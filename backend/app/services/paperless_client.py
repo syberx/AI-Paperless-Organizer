@@ -9,8 +9,8 @@ from app.database import get_db
 from app.models import PaperlessSettings
 from app.services.cache import get_cache
 
-# Cache TTL in seconds (2 minutes for lists, they change rarely)
-CACHE_TTL = 120
+# Cache TTL in seconds (10 minutes for lists, they change rarely)
+CACHE_TTL = 600
 
 
 class PaperlessClient:

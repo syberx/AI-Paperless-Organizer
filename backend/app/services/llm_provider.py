@@ -324,8 +324,33 @@ class LLMProviderService:
         
         return 7000  # Conservative fallback
     
+    def get_model_info(self) -> Optional[Dict[str, Any]]:
+        """Get info about the current model."""
+        if not self.provider:
+            return None
+        
+        model = self.provider.model or ""
+        provider_name = self.provider.name or ""
+        
+        # Check if we have detailed info for this model
+        if model in self.MODEL_INFO:
+            info = self.MODEL_INFO[model].copy()
+            info["model"] = model
+            info["provider_name"] = provider_name
+            return info
+        
+        # Return basic info
+        return {
+            "model": model or "Nicht konfiguriert",
+            "provider_name": provider_name,
+            "context": self.get_token_limit()
+        }
+    
     async def analyze_for_similarity(self, prompt_template: str, items: list) -> Dict:
         """Analyze items for similarity using the configured LLM."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
         if not items:
             return {"groups": [], "stats": {"items_count": 0, "estimated_tokens": 0}}
         
@@ -338,6 +363,8 @@ class LLMProviderService:
         # Estimate tokens
         estimated_input_tokens = self.estimate_tokens(prompt)
         
+        logger.info(f"[LLM] Analyzing {len(items)} items, estimated tokens: {estimated_input_tokens}")
+        
         # Check if likely too large
         token_warning = None
         max_recommended = 8000  # Safe limit for most models
@@ -345,7 +372,9 @@ class LLMProviderService:
             token_warning = f"Viele Items ({len(items)})! Geschätzte Tokens: ~{estimated_input_tokens}. Könnte das Limit überschreiten."
         
         # Get LLM response
+        logger.info(f"[LLM] Sending request to LLM provider...")
         response = await self.complete(prompt)
+        logger.info(f"[LLM] Got response, length: {len(response)} chars, first 200: {response[:200]}")
         
         # Estimate output tokens
         estimated_output_tokens = self.estimate_tokens(response)
@@ -364,29 +393,83 @@ class LLMProviderService:
             # Try to extract JSON from the response
             json_match = re.search(r'\{[\s\S]*\}', response)
             if json_match:
-                result = json.loads(json_match.group())
+                json_str = json_match.group()
+                
+                # Try to fix common JSON errors
+                # 1. Remove trailing commas before } or ]
+                json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
+                # 2. Fix unescaped quotes in strings (very basic)
+                # 3. Try to close unclosed brackets
+                
+                try:
+                    result = json.loads(json_str)
+                except json.JSONDecodeError:
+                    # Try more aggressive cleanup
+                    # Find the last valid closing brace
+                    depth = 0
+                    last_valid = 0
+                    for i, c in enumerate(json_str):
+                        if c == '{':
+                            depth += 1
+                        elif c == '}':
+                            depth -= 1
+                            if depth == 0:
+                                last_valid = i + 1
+                                break
+                    
+                    if last_valid > 0:
+                        json_str = json_str[:last_valid]
+                        result = json.loads(json_str)
+                    else:
+                        raise
                 
                 # Enrich groups with IDs from original items
                 items_dict = {item["name"]: item for item in items}
+                # Also create lowercase lookup for fuzzy matching
+                items_dict_lower = {item["name"].lower(): item for item in items}
+                
                 for group in result.get("groups", []):
                     enriched_members = []
                     for member_name in group.get("members", []):
+                        matched = False
+                        
+                        # 1. Exact match
                         if member_name in items_dict:
                             enriched_members.append(items_dict[member_name])
+                            matched = True
+                        # 2. Case-insensitive match
+                        elif member_name.lower() in items_dict_lower:
+                            enriched_members.append(items_dict_lower[member_name.lower()])
+                            matched = True
                         else:
-                            # Try case-insensitive match
+                            # 3. Fuzzy match - check if member_name is contained in any item name or vice versa
                             for name, item in items_dict.items():
-                                if name.lower() == member_name.lower():
+                                if (member_name.lower() in name.lower() or 
+                                    name.lower() in member_name.lower() or
+                                    member_name.lower().replace(" ", "") == name.lower().replace(" ", "")):
                                     enriched_members.append(item)
+                                    matched = True
                                     break
+                        
+                        if not matched:
+                            logger.warning(f"[LLM] Member '{member_name}' not found in items!")
+                    
                     group["members"] = enriched_members
+                    if len(enriched_members) < len(group.get("members", [])):
+                        logger.warning(f"[LLM] Group '{group.get('suggested_name')}': Only {len(enriched_members)} of {len(group.get('members', []))} members matched")
                 
                 result["stats"] = stats
                 return result
             else:
-                return {"groups": [], "error": "Could not parse JSON from response", "stats": stats}
+                return {"groups": [], "error": "Keine JSON-Antwort vom LLM erhalten", "stats": stats, "raw_response": response[:500]}
         except json.JSONDecodeError as e:
-            return {"groups": [], "error": f"JSON parse error: {str(e)}", "stats": stats}
+            # Return partial info for debugging
+            error_context = response[max(0, e.pos-100):e.pos+100] if hasattr(e, 'pos') else response[:200]
+            return {
+                "groups": [], 
+                "error": f"JSON-Fehler: {str(e)}. Kontext: ...{error_context}...", 
+                "stats": stats
+            }
 
 
 async def get_llm_service(db: AsyncSession = Depends(get_db)) -> LLMProviderService:

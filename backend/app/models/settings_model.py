@@ -54,6 +54,19 @@ class IgnoredTag(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 
+class IgnoredItem(Base):
+    """Items (tags, correspondents, document_types) to ignore in specific analyses."""
+    __tablename__ = "ignored_items"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    item_id = Column(Integer, nullable=False)  # ID in Paperless
+    item_name = Column(String(500), nullable=False)  # Name for display
+    entity_type = Column(String(50), nullable=False)  # "tag", "correspondent", "document_type"
+    analysis_type = Column(String(50), nullable=False)  # "nonsense", "correspondent_match", "doctype_match", "similar"
+    reason = Column(String(500), default="")  # Optional: why it's ignored
+    created_at = Column(DateTime, server_default=func.now())
+
+
 class AppSettings(Base):
     """Application-wide settings."""
     __tablename__ = "app_settings"

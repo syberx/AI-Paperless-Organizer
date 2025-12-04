@@ -90,7 +90,7 @@ class SimilarityService:
         return await self.llm.analyze_for_similarity(prompt_template, items)
     
     async def _analyze_with_batching(self, all_items: List[Dict], prompt_template: str, batch_size: int = 200) -> Dict:
-        """Analyze items with automatic batching for large lists - ONLY if necessary."""
+        """Analyze items - batch only if token limit exceeded."""
         
         # Get token limit from LLM provider
         token_limit = self.llm.get_token_limit()
@@ -103,9 +103,16 @@ class SimilarityService:
         # Leave 20% buffer for output
         safe_limit = int(token_limit * 0.8)
         
-        # If it fits in one request, don't batch!
+        # If tokens fit, process ALL items in one go (no batching!)
         if estimated_tokens <= safe_limit:
-            return await self._analyze_batch(all_items, prompt_template)
+            result = await self._analyze_batch(all_items, prompt_template)
+            # Filter out groups with less than 2 members
+            groups = result.get("groups", [])
+            valid_groups = [g for g in groups if len(g.get("members", [])) >= 2]
+            result["groups"] = valid_groups
+            if "stats" in result:
+                result["stats"]["groups_filtered_out"] = len(groups) - len(valid_groups)
+            return result
         
         # Calculate how many items fit per batch
         tokens_per_item = max(1, estimated_tokens // len(all_items))
@@ -136,13 +143,22 @@ class SimilarityService:
         errors = []
         grouped_item_ids = set()  # Track which items got grouped
         
+        import logging
+        logger = logging.getLogger(__name__)
+        
         # Phase 1: Analyze each batch
         for i, batch in enumerate(batches):
             try:
+                logger.info(f"[Batch {i+1}/{len(batches)}] Analyzing {len(batch)} items...")
                 result = await self._analyze_batch(batch, prompt_template)
                 
                 # Collect groups
                 groups = result.get("groups", [])
+                logger.info(f"[Batch {i+1}/{len(batches)}] Found {len(groups)} groups")
+                
+                if result.get("error"):
+                    logger.error(f"[Batch {i+1}/{len(batches)}] Error: {result.get('error')}")
+                
                 all_groups.extend(groups)
                 
                 # Track grouped items
@@ -183,8 +199,12 @@ class SimilarityService:
             total_stats["estimated_output_tokens"]
         )
         
+        # Filter out groups with less than 2 members (nothing to merge!)
+        valid_groups = [g for g in all_groups if len(g.get("members", [])) >= 2]
+        total_stats["groups_filtered_out"] = len(all_groups) - len(valid_groups)
+        
         result = {
-            "groups": all_groups,
+            "groups": valid_groups,
             "stats": total_stats
         }
         
@@ -408,15 +428,51 @@ Wenn nichts zusammengehört: {{"group_merges": [], "add_to_groups": []}}"""
         prompt_template = await self._get_prompt("tags_nonsense")
         prompt = prompt_template.replace("{items}", items_text) + ignore_info
         
+        # Token estimation
+        estimated_input_tokens = self.llm.estimate_tokens(prompt)
+        token_limit = self.llm.get_token_limit()
+        safe_limit = int(token_limit * 0.8)
+        
+        stats = {
+            "items_count": len(tags), 
+            "ignored_count": ignored_count,
+            "analyzed_count": len(filtered_tags),
+            "estimated_input_tokens": estimated_input_tokens,
+            "token_limit": token_limit,
+            "model": self.llm.provider.model if self.llm.provider else "unknown"
+        }
+        
+        if estimated_input_tokens > safe_limit:
+            stats["warning"] = f"Prompt sehr groß ({estimated_input_tokens} Tokens)! Könnte Token-Limit ({token_limit}) überschreiten."
+        
         try:
             response = await self.llm.complete(prompt)
+            stats["estimated_output_tokens"] = self.llm.estimate_tokens(response)
+            stats["estimated_total_tokens"] = stats["estimated_input_tokens"] + stats["estimated_output_tokens"]
             
-            # Parse JSON from response
+            # Parse JSON from response with better error handling
             json_match = re.search(r'\{[\s\S]*\}', response)
             if not json_match:
-                return {"nonsense_tags": [], "error": "Invalid JSON response"}
+                return {"nonsense_tags": [], "error": "Keine JSON-Antwort vom LLM erhalten", "stats": stats, "raw_response": response[:500]}
             
-            result = json.loads(json_match.group())
+            json_str = json_match.group()
+            
+            # Try to fix common JSON issues
+            try:
+                result = json.loads(json_str)
+            except json.JSONDecodeError as je:
+                # Try to fix trailing commas
+                fixed_json = re.sub(r',(\s*[}\]])', r'\1', json_str)
+                try:
+                    result = json.loads(fixed_json)
+                except:
+                    return {
+                        "nonsense_tags": [], 
+                        "error": f"JSON-Parse-Fehler: {str(je)}", 
+                        "stats": stats,
+                        "raw_response": response[:1000]
+                    }
+            
             nonsense_tags = result.get("nonsense_tags", [])
             
             # Enrich with tag IDs and double-check ignore list
@@ -438,18 +494,14 @@ Wenn nichts zusammengehört: {{"group_merges": [], "add_to_groups": []}}"""
                         "reason": nt.get("reason", "")
                     })
             
+            stats["found_count"] = len(enriched)
             return {
                 "nonsense_tags": enriched,
-                "stats": {
-                    "items_count": len(tags), 
-                    "ignored_count": ignored_count,
-                    "analyzed_count": len(filtered_tags),
-                    "found_count": len(enriched)
-                }
+                "stats": stats
             }
             
         except Exception as e:
-            return {"nonsense_tags": [], "error": str(e)}
+            return {"nonsense_tags": [], "error": str(e), "stats": stats}
     
     async def find_tags_that_are_correspondents(self, batch_size: int = 300) -> Dict:
         """Find tags that should be correspondents using LLM analysis."""
@@ -466,15 +518,50 @@ Wenn nichts zusammengehört: {{"group_merges": [], "add_to_groups": []}}"""
         prompt_template = await self._get_prompt("tags_are_correspondents")
         prompt = prompt_template.replace("{items}", tags_text).replace("{correspondents}", corr_text)
         
+        # Token estimation
+        estimated_input_tokens = self.llm.estimate_tokens(prompt)
+        token_limit = self.llm.get_token_limit()
+        safe_limit = int(token_limit * 0.8)
+        
+        stats = {
+            "tags_count": len(tags),
+            "correspondents_count": len(correspondents),
+            "estimated_input_tokens": estimated_input_tokens,
+            "token_limit": token_limit,
+            "model": self.llm.provider.model if self.llm.provider else "unknown"
+        }
+        
+        if estimated_input_tokens > safe_limit:
+            stats["warning"] = f"Prompt sehr groß ({estimated_input_tokens} Tokens)! Könnte Token-Limit ({token_limit}) überschreiten."
+        
         try:
             response = await self.llm.complete(prompt)
+            stats["estimated_output_tokens"] = self.llm.estimate_tokens(response)
+            stats["estimated_total_tokens"] = stats["estimated_input_tokens"] + stats["estimated_output_tokens"]
             
-            import re
+            # Try to extract JSON - handle common LLM response issues
             json_match = re.search(r'\{[\s\S]*\}', response)
             if not json_match:
-                return {"correspondent_tags": [], "error": "Invalid JSON response"}
+                return {"correspondent_tags": [], "error": "Keine JSON-Antwort vom LLM erhalten", "stats": stats, "raw_response": response[:500]}
             
-            result = json.loads(json_match.group())
+            json_str = json_match.group()
+            
+            # Try to fix common JSON issues
+            try:
+                result = json.loads(json_str)
+            except json.JSONDecodeError as je:
+                # Try to fix trailing commas
+                fixed_json = re.sub(r',(\s*[}\]])', r'\1', json_str)
+                try:
+                    result = json.loads(fixed_json)
+                except:
+                    return {
+                        "correspondent_tags": [], 
+                        "error": f"JSON-Parse-Fehler: {str(je)}", 
+                        "stats": stats,
+                        "raw_response": response[:1000]
+                    }
+            
             correspondent_tags = result.get("correspondent_tags", [])
             
             # Enrich with tag IDs and correspondent IDs
@@ -500,13 +587,14 @@ Wenn nichts zusammengehört: {{"group_merges": [], "add_to_groups": []}}"""
                         "reason": ct.get("reason", "")
                     })
             
+            stats["found_count"] = len(enriched)
             return {
                 "correspondent_tags": enriched,
-                "stats": {"tags_count": len(tags), "correspondents_count": len(correspondents), "found_count": len(enriched)}
+                "stats": stats
             }
             
         except Exception as e:
-            return {"correspondent_tags": [], "error": str(e)}
+            return {"correspondent_tags": [], "error": str(e), "stats": stats}
     
     async def find_tags_that_are_document_types(self, batch_size: int = 300) -> Dict:
         """Find tags that should be document types using LLM analysis."""
@@ -523,15 +611,50 @@ Wenn nichts zusammengehört: {{"group_merges": [], "add_to_groups": []}}"""
         prompt_template = await self._get_prompt("tags_are_document_types")
         prompt = prompt_template.replace("{items}", tags_text).replace("{document_types}", dt_text)
         
+        # Token estimation
+        estimated_input_tokens = self.llm.estimate_tokens(prompt)
+        token_limit = self.llm.get_token_limit()
+        safe_limit = int(token_limit * 0.8)
+        
+        stats = {
+            "tags_count": len(tags),
+            "doctypes_count": len(doc_types),
+            "estimated_input_tokens": estimated_input_tokens,
+            "token_limit": token_limit,
+            "model": self.llm.provider.model if self.llm.provider else "unknown"
+        }
+        
+        if estimated_input_tokens > safe_limit:
+            stats["warning"] = f"Prompt sehr groß ({estimated_input_tokens} Tokens)! Könnte Token-Limit ({token_limit}) überschreiten."
+        
         try:
             response = await self.llm.complete(prompt)
+            stats["estimated_output_tokens"] = self.llm.estimate_tokens(response)
+            stats["estimated_total_tokens"] = stats["estimated_input_tokens"] + stats["estimated_output_tokens"]
             
-            import re
+            # Try to extract JSON - handle common LLM response issues
             json_match = re.search(r'\{[\s\S]*\}', response)
             if not json_match:
-                return {"doctype_tags": [], "error": "Invalid JSON response"}
+                return {"doctype_tags": [], "error": "Keine JSON-Antwort vom LLM erhalten", "stats": stats, "raw_response": response[:500]}
             
-            result = json.loads(json_match.group())
+            json_str = json_match.group()
+            
+            # Try to fix common JSON issues
+            try:
+                result = json.loads(json_str)
+            except json.JSONDecodeError as je:
+                # Try to fix trailing commas
+                fixed_json = re.sub(r',(\s*[}\]])', r'\1', json_str)
+                try:
+                    result = json.loads(fixed_json)
+                except:
+                    return {
+                        "doctype_tags": [], 
+                        "error": f"JSON-Parse-Fehler: {str(je)}", 
+                        "stats": stats,
+                        "raw_response": response[:1000]
+                    }
+            
             doctype_tags = result.get("doctype_tags", [])
             
             # Enrich with tag IDs and doctype IDs
@@ -557,13 +680,14 @@ Wenn nichts zusammengehört: {{"group_merges": [], "add_to_groups": []}}"""
                         "reason": dtt.get("reason", "")
                     })
             
+            stats["found_count"] = len(enriched)
             return {
                 "doctype_tags": enriched,
-                "stats": {"tags_count": len(tags), "doctypes_count": len(doc_types), "found_count": len(enriched)}
+                "stats": stats
             }
             
         except Exception as e:
-            return {"doctype_tags": [], "error": str(e)}
+            return {"doctype_tags": [], "error": str(e), "stats": stats}
 
 
 async def get_similarity_service(

@@ -130,7 +130,7 @@ export const removePassword = () =>
 export const getCorrespondents = () => fetchJson<any[]>('/correspondents/')
 
 export const estimateCorrespondents = () => 
-  fetchJson<{ items_count: number; estimated_tokens: number; recommended_batches: number; warning?: string }>('/correspondents/estimate')
+  fetchJson<{ items_info?: string; estimated_tokens: number; token_limit?: number; model?: string; recommended_batches: number; warning?: string }>('/correspondents/estimate')
 
 export const analyzeCorrespondents = (batchSize: number = 200) => 
   fetchJson<{ groups: any[]; stats?: any; error?: string }>('/correspondents/analyze', { 
@@ -187,8 +187,16 @@ export const markCorrespondentGroupProcessed = (groupIndex: number) =>
 // Tags
 export const getTags = () => fetchJson<any[]>('/tags/')
 
-export const estimateTags = () => 
-  fetchJson<{ items_count: number; estimated_tokens: number; recommended_batches: number; warning?: string }>('/tags/estimate')
+export const estimateTags = (analysisType: 'nonsense' | 'correspondent' | 'doctype' | 'similar' = 'nonsense') => 
+  fetchJson<{ 
+    analysis_type: string
+    items_info: string
+    estimated_tokens: number
+    token_limit: number
+    model: string
+    recommended_batches: number
+    warning?: string 
+  }>(`/tags/estimate?analysis_type=${analysisType}`)
 
 export const analyzeTags = (batchSize: number = 200) => 
   fetchJson<{ groups: any[]; stats?: any; error?: string }>('/tags/analyze', { 
@@ -214,15 +222,55 @@ export const deleteTag = (tagId: number) =>
   fetchJson<{ success: boolean; message: string }>(`/tags/${tagId}`, { method: 'DELETE' })
 
 export const analyzeNonsenseTags = () =>
-  fetchJson<{ nonsense_tags: any[]; stats?: any; error?: string }>('/tags/analyze-nonsense', { method: 'POST' })
+  fetchJson<{ nonsense_tags: any[]; stats?: AnalysisStats; error?: string }>('/tags/analyze-nonsense', { method: 'POST' })
 
 export const analyzeCorrespondentTags = () =>
-  fetchJson<{ correspondent_tags: any[]; stats?: any; error?: string }>('/tags/analyze-correspondent-matches', { method: 'POST' })
+  fetchJson<{ correspondent_tags: any[]; stats?: AnalysisStats; error?: string }>('/tags/analyze-correspondent-matches', { method: 'POST' })
 
 export const analyzeDoctypeTags = () =>
-  fetchJson<{ doctype_tags: any[]; stats?: any; error?: string }>('/tags/analyze-doctype-matches', { method: 'POST' })
+  fetchJson<{ doctype_tags: any[]; stats?: AnalysisStats; error?: string }>('/tags/analyze-doctype-matches', { method: 'POST' })
 
-// Tag Saved Analysis
+// Nonsense Tags Saved Analysis
+export const getSavedNonsenseAnalysis = () =>
+  fetchJson<{ exists: boolean; id?: number; created_at?: string; items_count?: number; groups_count?: number }>('/tags/saved-nonsense')
+
+export interface AnalysisStats {
+  estimated_input_tokens?: number
+  estimated_output_tokens?: number
+  estimated_total_tokens?: number
+  token_limit?: number
+  model?: string
+  warning?: string
+  [key: string]: any
+}
+
+export const loadSavedNonsenseAnalysis = () =>
+  fetchJson<{ exists: boolean; nonsense_tags: any[]; stats?: AnalysisStats; created_at?: string }>('/tags/saved-nonsense/load')
+
+export const deleteSavedNonsenseAnalysis = () =>
+  fetchJson<{ success: boolean }>('/tags/saved-nonsense', { method: 'DELETE' })
+
+// Correspondent Tags Saved Analysis
+export const getSavedCorrespondentAnalysis = () =>
+  fetchJson<{ exists: boolean; id?: number; created_at?: string; items_count?: number; groups_count?: number }>('/tags/saved-correspondent-matches')
+
+export const loadSavedCorrespondentAnalysis = () =>
+  fetchJson<{ exists: boolean; correspondent_tags: any[]; stats?: AnalysisStats; created_at?: string }>('/tags/saved-correspondent-matches/load')
+
+export const deleteSavedCorrespondentAnalysis = () =>
+  fetchJson<{ success: boolean }>('/tags/saved-correspondent-matches', { method: 'DELETE' })
+
+// Doctype Tags Saved Analysis
+export const getSavedDoctypeAnalysis = () =>
+  fetchJson<{ exists: boolean; id?: number; created_at?: string; items_count?: number; groups_count?: number }>('/tags/saved-doctype-matches')
+
+export const loadSavedDoctypeAnalysis = () =>
+  fetchJson<{ exists: boolean; doctype_tags: any[]; stats?: AnalysisStats; created_at?: string }>('/tags/saved-doctype-matches/load')
+
+export const deleteSavedDoctypeAnalysis = () =>
+  fetchJson<{ success: boolean }>('/tags/saved-doctype-matches', { method: 'DELETE' })
+
+// Tag Saved Analysis (Similarity)
 export const getTagSavedAnalysis = () =>
   fetchJson<SavedAnalysisInfo>('/tags/saved-analysis')
 
@@ -239,7 +287,7 @@ export const markTagGroupProcessed = (groupIndex: number) =>
 export const getDocumentTypes = () => fetchJson<any[]>('/document-types/')
 
 export const estimateDocumentTypes = () => 
-  fetchJson<{ items_count: number; estimated_tokens: number; recommended_batches: number; warning?: string }>('/document-types/estimate')
+  fetchJson<{ items_info?: string; estimated_tokens: number; token_limit?: number; model?: string; recommended_batches: number; warning?: string }>('/document-types/estimate')
 
 export const analyzeDocumentTypes = (batchSize: number = 200) => 
   fetchJson<{ groups: any[]; stats?: any; error?: string }>('/document-types/analyze', { 
@@ -323,4 +371,40 @@ export const getStatisticsSummary = () =>
 
 export const getRecentOperations = (limit: number = 10) =>
   fetchJson<any[]>(`/statistics/recent?limit=${limit}`)
+
+// Ignored Items
+export interface IgnoredItem {
+  id: number
+  item_id: number
+  item_name: string
+  entity_type: string  // "tag", "correspondent", "document_type"
+  analysis_type: string  // "nonsense", "correspondent_match", "doctype_match", "similar"
+  reason: string
+  created_at: string
+}
+
+export const getIgnoredItems = (entityType?: string, analysisType?: string) => {
+  const params = new URLSearchParams()
+  if (entityType) params.append('entity_type', entityType)
+  if (analysisType) params.append('analysis_type', analysisType)
+  const query = params.toString()
+  return fetchJson<IgnoredItem[]>(`/ignored-items${query ? `?${query}` : ''}`)
+}
+
+export const addIgnoredItem = (data: {
+  item_id: number
+  item_name: string
+  entity_type: string
+  analysis_type: string
+  reason?: string
+}) => fetchJson<IgnoredItem>('/ignored-items', {
+  method: 'POST',
+  body: JSON.stringify(data)
+})
+
+export const removeIgnoredItem = (id: number) =>
+  fetchJson<{ status: string; message: string }>(`/ignored-items/${id}`, { method: 'DELETE' })
+
+export const getIgnoredIds = (entityType: string, analysisType: string) =>
+  fetchJson<number[]>(`/ignored-items/ids/${entityType}/${analysisType}`)
 

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import List
+import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from app.database import get_db
@@ -45,18 +46,21 @@ async def estimate_document_types(
     estimated_input = 500 + int(items_count * (avg_name_length + 10))
     estimated_tokens = estimated_input // 4
     
-    # Get token limit from LLM provider
+    # Get token limit and model info from LLM provider
     token_limit = llm.get_token_limit()
+    model_info = llm.get_model_info()
+    model_name = model_info.get("model", "Nicht konfiguriert") if model_info else "Nicht konfiguriert"
     safe_limit = int(token_limit * 0.8)
     needs_batching = estimated_tokens > safe_limit
     recommended_batches = max(1, (estimated_tokens + safe_limit - 1) // safe_limit) if needs_batching else 1
     
     return {
-        "items_count": items_count,
+        "items_info": f"{items_count} Dokumententypen",
         "estimated_tokens": estimated_tokens,
         "token_limit": token_limit,
+        "model": model_name,
         "recommended_batches": recommended_batches,
-        "warning": f"Tokens ({estimated_tokens}) > Limit ({safe_limit}). Wird in {recommended_batches} Batches aufgeteilt." if needs_batching else None
+        "warning": f"~{estimated_tokens:,} Tokens > {safe_limit:,} Limit. Wird in {recommended_batches} Batches aufgeteilt." if needs_batching else None
     }
 
 
@@ -210,19 +214,33 @@ async def delete_empty_document_types(
     client: PaperlessClient = Depends(get_paperless_client),
     stats_service: StatisticsService = Depends(get_statistics_service)
 ):
-    """Delete all document types with 0 documents."""
+    """Delete all document types with 0 documents - PARALLEL for speed."""
     doc_types = await client.get_document_types_with_counts()
     empty = [dt for dt in doc_types if dt.get("document_count", 0) == 0]
     
-    deleted = 0
-    errors = []
+    if not empty:
+        return {"deleted": 0, "total": 0, "errors": None}
     
-    for dt in empty:
+    # Parallel deletion for speed (batch of 10 at a time)
+    errors = []
+    deleted = 0
+    batch_size = 10
+    
+    async def delete_one(item):
         try:
-            await client.delete_document_type(dt["id"])
-            deleted += 1
+            await client.delete_document_type(item["id"])
+            return True, None
         except Exception as e:
-            errors.append(f"{dt['name']}: {str(e)}")
+            return False, f"{item['name']}: {str(e)}"
+    
+    for i in range(0, len(empty), batch_size):
+        batch = empty[i:i + batch_size]
+        results = await asyncio.gather(*[delete_one(dt) for dt in batch])
+        for success, error in results:
+            if success:
+                deleted += 1
+            elif error:
+                errors.append(error)
     
     # Record statistics
     if deleted > 0:

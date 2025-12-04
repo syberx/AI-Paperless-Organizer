@@ -31,9 +31,10 @@ interface AnalysisStats {
 }
 
 interface Estimate {
-  items_count: number
+  items_info?: string
   estimated_tokens: number
   token_limit?: number
+  model?: string
   recommended_batches: number
   warning?: string
 }
@@ -45,7 +46,9 @@ export default function DocumentTypeManager() {
   const [estimate, setEstimate] = useState<Estimate | null>(null)
   const [loading, setLoading] = useState(true)
   const [analyzing, setAnalyzing] = useState(false)
+  const [analysisCompleted, setAnalysisCompleted] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [ignoredItemIds, setIgnoredItemIds] = useState<number[]>([])
   const [view, setView] = useState<'list' | 'analyze'>('list')
   
   const [lastSync, setLastSync] = useState<Date | null>(null)
@@ -63,6 +66,11 @@ export default function DocumentTypeManager() {
   const [showCleanupModal, setShowCleanupModal] = useState(false)
   const [cleaningUp, setCleaningUp] = useState(false)
   const [cleanupResult, setCleanupResult] = useState<{ deleted: number; total: number; errors?: string[] } | null>(null)
+  
+  // AI Analysis Confirmation Modal
+  const [showConfirmModal, setShowConfirmModal] = useState(false)
+  const [confirmEstimate, setConfirmEstimate] = useState<Estimate | null>(null)
+  const [loadingEstimate, setLoadingEstimate] = useState(false)
 
   // Update time display every 10 seconds
   useEffect(() => {
@@ -92,6 +100,14 @@ export default function DocumentTypeManager() {
         setEstimate(est)
       } catch (e) {
         // Estimate is optional
+      }
+      
+      // Load ignored items
+      try {
+        const ignored = await api.getIgnoredIds('document_type', 'similar')
+        setIgnoredItemIds(ignored)
+      } catch (e) {
+        // Ignored items are optional
       }
       
       // Get empty items
@@ -134,7 +150,7 @@ export default function DocumentTypeManager() {
     if (savedAnalysis?.exists) {
       setShowLoadAnalysisModal(true)
     } else {
-      await runNewAnalysis()
+      await openAnalysisConfirm()
     }
   }
   
@@ -147,6 +163,7 @@ export default function DocumentTypeManager() {
       setGroups(result.groups || [])
       setStats(result.stats || null)
       setAnalysisLoadedAt(result.created_at || null)
+      setAnalysisCompleted(true)
       setView('analyze')
     } catch (err) {
       setError('Fehler beim Laden der gespeicherten Analyse')
@@ -155,7 +172,33 @@ export default function DocumentTypeManager() {
     }
   }
   
+  // Open confirmation modal before AI analysis
+  const openAnalysisConfirm = async () => {
+    setShowLoadAnalysisModal(false)
+    setShowConfirmModal(true)
+    setLoadingEstimate(true)
+    setConfirmEstimate(null)
+    
+    try {
+      const est = await api.estimateDocumentTypes()
+      // Check if external LLM
+      const isExternal = est.model ? !est.model.toLowerCase().includes('llama') && !est.model.toLowerCase().includes('mistral') && !est.model.toLowerCase().includes('local') : true
+      setConfirmEstimate({ ...est, is_external: isExternal } as any)
+    } catch (e) {
+      setConfirmEstimate({
+        items_info: `${documentTypes.length} Dokumententypen`,
+        estimated_tokens: documentTypes.length * 20,
+        token_limit: 128000,
+        model: 'Unbekannt',
+        recommended_batches: 1
+      })
+    } finally {
+      setLoadingEstimate(false)
+    }
+  }
+  
   const runNewAnalysis = async () => {
+    setShowConfirmModal(false)
     setShowLoadAnalysisModal(false)
     setAnalyzing(true)
     setError(null)
@@ -165,7 +208,13 @@ export default function DocumentTypeManager() {
       const result = await api.analyzeDocumentTypes(200)
       setGroups(result.groups || [])
       setStats(result.stats || null)
+      setAnalysisCompleted(true)
       setView('analyze')
+      
+      // Check for error in result
+      if (result.error) {
+        setError(`Analyse-Fehler: ${result.error}`)
+      }
       
       const saved = await api.getDocTypeSavedAnalysis()
       setSavedAnalysis(saved)
@@ -193,6 +242,17 @@ export default function DocumentTypeManager() {
     setSavedAnalysis(null)
     
     // Don't reload - user can click "Aktualisieren" when done with all merges
+  }
+
+  const handleIgnoreItem = async (itemId: number, itemName: string) => {
+    await api.addIgnoredItem({
+      item_id: itemId,
+      item_name: itemName,
+      entity_type: 'document_type',
+      analysis_type: 'similar',
+      reason: 'Manuell ignoriert'
+    })
+    setIgnoredItemIds(prev => [...prev, itemId])
   }
 
   const handleCleanup = async () => {
@@ -329,7 +389,7 @@ export default function DocumentTypeManager() {
             <div className="flex flex-wrap gap-4">
               <span>
                 <span className="text-surface-400">Items:</span>
-                <span className="ml-1 text-surface-100 font-medium">{estimate.items_count}</span>
+                <span className="ml-1 text-surface-100 font-medium">{estimate.items_info || 'Dokumententypen'}</span>
               </span>
               <span>
                 <span className="text-surface-400">Tokens:</span>
@@ -405,7 +465,7 @@ export default function DocumentTypeManager() {
               )}
             </div>
             <button
-              onClick={runNewAnalysis}
+              onClick={openAnalysisConfirm}
               disabled={analyzing}
               className="btn btn-secondary btn-sm flex items-center gap-2"
             >
@@ -454,8 +514,34 @@ export default function DocumentTypeManager() {
         <MergePreview 
           groups={groups} 
           entityType="document_types"
+          analysisType="similar"
           onMerge={handleMerge}
+          onIgnoreItem={handleIgnoreItem}
+          ignoredItemIds={ignoredItemIds}
         />
+      ) : view === 'analyze' && groups.length === 0 && analysisCompleted ? (
+        <div className="card p-8 text-center">
+          <div className="text-4xl mb-4">✅</div>
+          <h3 className="text-xl font-semibold text-surface-200 mb-2">
+            Keine ähnlichen Dokumententypen gefunden
+          </h3>
+          <p className="text-surface-400 mb-4">
+            Die KI-Analyse hat keine Gruppen von ähnlichen Dokumententypen identifiziert, 
+            die zusammengeführt werden könnten. Alle Dokumententypen sind einzigartig!
+          </p>
+          {stats && (
+            <p className="text-sm text-surface-500">
+              Analysiert: {stats.items_count} Dokumententypen • 
+              Tokens: ~{stats.estimated_total_tokens?.toLocaleString() || 'N/A'}
+            </p>
+          )}
+          <button
+            onClick={() => setView('list')}
+            className="mt-4 px-4 py-2 bg-surface-700 hover:bg-surface-600 rounded-lg text-surface-200 transition-colors"
+          >
+            Zurück zur Liste
+          </button>
+        </div>
       ) : (
         <div className="card overflow-hidden">
           <div className="overflow-x-auto">
@@ -546,12 +632,11 @@ export default function DocumentTypeManager() {
                 <span className="text-xs opacity-75">(kostenlos)</span>
               </button>
               <button
-                onClick={runNewAnalysis}
+                onClick={openAnalysisConfirm}
                 className="btn btn-secondary w-full flex items-center justify-center gap-2"
               >
                 <Zap className="w-4 h-4" />
                 Neue Analyse starten
-                <span className="text-xs opacity-75">(KI-Kosten)</span>
               </button>
             </div>
           </div>
@@ -691,6 +776,99 @@ export default function DocumentTypeManager() {
                 </button>
               </>
             )}
+          </div>
+        </div>
+      )}
+      
+      {/* AI Analysis Confirmation Modal */}
+      {showConfirmModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-surface-800 rounded-xl p-6 w-full max-w-md mx-4 border border-surface-700 shadow-xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-full bg-primary-500/20 flex items-center justify-center">
+                <Sparkles className="w-6 h-6 text-primary-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-surface-100">
+                  KI-Analyse starten
+                </h3>
+                <p className="text-sm text-surface-400">Dokumententypen gruppieren</p>
+              </div>
+            </div>
+            
+            {loadingEstimate ? (
+              <div className="py-8 text-center">
+                <Loader2 className="w-8 h-8 animate-spin mx-auto text-primary-400 mb-2" />
+                <p className="text-surface-400">Berechne Token-Schätzung...</p>
+              </div>
+            ) : confirmEstimate && (
+              <>
+                <div className="bg-surface-700/50 rounded-lg p-4 mb-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-surface-400">Modell</span>
+                    <span className="text-primary-400 font-medium">{confirmEstimate.model || 'Unbekannt'}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-surface-400">Daten</span>
+                    <span className="text-surface-200">{confirmEstimate.items_info || `${documentTypes.length} Items`}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-surface-400">Geschätzte Tokens</span>
+                    <span className="text-surface-200">~{confirmEstimate.estimated_tokens.toLocaleString()}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-surface-400">Token-Limit</span>
+                    <span className="text-surface-200">{(confirmEstimate.token_limit || 128000).toLocaleString()}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-surface-400">Auslastung</span>
+                    <span className={clsx(
+                      'px-2 py-0.5 rounded text-xs font-medium',
+                      confirmEstimate.estimated_tokens > (confirmEstimate.token_limit || 128000) * 0.8 
+                        ? 'bg-amber-500/20 text-amber-400' 
+                        : 'bg-emerald-500/20 text-emerald-400'
+                    )}>
+                      {Math.round(confirmEstimate.estimated_tokens / (confirmEstimate.token_limit || 128000) * 100)}%
+                    </span>
+                  </div>
+                </div>
+                
+                {confirmEstimate.warning && (
+                  <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg mb-4">
+                    <p className="text-amber-400 text-sm">⚠️ {confirmEstimate.warning}</p>
+                  </div>
+                )}
+                
+                {(confirmEstimate as any).is_external && (
+                  <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg mb-4">
+                    <p className="text-blue-400 text-sm flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                      <span>
+                        <strong>Hinweis:</strong> Du verwendest einen externen LLM-Anbieter. 
+                        Deine Dokumententyp-Namen werden zur Analyse übertragen.
+                      </span>
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
+            
+            <div className="flex gap-3 justify-end mt-4">
+              <button
+                onClick={() => setShowConfirmModal(false)}
+                className="btn btn-secondary"
+              >
+                Abbrechen
+              </button>
+              <button
+                onClick={runNewAnalysis}
+                disabled={loadingEstimate}
+                className="btn btn-primary flex items-center gap-2"
+              >
+                <Sparkles className="w-4 h-4" />
+                Analyse starten
+              </button>
+            </div>
           </div>
         </div>
       )}
