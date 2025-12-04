@@ -2,10 +2,17 @@ import { useState, useEffect } from 'react'
 import { 
   Sparkles, Loader2, Tag, AlertCircle, Trash2,
   ChevronRight, ChevronLeft, Check, Users, FileText, Layers, RefreshCw, Brain,
-  Shield, Plus, X
+  Shield, Plus, X, Ban
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
+
+// Confirmation modal for AI analysis
+interface AnalysisConfirmInfo {
+  step: number
+  stepName: string
+  analysisType: 'nonsense' | 'correspondent' | 'doctype' | 'similar'
+}
 
 interface IgnoredTag {
   id: number
@@ -80,6 +87,7 @@ export default function TagCleanupWizard() {
   const [loadTime, setLoadTime] = useState<number | null>(null)
   const [cachedInfo, setCachedInfo] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
+  const [progress, setProgress] = useState<{ current: number; total: number } | null>(null)
   
   // Data
   const [tags, setTags] = useState<TagItem[]>([])
@@ -97,16 +105,63 @@ export default function TagCleanupWizard() {
   const [selectedCorrespondentMatches, setSelectedCorrespondentMatches] = useState<Set<number>>(new Set())
   const [selectedDocTypeMatches, setSelectedDocTypeMatches] = useState<Set<number>>(new Set())
   
-  // Ignore list
+  // Ignore list (pattern-based)
   const [ignoredTags, setIgnoredTags] = useState<IgnoredTag[]>([])
   const [showIgnoreModal, setShowIgnoreModal] = useState(false)
   const [newIgnorePattern, setNewIgnorePattern] = useState('')
   const [newIgnoreReason, setNewIgnoreReason] = useState('')
+  
+  // Ignored items (ID-based, per analysis type)
+  const [ignoredItemIds, setIgnoredItemIds] = useState<{
+    nonsense: number[]
+    correspondent: number[]
+    doctype: number[]
+    similar: number[]
+  }>({ nonsense: [], correspondent: [], doctype: [], similar: [] })
+  const [ignoringItemId, setIgnoringItemId] = useState<number | null>(null)
+  
+  // Saved analysis info
+  const [savedNonsenseInfo, setSavedNonsenseInfo] = useState<{ exists: boolean; created_at?: string } | null>(null)
+  const [savedCorrespondentInfo, setSavedCorrespondentInfo] = useState<{ exists: boolean; created_at?: string } | null>(null)
+  const [savedDoctypeInfo, setSavedDoctypeInfo] = useState<{ exists: boolean; created_at?: string } | null>(null)
+  const [savedSimilarInfo, setSavedSimilarInfo] = useState<{ exists: boolean; created_at?: string } | null>(null)
+  
+  
+  // Confirmation modal for AI analysis
+  const [confirmModal, setConfirmModal] = useState<AnalysisConfirmInfo | null>(null)
+  const [confirmEstimate, setConfirmEstimate] = useState<{
+    items_info: string
+    estimated_tokens: number
+    token_limit: number
+    model: string
+    is_external: boolean
+    warning?: string
+  } | null>(null)
+  const [loadingEstimate, setLoadingEstimate] = useState(false)
 
   useEffect(() => {
     loadInitialData()
     loadIgnoredTags()
+    loadIgnoredItemIds()
+    loadSavedAnalysisInfo()
   }, [])
+  
+  const loadSavedAnalysisInfo = async () => {
+    try {
+      const [nonsense, correspondent, doctype, similar] = await Promise.all([
+        api.getSavedNonsenseAnalysis(),
+        api.getSavedCorrespondentAnalysis(),
+        api.getSavedDoctypeAnalysis(),
+        api.getTagSavedAnalysis()
+      ])
+      setSavedNonsenseInfo(nonsense)
+      setSavedCorrespondentInfo(correspondent)
+      setSavedDoctypeInfo(doctype)
+      setSavedSimilarInfo(similar)
+    } catch (e) {
+      console.error('Failed to load saved analysis info:', e)
+    }
+  }
   
   const loadIgnoredTags = async () => {
     try {
@@ -114,6 +169,41 @@ export default function TagCleanupWizard() {
       setIgnoredTags(data)
     } catch (e) {
       console.error('Failed to load ignored tags:', e)
+    }
+  }
+  
+  const loadIgnoredItemIds = async () => {
+    try {
+      const [nonsense, correspondent, doctype, similar] = await Promise.all([
+        api.getIgnoredIds('tag', 'nonsense'),
+        api.getIgnoredIds('tag', 'correspondent_match'),
+        api.getIgnoredIds('tag', 'doctype_match'),
+        api.getIgnoredIds('tag', 'similar')
+      ])
+      setIgnoredItemIds({ nonsense, correspondent, doctype, similar })
+    } catch (e) {
+      console.error('Failed to load ignored item IDs:', e)
+    }
+  }
+  
+  const handleIgnoreItem = async (itemId: number, itemName: string, analysisType: 'nonsense' | 'correspondent' | 'doctype' | 'similar') => {
+    setIgnoringItemId(itemId)
+    try {
+      await api.addIgnoredItem({
+        item_id: itemId,
+        item_name: itemName,
+        entity_type: 'tag',
+        analysis_type: analysisType === 'correspondent' ? 'correspondent_match' : analysisType === 'doctype' ? 'doctype_match' : analysisType,
+        reason: 'Manuell ignoriert'
+      })
+      setIgnoredItemIds(prev => ({
+        ...prev,
+        [analysisType]: [...prev[analysisType], itemId]
+      }))
+    } catch (e) {
+      console.error('Failed to ignore item:', e)
+    } finally {
+      setIgnoringItemId(null)
     }
   }
   
@@ -138,29 +228,6 @@ export default function TagCleanupWizard() {
       setIgnoredTags(ignoredTags.filter(t => t.id !== id))
     } catch (e) {
       console.error('Failed to remove ignored tag:', e)
-    }
-  }
-  
-  const addTagToIgnoreList = async (tagName: string) => {
-    try {
-      const newTag = await api.addIgnoredTag({
-        pattern: tagName,
-        reason: 'Aus Vorschlag entfernt'
-      })
-      setIgnoredTags([...ignoredTags, newTag])
-      // Remove from nonsense list
-      setNonsenseTags(nonsenseTags.filter(t => t.name !== tagName))
-      setSelectedNonsense(prev => {
-        const tag = nonsenseTags.find(t => t.name === tagName)
-        if (tag) {
-          const newSet = new Set(prev)
-          newSet.delete(tag.id)
-          return newSet
-        }
-        return prev
-      })
-    } catch (e) {
-      console.error('Failed to add to ignore list:', e)
     }
   }
   
@@ -210,48 +277,152 @@ export default function TagCleanupWizard() {
     }
   }
   
-  const analyzeStep = async (step: number) => {
+  // Open confirmation modal before AI analysis
+  const openAnalysisConfirm = async (step: number, forceNew: boolean = false) => {
+    const stepInfo: Record<number, { name: string; type: 'nonsense' | 'correspondent' | 'doctype' | 'similar' }> = {
+      2: { name: 'Unsinnige Tags', type: 'nonsense' },
+      3: { name: 'Korrespondenten-Tags', type: 'correspondent' },
+      4: { name: 'Dokumententyp-Tags', type: 'doctype' },
+      5: { name: 'Ähnliche Tags', type: 'similar' }
+    }
+    
+    const info = stepInfo[step]
+    if (!info) return
+    
+    // If loading saved (not forceNew), skip modal
+    if (!forceNew) {
+      const hasSaved = 
+        (step === 2 && savedNonsenseInfo?.exists) ||
+        (step === 3 && savedCorrespondentInfo?.exists) ||
+        (step === 4 && savedDoctypeInfo?.exists) ||
+        (step === 5 && savedSimilarInfo?.exists)
+      
+      if (hasSaved) {
+        // Load saved directly without modal
+        await loadSavedOrAnalyze(step, false)
+        return
+      }
+    }
+    
+    // Show modal and load estimate
+    setConfirmModal({ step, stepName: info.name, analysisType: info.type })
+    setLoadingEstimate(true)
+    setConfirmEstimate(null)
+    
+    try {
+      const estimate = await api.estimateTags(info.type)
+      // Check if external LLM (not Ollama)
+      const isExternal = estimate.model ? !estimate.model.toLowerCase().includes('llama') && !estimate.model.toLowerCase().includes('mistral') && !estimate.model.toLowerCase().includes('local') : true
+      setConfirmEstimate({ ...estimate, is_external: isExternal })
+    } catch (e) {
+      console.error('Error loading estimate:', e)
+      setConfirmEstimate({
+        items_info: `${tags.length} Tags`,
+        estimated_tokens: tags.length * 20,
+        token_limit: 128000,
+        model: 'Unbekannt',
+        is_external: true
+      })
+    } finally {
+      setLoadingEstimate(false)
+    }
+  }
+  
+  const confirmAndAnalyze = async () => {
+    if (!confirmModal) return
+    setConfirmModal(null)
+    await loadSavedOrAnalyze(confirmModal.step, true)
+  }
+  
+  const loadSavedOrAnalyze = async (step: number, forceNew: boolean = false) => {
     setAnalyzing(true)
     setError(null)
     
     try {
       switch(step) {
-        case 2: // Nonsense tags via AI
+        case 2: // Nonsense tags
+          if (!forceNew && savedNonsenseInfo?.exists) {
+            const saved = await api.loadSavedNonsenseAnalysis()
+            if (saved.exists && saved.nonsense_tags) {
+              setNonsenseTags(saved.nonsense_tags)
+              setSelectedNonsense(new Set(saved.nonsense_tags.map((t: NonsenseTag) => t.id)))
+              setStepStatus(prev => ({ ...prev, [step]: { ...prev[step], analyzed: true } }))
+              setAnalyzing(false)
+              return
+            }
+          }
+          // Run new analysis
           const nonsenseResult = await api.analyzeNonsenseTags()
           if (nonsenseResult.error) {
             setError(nonsenseResult.error)
           } else {
             setNonsenseTags(nonsenseResult.nonsense_tags || [])
             setSelectedNonsense(new Set(nonsenseResult.nonsense_tags?.map((t: NonsenseTag) => t.id) || []))
+            setSavedNonsenseInfo({ exists: true, created_at: new Date().toISOString() })
           }
           break
           
-        case 3: // Correspondent matches via AI
+        case 3: // Correspondent matches
+          if (!forceNew && savedCorrespondentInfo?.exists) {
+            const saved = await api.loadSavedCorrespondentAnalysis()
+            if (saved.exists && saved.correspondent_tags) {
+              setCorrespondentMatches(saved.correspondent_tags)
+              setSelectedCorrespondentMatches(new Set(saved.correspondent_tags.map((t: CorrespondentMatch) => t.tag_id)))
+              setStepStatus(prev => ({ ...prev, [step]: { ...prev[step], analyzed: true } }))
+              setAnalyzing(false)
+              return
+            }
+          }
+          // Run new analysis
           const corrResult = await api.analyzeCorrespondentTags()
           if (corrResult.error) {
             setError(corrResult.error)
           } else {
             setCorrespondentMatches(corrResult.correspondent_tags || [])
             setSelectedCorrespondentMatches(new Set(corrResult.correspondent_tags?.map((t: CorrespondentMatch) => t.tag_id) || []))
+            setSavedCorrespondentInfo({ exists: true, created_at: new Date().toISOString() })
           }
           break
           
-        case 4: // Doctype matches via AI
+        case 4: // Doctype matches
+          if (!forceNew && savedDoctypeInfo?.exists) {
+            const saved = await api.loadSavedDoctypeAnalysis()
+            if (saved.exists && saved.doctype_tags) {
+              setDocTypeMatches(saved.doctype_tags)
+              setSelectedDocTypeMatches(new Set(saved.doctype_tags.map((t: DoctypeMatch) => t.tag_id)))
+              setStepStatus(prev => ({ ...prev, [step]: { ...prev[step], analyzed: true } }))
+              setAnalyzing(false)
+              return
+            }
+          }
+          // Run new analysis
           const dtResult = await api.analyzeDoctypeTags()
           if (dtResult.error) {
             setError(dtResult.error)
           } else {
             setDocTypeMatches(dtResult.doctype_tags || [])
             setSelectedDocTypeMatches(new Set(dtResult.doctype_tags?.map((t: DoctypeMatch) => t.tag_id) || []))
+            setSavedDoctypeInfo({ exists: true, created_at: new Date().toISOString() })
           }
           break
           
-        case 5: // Similar tags via AI
+        case 5: // Similar tags
+          if (!forceNew && savedSimilarInfo?.exists) {
+            const saved = await api.loadTagSavedAnalysis()
+            if (saved.groups && saved.groups.length > 0) {
+              setSimilarGroups(saved.groups)
+              setStepStatus(prev => ({ ...prev, [step]: { ...prev[step], analyzed: true } }))
+              setAnalyzing(false)
+              return
+            }
+          }
+          // Run new analysis
           const analysisResult = await api.analyzeTags(200)
           if (analysisResult.error) {
             setError(analysisResult.error)
           } else {
             setSimilarGroups(analysisResult.groups || [])
+            setSavedSimilarInfo({ exists: true, created_at: new Date().toISOString() })
           }
           break
       }
@@ -262,7 +433,7 @@ export default function TagCleanupWizard() {
       }))
       
     } catch (e: any) {
-      setError(e.message || 'Analyse fehlgeschlagen')
+      setError(e.message || 'Analyse fehlgeschlagen. Ist ein LLM Provider konfiguriert?')
     } finally {
       setAnalyzing(false)
     }
@@ -271,66 +442,51 @@ export default function TagCleanupWizard() {
   const executeStep = async (step: number) => {
     setProcessing(true)
     setError(null)
+    setProgress(null)
+    
+    // Helper for parallel deletion with progress
+    const deleteTagsParallel = async (tagIds: number[], batchSize = 5) => {
+      let deleted = 0
+      const total = tagIds.length
+      setProgress({ current: 0, total })
+      
+      for (let i = 0; i < tagIds.length; i += batchSize) {
+        const batch = tagIds.slice(i, i + batchSize)
+        const results = await Promise.allSettled(batch.map(id => api.deleteTag(id)))
+        deleted += results.filter(r => r.status === 'fulfilled').length
+        setProgress({ current: Math.min(i + batchSize, total), total })
+      }
+      return deleted
+    }
+    
     try {
       let result: StepStatus['result'] = {}
       
       switch(step) {
-        case 1: // Delete empty tags
+        case 1: // Delete empty tags - PARALLEL
           const emptyToDelete = emptyTags.filter(t => selectedEmpty.has(t.id))
-          let deleted1 = 0
-          for (const tag of emptyToDelete) {
-            try {
-              await api.deleteTag(tag.id)
-              deleted1++
-            } catch (e) {
-              console.error(`Failed to delete tag ${tag.name}:`, e)
-            }
-          }
+          const deleted1 = await deleteTagsParallel(emptyToDelete.map(t => t.id))
           result.deleted = deleted1
           result.total = emptyToDelete.length
           break
           
-        case 2: // Delete nonsense tags
+        case 2: // Delete nonsense tags - PARALLEL
           const nonsenseToDelete = nonsenseTags.filter(t => selectedNonsense.has(t.id))
-          let deleted2 = 0
-          for (const tag of nonsenseToDelete) {
-            try {
-              await api.deleteTag(tag.id)
-              deleted2++
-            } catch (e) {
-              console.error(`Failed to delete tag ${tag.name}:`, e)
-            }
-          }
+          const deleted2 = await deleteTagsParallel(nonsenseToDelete.map(t => t.id))
           result.deleted = deleted2
           result.total = nonsenseToDelete.length
           break
           
-        case 3: // Delete correspondent tags
+        case 3: // Delete correspondent tags - PARALLEL
           const corrToDelete = correspondentMatches.filter(m => selectedCorrespondentMatches.has(m.tag_id))
-          let deleted3 = 0
-          for (const match of corrToDelete) {
-            try {
-              await api.deleteTag(match.tag_id)
-              deleted3++
-            } catch (e) {
-              console.error(`Failed to delete tag ${match.tag_name}:`, e)
-            }
-          }
+          const deleted3 = await deleteTagsParallel(corrToDelete.map(m => m.tag_id))
           result.deleted = deleted3
           result.total = corrToDelete.length
           break
           
-        case 4: // Delete doctype tags
+        case 4: // Delete doctype tags - PARALLEL
           const dtToDelete = docTypeMatches.filter(m => selectedDocTypeMatches.has(m.tag_id))
-          let deleted4 = 0
-          for (const match of dtToDelete) {
-            try {
-              await api.deleteTag(match.tag_id)
-              deleted4++
-            } catch (e) {
-              console.error(`Failed to delete tag ${match.tag_name}:`, e)
-            }
-          }
+          const deleted4 = await deleteTagsParallel(dtToDelete.map(m => m.tag_id))
           result.deleted = deleted4
           result.total = dtToDelete.length
           break
@@ -352,6 +508,7 @@ export default function TagCleanupWizard() {
       console.error('Error executing step:', e)
     } finally {
       setProcessing(false)
+      setProgress(null)
     }
   }
 
@@ -459,27 +616,64 @@ export default function TagCleanupWizard() {
               
               <div className="text-center py-8">
                 <Brain className="w-16 h-16 mx-auto text-primary-500 mb-4" />
-                <h4 className="text-lg font-medium text-surface-100 mb-2">KI-Analyse erforderlich</h4>
+                <h4 className="text-lg font-medium text-surface-100 mb-2">
+                  {savedNonsenseInfo?.exists ? 'Gespeicherte Analyse vorhanden' : 'KI-Analyse erforderlich'}
+                </h4>
                 <p className="text-surface-400 mb-6 max-w-md mx-auto">
-                  Die KI analysiert alle Tags und identifiziert unsinnige, generische oder sinnlose Tags wie "test", "Dokument", "Sonstige" etc.
+                  {savedNonsenseInfo?.exists 
+                    ? `Letzte Analyse: ${savedNonsenseInfo.created_at ? new Date(savedNonsenseInfo.created_at).toLocaleString('de-DE') : 'Unbekannt'}` 
+                    : 'Die KI analysiert alle Tags und identifiziert unsinnige, generische oder sinnlose Tags wie "test", "Dokument", "Sonstige" etc.'}
                 </p>
-                <button
-                  onClick={() => analyzeStep(2)}
-                  disabled={analyzing}
-                  className="btn btn-primary flex items-center gap-2 mx-auto"
-                >
-                  {analyzing ? (
+                
+                <div className="flex gap-3 justify-center">
+                  {savedNonsenseInfo?.exists ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Analysiere...
+                      <button
+                        onClick={() => openAnalysisConfirm(2, false)}
+                        disabled={analyzing}
+                        className="btn btn-primary flex items-center gap-2"
+                      >
+                        {analyzing ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Lade...
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="w-4 h-4" />
+                            Gespeicherte laden
+                          </>
+                        )}
+                      </button>
+                      <button
+                        onClick={() => openAnalysisConfirm(2, true)}
+                        disabled={analyzing}
+                        className="btn btn-secondary flex items-center gap-2"
+                      >
+                        <Sparkles className="w-4 h-4" />
+                        Neu analysieren
+                      </button>
                     </>
                   ) : (
-                    <>
-                      <Sparkles className="w-4 h-4" />
-                      KI-Analyse starten
-                    </>
+                    <button
+                      onClick={() => openAnalysisConfirm(2, true)}
+                      disabled={analyzing}
+                      className="btn btn-primary flex items-center gap-2"
+                    >
+                      {analyzing ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Analysiere...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-4 h-4" />
+                          KI-Analyse starten
+                        </>
+                      )}
+                    </button>
                   )}
-                </button>
+                </div>
               </div>
             </div>
           )
@@ -487,6 +681,7 @@ export default function TagCleanupWizard() {
         
         return (
           <div className="space-y-4">
+            
             <div className="flex items-center justify-between">
               <p className="text-surface-300">
                 <strong className="text-amber-400">{nonsenseTags.length}</strong> unsinnige Tags gefunden
@@ -515,7 +710,9 @@ export default function TagCleanupWizard() {
             </div>
             
             <div className="max-h-96 overflow-y-auto space-y-2">
-              {nonsenseTags.map(tag => (
+              {nonsenseTags
+                .filter(tag => !ignoredItemIds.nonsense.includes(tag.id))
+                .map(tag => (
                 <div key={tag.id} className="flex items-start gap-3 p-3 rounded bg-surface-700/30 hover:bg-surface-700/50">
                   <input
                     type="checkbox"
@@ -540,15 +737,20 @@ export default function TagCleanupWizard() {
                     <p className="text-sm text-surface-400 mt-1">{tag.reason}</p>
                   </div>
                   <button
-                    onClick={() => addTagToIgnoreList(tag.name)}
-                    className="text-xs text-emerald-400 hover:text-emerald-300 px-2 py-1 bg-emerald-500/10 rounded"
-                    title="Zur Ignorier-Liste hinzufügen"
+                    onClick={() => handleIgnoreItem(tag.id, tag.name, 'nonsense')}
+                    disabled={ignoringItemId === tag.id}
+                    className="p-1.5 rounded text-surface-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                    title="Dauerhaft ignorieren"
                   >
-                    <Shield className="w-4 h-4" />
+                    {ignoringItemId === tag.id ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Ban className="w-4 h-4" />
+                    )}
                   </button>
                 </div>
               ))}
-              {nonsenseTags.length === 0 && (
+              {nonsenseTags.filter(t => !ignoredItemIds.nonsense.includes(t.id)).length === 0 && (
                 <p className="text-center text-surface-400 py-8">Keine unsinnigen Tags gefunden! ✓</p>
               )}
             </div>
@@ -560,33 +762,54 @@ export default function TagCleanupWizard() {
           return (
             <div className="text-center py-12">
               <Brain className="w-16 h-16 mx-auto text-blue-500 mb-4" />
-              <h4 className="text-lg font-medium text-surface-100 mb-2">KI-Analyse erforderlich</h4>
+              <h4 className="text-lg font-medium text-surface-100 mb-2">
+                {savedCorrespondentInfo?.exists ? 'Gespeicherte Analyse vorhanden' : 'KI-Analyse erforderlich'}
+              </h4>
               <p className="text-surface-400 mb-6 max-w-md mx-auto">
-                Die KI analysiert alle Tags und findet Tags die eigentlich Firmen oder Personen (Korrespondenten) sind.
+                {savedCorrespondentInfo?.exists 
+                  ? `Letzte Analyse: ${savedCorrespondentInfo.created_at ? new Date(savedCorrespondentInfo.created_at).toLocaleString('de-DE') : 'Unbekannt'}` 
+                  : 'Die KI analysiert alle Tags und findet Tags die eigentlich Firmen oder Personen (Korrespondenten) sind.'}
               </p>
-              <button
-                onClick={() => analyzeStep(3)}
-                disabled={analyzing}
-                className="btn btn-primary flex items-center gap-2 mx-auto"
-              >
-                {analyzing ? (
+              
+              
+              <div className="flex gap-3 justify-center">
+                {savedCorrespondentInfo?.exists ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Analysiere...
+                    <button
+                      onClick={() => openAnalysisConfirm(3, false)}
+                      disabled={analyzing}
+                      className="btn btn-primary flex items-center gap-2"
+                    >
+                      {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                      {analyzing ? 'Lade...' : 'Gespeicherte laden'}
+                    </button>
+                    <button
+                      onClick={() => openAnalysisConfirm(3, true)}
+                      disabled={analyzing}
+                      className="btn btn-secondary flex items-center gap-2"
+                    >
+                      <Sparkles className="w-4 h-4" />
+                      Neu analysieren
+                    </button>
                   </>
                 ) : (
-                  <>
-                    <Sparkles className="w-4 h-4" />
-                    KI-Analyse starten
-                  </>
+                  <button
+                    onClick={() => openAnalysisConfirm(3, true)}
+                    disabled={analyzing}
+                    className="btn btn-primary flex items-center gap-2"
+                  >
+                    {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                    {analyzing ? 'Analysiere...' : 'KI-Analyse starten'}
+                  </button>
                 )}
-              </button>
+              </div>
             </div>
           )
         }
         
         return (
           <div className="space-y-4">
+            
             <div className="flex items-center justify-between">
               <p className="text-surface-300">
                 <strong className="text-blue-400">{correspondentMatches.length}</strong> Tags sind eigentlich Korrespondenten
@@ -594,8 +817,10 @@ export default function TagCleanupWizard() {
             </div>
             
             <div className="max-h-96 overflow-y-auto space-y-2">
-              {correspondentMatches.map(match => (
-                <label key={match.tag_id} className="flex items-start gap-3 p-3 rounded bg-surface-700/30 hover:bg-surface-700/50 cursor-pointer">
+              {correspondentMatches
+                .filter(match => !ignoredItemIds.correspondent.includes(match.tag_id))
+                .map(match => (
+                <div key={match.tag_id} className="flex items-start gap-3 p-3 rounded bg-surface-700/30 hover:bg-surface-700/50">
                   <input
                     type="checkbox"
                     checked={selectedCorrespondentMatches.has(match.tag_id)}
@@ -605,7 +830,7 @@ export default function TagCleanupWizard() {
                       else newSet.delete(match.tag_id)
                       setSelectedCorrespondentMatches(newSet)
                     }}
-                    className="w-4 h-4 mt-1"
+                    className="w-4 h-4 mt-1 cursor-pointer"
                   />
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
@@ -622,9 +847,21 @@ export default function TagCleanupWizard() {
                     </div>
                     <p className="text-sm text-surface-500 mt-1">{match.reason}</p>
                   </div>
-                </label>
+                  <button
+                    onClick={() => handleIgnoreItem(match.tag_id, match.tag_name, 'correspondent')}
+                    disabled={ignoringItemId === match.tag_id}
+                    className="p-1.5 rounded text-surface-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                    title="Dauerhaft ignorieren"
+                  >
+                    {ignoringItemId === match.tag_id ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Ban className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
               ))}
-              {correspondentMatches.length === 0 && (
+              {correspondentMatches.filter(m => !ignoredItemIds.correspondent.includes(m.tag_id)).length === 0 && (
                 <p className="text-center text-surface-400 py-8">Keine solchen Tags gefunden! ✓</p>
               )}
             </div>
@@ -636,33 +873,54 @@ export default function TagCleanupWizard() {
           return (
             <div className="text-center py-12">
               <Brain className="w-16 h-16 mx-auto text-amber-500 mb-4" />
-              <h4 className="text-lg font-medium text-surface-100 mb-2">KI-Analyse erforderlich</h4>
+              <h4 className="text-lg font-medium text-surface-100 mb-2">
+                {savedDoctypeInfo?.exists ? 'Gespeicherte Analyse vorhanden' : 'KI-Analyse erforderlich'}
+              </h4>
               <p className="text-surface-400 mb-6 max-w-md mx-auto">
-                Die KI analysiert alle Tags und findet Tags die eigentlich Dokumententypen sind (z.B. "Rechnung", "Vertrag").
+                {savedDoctypeInfo?.exists 
+                  ? `Letzte Analyse: ${savedDoctypeInfo.created_at ? new Date(savedDoctypeInfo.created_at).toLocaleString('de-DE') : 'Unbekannt'}` 
+                  : 'Die KI analysiert alle Tags und findet Tags die eigentlich Dokumententypen sind (z.B. "Rechnung", "Vertrag").'}
               </p>
-              <button
-                onClick={() => analyzeStep(4)}
-                disabled={analyzing}
-                className="btn btn-primary flex items-center gap-2 mx-auto"
-              >
-                {analyzing ? (
+              
+              
+              <div className="flex gap-3 justify-center">
+                {savedDoctypeInfo?.exists ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Analysiere...
+                    <button
+                      onClick={() => openAnalysisConfirm(4, false)}
+                      disabled={analyzing}
+                      className="btn btn-primary flex items-center gap-2"
+                    >
+                      {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                      {analyzing ? 'Lade...' : 'Gespeicherte laden'}
+                    </button>
+                    <button
+                      onClick={() => openAnalysisConfirm(4, true)}
+                      disabled={analyzing}
+                      className="btn btn-secondary flex items-center gap-2"
+                    >
+                      <Sparkles className="w-4 h-4" />
+                      Neu analysieren
+                    </button>
                   </>
                 ) : (
-                  <>
-                    <Sparkles className="w-4 h-4" />
-                    KI-Analyse starten
-                  </>
+                  <button
+                    onClick={() => openAnalysisConfirm(4, true)}
+                    disabled={analyzing}
+                    className="btn btn-primary flex items-center gap-2"
+                  >
+                    {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                    {analyzing ? 'Analysiere...' : 'KI-Analyse starten'}
+                  </button>
                 )}
-              </button>
+              </div>
             </div>
           )
         }
         
         return (
           <div className="space-y-4">
+            
             <div className="flex items-center justify-between">
               <p className="text-surface-300">
                 <strong className="text-amber-400">{docTypeMatches.length}</strong> Tags sind eigentlich Dokumententypen
@@ -670,8 +928,10 @@ export default function TagCleanupWizard() {
             </div>
             
             <div className="max-h-96 overflow-y-auto space-y-2">
-              {docTypeMatches.map(match => (
-                <label key={match.tag_id} className="flex items-start gap-3 p-3 rounded bg-surface-700/30 hover:bg-surface-700/50 cursor-pointer">
+              {docTypeMatches
+                .filter(match => !ignoredItemIds.doctype.includes(match.tag_id))
+                .map(match => (
+                <div key={match.tag_id} className="flex items-start gap-3 p-3 rounded bg-surface-700/30 hover:bg-surface-700/50">
                   <input
                     type="checkbox"
                     checked={selectedDocTypeMatches.has(match.tag_id)}
@@ -681,7 +941,7 @@ export default function TagCleanupWizard() {
                       else newSet.delete(match.tag_id)
                       setSelectedDocTypeMatches(newSet)
                     }}
-                    className="w-4 h-4 mt-1"
+                    className="w-4 h-4 mt-1 cursor-pointer"
                   />
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
@@ -698,9 +958,21 @@ export default function TagCleanupWizard() {
                     </div>
                     <p className="text-sm text-surface-500 mt-1">{match.reason}</p>
                   </div>
-                </label>
+                  <button
+                    onClick={() => handleIgnoreItem(match.tag_id, match.tag_name, 'doctype')}
+                    disabled={ignoringItemId === match.tag_id}
+                    className="p-1.5 rounded text-surface-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                    title="Dauerhaft ignorieren"
+                  >
+                    {ignoringItemId === match.tag_id ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Ban className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
               ))}
-              {docTypeMatches.length === 0 && (
+              {docTypeMatches.filter(m => !ignoredItemIds.doctype.includes(m.tag_id)).length === 0 && (
                 <p className="text-center text-surface-400 py-8">Keine solchen Tags gefunden! ✓</p>
               )}
             </div>
@@ -712,33 +984,54 @@ export default function TagCleanupWizard() {
           return (
             <div className="text-center py-12">
               <Brain className="w-16 h-16 mx-auto text-purple-500 mb-4" />
-              <h4 className="text-lg font-medium text-surface-100 mb-2">KI-Analyse erforderlich</h4>
+              <h4 className="text-lg font-medium text-surface-100 mb-2">
+                {savedSimilarInfo?.exists ? 'Gespeicherte Analyse vorhanden' : 'KI-Analyse erforderlich'}
+              </h4>
               <p className="text-surface-400 mb-6 max-w-md mx-auto">
-                Die KI findet ähnliche Tags wie "Hoster", "Webhoster", "Web-Hoster" und schlägt vor, sie zusammenzulegen.
+                {savedSimilarInfo?.exists 
+                  ? `Letzte Analyse: ${savedSimilarInfo.created_at ? new Date(savedSimilarInfo.created_at).toLocaleString('de-DE') : 'Unbekannt'}` 
+                  : 'Die KI findet ähnliche Tags wie "Hoster", "Webhoster", "Web-Hoster" und schlägt vor, sie zusammenzulegen.'}
               </p>
-              <button
-                onClick={() => analyzeStep(5)}
-                disabled={analyzing}
-                className="btn btn-primary flex items-center gap-2 mx-auto"
-              >
-                {analyzing ? (
+              
+              
+              <div className="flex gap-3 justify-center">
+                {savedSimilarInfo?.exists ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Analysiere...
+                    <button
+                      onClick={() => openAnalysisConfirm(5, false)}
+                      disabled={analyzing}
+                      className="btn btn-primary flex items-center gap-2"
+                    >
+                      {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                      {analyzing ? 'Lade...' : 'Gespeicherte laden'}
+                    </button>
+                    <button
+                      onClick={() => openAnalysisConfirm(5, true)}
+                      disabled={analyzing}
+                      className="btn btn-secondary flex items-center gap-2"
+                    >
+                      <Sparkles className="w-4 h-4" />
+                      Neu analysieren
+                    </button>
                   </>
                 ) : (
-                  <>
-                    <Sparkles className="w-4 h-4" />
-                    KI-Analyse starten
-                  </>
+                  <button
+                    onClick={() => openAnalysisConfirm(5, true)}
+                    disabled={analyzing}
+                    className="btn btn-primary flex items-center gap-2"
+                  >
+                    {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                    {analyzing ? 'Analysiere...' : 'KI-Analyse starten'}
+                  </button>
                 )}
-              </button>
+              </div>
             </div>
           )
         }
         
         return (
           <div className="space-y-4">
+            
             <p className="text-surface-300">
               <strong className="text-purple-400">{similarGroups.length}</strong> Gruppen ähnlicher Tags gefunden
             </p>
@@ -937,12 +1230,16 @@ export default function TagCleanupWizard() {
             <button
               onClick={() => executeStep(currentStep)}
               disabled={processing || stepStatus[currentStep]?.completed || !canExecute()}
-              className="btn btn-primary flex items-center gap-2"
+              className="btn btn-primary flex items-center gap-2 min-w-[180px]"
             >
               {processing ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  Verarbeite...
+                  {progress ? (
+                    <span>{progress.current}/{progress.total} ({Math.round(progress.current / progress.total * 100)}%)</span>
+                  ) : (
+                    <span>Verarbeite...</span>
+                  )}
                 </>
               ) : (
                 <>
@@ -1046,6 +1343,101 @@ export default function TagCleanupWizard() {
                 className="btn btn-primary"
               >
                 Fertig
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* AI Analysis Confirmation Modal */}
+      {confirmModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-surface-800 rounded-xl p-6 w-full max-w-md mx-4 border border-surface-700 shadow-xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-full bg-primary-500/20 flex items-center justify-center">
+                <Sparkles className="w-6 h-6 text-primary-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-surface-100">
+                  KI-Analyse starten
+                </h3>
+                <p className="text-sm text-surface-400">{confirmModal.stepName}</p>
+              </div>
+            </div>
+            
+            {loadingEstimate ? (
+              <div className="py-8 text-center">
+                <Loader2 className="w-8 h-8 animate-spin mx-auto text-primary-400 mb-2" />
+                <p className="text-surface-400">Berechne Token-Schätzung...</p>
+              </div>
+            ) : confirmEstimate && (
+              <>
+                {/* Token Info */}
+                <div className="bg-surface-700/50 rounded-lg p-4 mb-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-surface-400">Modell</span>
+                    <span className="text-primary-400 font-medium">{confirmEstimate.model}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-surface-400">Daten</span>
+                    <span className="text-surface-200">{confirmEstimate.items_info}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-surface-400">Geschätzte Tokens</span>
+                    <span className="text-surface-200">~{confirmEstimate.estimated_tokens.toLocaleString()}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-surface-400">Token-Limit</span>
+                    <span className="text-surface-200">{confirmEstimate.token_limit.toLocaleString()}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-surface-400">Auslastung</span>
+                    <span className={clsx(
+                      'px-2 py-0.5 rounded text-xs font-medium',
+                      confirmEstimate.estimated_tokens > confirmEstimate.token_limit * 0.8 
+                        ? 'bg-amber-500/20 text-amber-400' 
+                        : 'bg-emerald-500/20 text-emerald-400'
+                    )}>
+                      {Math.round(confirmEstimate.estimated_tokens / confirmEstimate.token_limit * 100)}%
+                    </span>
+                  </div>
+                </div>
+                
+                {confirmEstimate.warning && (
+                  <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg mb-4">
+                    <p className="text-amber-400 text-sm">⚠️ {confirmEstimate.warning}</p>
+                  </div>
+                )}
+                
+                {/* External LLM Warning */}
+                {confirmEstimate.is_external && (
+                  <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg mb-4">
+                    <p className="text-blue-400 text-sm flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                      <span>
+                        <strong>Hinweis:</strong> Du verwendest einen externen LLM-Anbieter. 
+                        Deine Tag-Namen werden zur Analyse an diesen Dienst übertragen.
+                      </span>
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
+            
+            <div className="flex gap-3 justify-end mt-4">
+              <button
+                onClick={() => setConfirmModal(null)}
+                className="btn btn-secondary"
+              >
+                Abbrechen
+              </button>
+              <button
+                onClick={confirmAndAnalyze}
+                disabled={loadingEstimate}
+                className="btn btn-primary flex items-center gap-2"
+              >
+                <Sparkles className="w-4 h-4" />
+                Analyse starten
               </button>
             </div>
           </div>

@@ -33,9 +33,11 @@ interface AnalysisStats {
 }
 
 interface Estimate {
-  items_count: number
+  analysis_type?: string
+  items_info?: string
   estimated_tokens: number
   token_limit?: number
+  model?: string
   recommended_batches: number
   warning?: string
 }
@@ -337,7 +339,7 @@ export default function TagManager() {
             <div className="flex flex-wrap gap-4">
               <span>
                 <span className="text-surface-400">Items:</span>
-                <span className="ml-1 text-surface-100 font-medium">{estimate.items_count}</span>
+                <span className="ml-1 text-surface-100 font-medium">{estimate.items_info || 'Tags'}</span>
               </span>
               <span>
                 <span className="text-surface-400">Tokens:</span>

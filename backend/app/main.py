@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.database import create_tables
-from app.routers import paperless, correspondents, tags, document_types, settings, llm, debug, statistics
+from app.routers import paperless, correspondents, tags, document_types, settings, llm, debug, statistics, ignored_items
 
 
 @asynccontextmanager
@@ -39,6 +39,7 @@ app.include_router(settings.router, prefix="/api/settings", tags=["Settings"])
 app.include_router(llm.router, prefix="/api/llm", tags=["LLM"])
 app.include_router(debug.router, prefix="/api/debug", tags=["Debug"])
 app.include_router(statistics.router, prefix="/api/statistics", tags=["Statistics"])
+app.include_router(ignored_items.router, prefix="/api/ignored-items", tags=["Ignored Items"])
 
 
 @app.get("/api/health")

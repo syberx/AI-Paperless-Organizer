@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Save, Check, X, Eye, EyeOff, TestTube, Loader2, ChevronDown, ChevronUp, DollarSign, Cpu, Lock, Bug, Trash2 } from 'lucide-react'
+import { Save, Check, X, Eye, EyeOff, TestTube, Loader2, ChevronDown, ChevronUp, DollarSign, Cpu, Lock, Bug, Trash2, Ban } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
 import type { ModelInfo } from '../services/api'
@@ -47,12 +47,42 @@ export default function SettingsPanel() {
   const [showNewPassword, setShowNewPassword] = useState(false)
   const [savingAppSettings, setSavingAppSettings] = useState(false)
   const [appSettingsSaved, setAppSettingsSaved] = useState(false)
+  
+  // Ignored Items
+  const [ignoredItems, setIgnoredItems] = useState<api.IgnoredItem[]>([])
+  const [loadingIgnored, setLoadingIgnored] = useState(false)
+  const [removingIgnored, setRemovingIgnored] = useState<number | null>(null)
 
   useEffect(() => {
     loadSettings()
     loadModelInfos()
     loadAppSettings()
+    loadIgnoredItems()
   }, [])
+  
+  const loadIgnoredItems = async () => {
+    setLoadingIgnored(true)
+    try {
+      const items = await api.getIgnoredItems()
+      setIgnoredItems(items)
+    } catch (e) {
+      console.error('Failed to load ignored items:', e)
+    } finally {
+      setLoadingIgnored(false)
+    }
+  }
+  
+  const handleRemoveIgnored = async (id: number) => {
+    setRemovingIgnored(id)
+    try {
+      await api.removeIgnoredItem(id)
+      setIgnoredItems(ignoredItems.filter(item => item.id !== id))
+    } catch (e) {
+      console.error('Failed to remove ignored item:', e)
+    } finally {
+      setRemovingIgnored(null)
+    }
+  }
 
   const loadAppSettings = async () => {
     try {
@@ -669,6 +699,70 @@ export default function SettingsPanel() {
             </div>
           )}
         </div>
+      </div>
+      
+      {/* Ignored Items */}
+      <div className="card p-6">
+        <h2 className="font-display font-semibold text-lg text-surface-100 mb-6 flex items-center gap-2">
+          <Ban className="w-5 h-5 text-red-400" />
+          Ignorierte Einträge
+          {ignoredItems.length > 0 && (
+            <span className="text-sm font-normal text-surface-400">({ignoredItems.length})</span>
+          )}
+        </h2>
+        
+        <p className="text-sm text-surface-400 mb-4">
+          Diese Einträge werden bei KI-Analysen nicht mehr vorgeschlagen. Du kannst sie hier wieder aktivieren.
+        </p>
+        
+        {loadingIgnored ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-6 h-6 animate-spin text-primary-400" />
+          </div>
+        ) : ignoredItems.length === 0 ? (
+          <div className="text-center py-8 text-surface-500">
+            Keine ignorierten Einträge vorhanden.
+          </div>
+        ) : (
+          <div className="space-y-2 max-h-80 overflow-y-auto">
+            {ignoredItems.map(item => (
+              <div 
+                key={item.id} 
+                className="flex items-center justify-between p-3 rounded-lg bg-surface-800/50 border border-surface-700"
+              >
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-surface-200">{item.item_name}</span>
+                    <span className="text-xs px-2 py-0.5 rounded bg-surface-700 text-surface-400">
+                      {item.entity_type === 'tag' ? 'Tag' : 
+                       item.entity_type === 'correspondent' ? 'Korrespondent' : 'Dokumententyp'}
+                    </span>
+                    <span className="text-xs px-2 py-0.5 rounded bg-surface-700 text-surface-400">
+                      {item.analysis_type === 'nonsense' ? 'Unsinnig' :
+                       item.analysis_type === 'correspondent_match' ? 'Korrespondent-Match' :
+                       item.analysis_type === 'doctype_match' ? 'Dokumententyp-Match' : 'Ähnlich'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-surface-500 mt-1">
+                    Ignoriert am {new Date(item.created_at).toLocaleDateString('de-DE')}
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleRemoveIgnored(item.id)}
+                  disabled={removingIgnored === item.id}
+                  className="p-2 rounded text-surface-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                  title="Wieder aktivieren"
+                >
+                  {removingIgnored === item.id ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Check className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import React from 'react'
-import { Check, X, ChevronDown, ChevronUp, FileText, Loader2, Eye, ExternalLink } from 'lucide-react'
+import { Check, X, ChevronDown, ChevronUp, FileText, Loader2, Eye, ExternalLink, Ban } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
 
@@ -20,11 +20,14 @@ interface SimilarityGroup {
 interface MergePreviewProps {
   groups: SimilarityGroup[]
   entityType: 'correspondents' | 'tags' | 'document_types'
+  analysisType?: string  // "nonsense" | "correspondent_match" | "doctype_match" | "similar"
   onMerge: (targetId: number, targetName: string, sourceIds: number[], groupIndex?: number) => Promise<void>
   onIgnore?: (groupKey: string) => void
+  onIgnoreItem?: (itemId: number, itemName: string) => Promise<void>
+  ignoredItemIds?: number[]  // Items already on ignore list
 }
 
-export default function MergePreview({ groups, entityType, onMerge, onIgnore }: MergePreviewProps) {
+export default function MergePreview({ groups, entityType, analysisType: _analysisType, onMerge, onIgnore, onIgnoreItem, ignoredItemIds = [] }: MergePreviewProps) {
   // Use group's suggested_name as unique key instead of index
   const getGroupKey = (group: SimilarityGroup) => group.suggested_name + '_' + group.members.map(m => m.id).join('_')
   
@@ -42,6 +45,8 @@ export default function MergePreview({ groups, entityType, onMerge, onIgnore }: 
   const [selectedMembers, setSelectedMembers] = useState<Map<string, Set<number>>>(new Map())
   const [targetNames, setTargetNames] = useState<Map<string, string>>(new Map())
   const [targetIds, setTargetIds] = useState<Map<string, number>>(new Map())
+  const [localIgnoredItems, setLocalIgnoredItems] = useState<Set<number>>(new Set())
+  const [ignoringItem, setIgnoringItem] = useState<number | null>(null)
   
   // Re-initialize states when groups change
   React.useEffect(() => {
@@ -197,9 +202,38 @@ export default function MergePreview({ groups, entityType, onMerge, onIgnore }: 
     return 'bg-red-500/10 border-red-500/30'
   }
 
-  // Filter out ignored groups
-  const visibleGroups = groups.filter(g => !ignoredGroups.has(getGroupKey(g)))
+  // Combine prop and local ignored items
+  const allIgnoredItems = new Set([...ignoredItemIds, ...localIgnoredItems])
+  
+  // Filter groups: remove ignored groups and filter out ignored members from each group
+  const filteredGroups = groups
+    .filter(g => !ignoredGroups.has(getGroupKey(g)))
+    .map(g => ({
+      ...g,
+      members: g.members.filter(m => !allIgnoredItems.has(m.id))
+    }))
+    .filter(g => g.members.length >= 2)  // Only keep groups with 2+ members after filtering
+  
+  const visibleGroups = filteredGroups
   const ignoredCount = groups.length - visibleGroups.length
+  
+  const handleIgnoreItem = async (itemId: number, itemName: string) => {
+    if (!onIgnoreItem) {
+      // Just local ignore
+      setLocalIgnoredItems(prev => new Set([...prev, itemId]))
+      return
+    }
+    
+    setIgnoringItem(itemId)
+    try {
+      await onIgnoreItem(itemId, itemName)
+      setLocalIgnoredItems(prev => new Set([...prev, itemId]))
+    } catch (error) {
+      console.error('Error ignoring item:', error)
+    } finally {
+      setIgnoringItem(null)
+    }
+  }
 
   if (visibleGroups.length === 0) {
     return (
@@ -383,6 +417,25 @@ export default function MergePreview({ groups, entityType, onMerge, onIgnore }: 
                           >
                             {isTarget ? 'Ziel' : 'Als Ziel'}
                           </button>
+                          
+                          {/* Ignore single item button */}
+                          {!isTarget && onIgnoreItem && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleIgnoreItem(member.id, member.name)
+                              }}
+                              disabled={ignoringItem === member.id}
+                              className="px-2 py-1 rounded text-xs font-medium transition-colors bg-surface-700 text-surface-400 hover:bg-red-500/20 hover:text-red-400"
+                              title="Diesen Eintrag dauerhaft ignorieren"
+                            >
+                              {ignoringItem === member.id ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <Ban className="w-3 h-3" />
+                              )}
+                            </button>
+                          )}
                         </div>
                         
                         {/* Document Preview */}

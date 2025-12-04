@@ -139,14 +139,16 @@ async def update_llm_provider(
             LLMProvider.__table__.update().values(is_active=False)
         )
     
-    provider.api_key = data.api_key if data.api_key != "***" else provider.api_key
+    # Keep old key if *** or empty string is sent (don't accidentally clear the key)
+    if data.api_key and data.api_key != "***":
+        provider.api_key = data.api_key
+    # else: keep existing provider.api_key
     provider.api_base_url = data.api_base_url
     provider.model = data.model
     provider.is_active = data.is_active
+    # Provider is configured if it has a key (new or existing) or is Ollama
     provider.is_configured = bool(
-        (data.api_key and data.api_key != "***") or 
-        (provider.api_key and data.api_key == "***") or
-        provider.name == "ollama"  # Ollama doesn't need API key
+        provider.api_key or provider.name == "ollama"
     )
     
     await db.commit()

@@ -3,40 +3,40 @@
 DEFAULT_PROMPTS = {
     "correspondents": """Du bist ein Experte für die Analyse von Korrespondenten-Namen in einem Dokumentenmanagementsystem.
 
-Analysiere die folgende Liste von Korrespondenten und gruppiere ähnliche Einträge, die sich auf dieselbe Person oder Firma beziehen.
+Analysiere die folgende Liste und finde Gruppen von ÄHNLICHEN Korrespondenten die zusammengelegt werden könnten.
 
 Korrespondenten-Liste:
 {items}
 
-WICHTIGE Regeln:
-1. Gruppiere NUR Einträge, die sich DEFINITIV auf dieselbe Entität beziehen
-2. VORSICHT bei Abkürzungen: "BFS" könnte viele Firmen sein - nur gruppieren wenn klar ist, dass es dieselbe ist!
-3. Der suggested_name MUSS einer der Mitglieder-Namen sein oder eine direkte Variante davon
-4. NIEMALS einen Namen erfinden der nicht in der Liste vorkommt!
-5. GmbH/AG-Zusätze und Schreibweisen sind OK (z.B. "Telekom" und "Deutsche Telekom AG")
-6. Gib eine Konfidenz zwischen 0.0 und 1.0 an - bei Unsicherheit lieber NICHT gruppieren!
+WICHTIG - NUR Gruppen mit MINDESTENS 2 verschiedenen Einträgen erstellen!
 
-BEISPIEL für FALSCHES Gruppieren (NICHT machen!):
-- "BFS" und "Bundesagentur für Arbeit" - NEIN! Das sind komplett verschiedene Firmen!
-- "AOK" und "AXA" - NEIN! Nur weil beide mit A anfangen, sind sie nicht dieselbe Firma!
+Suche nach:
+1. Gleiche Firma mit verschiedenen Schreibweisen (z.B. "Telekom" und "Deutsche Telekom AG")
+2. Gleiche Person mit verschiedenen Schreibweisen
+3. Abkürzungen und ausgeschriebene Formen (z.B. "1&1" und "1und1")
+4. Mit/ohne GmbH, AG, etc.
 
-BEISPIEL für RICHTIGES Gruppieren:
-- "Deutsche Telekom" und "Telekom Deutschland GmbH" - JA! Gleiche Firma, verschiedene Schreibweisen
-- "1&1" und "1und1" und "1&1 Internet AG" - JA! Gleiche Firma
+BEISPIELE für gute Gruppen (IMMER mindestens 2 Members!):
+- ["Deutsche Telekom", "Telekom Deutschland GmbH"] → Gleiche Firma
+- ["1&1", "1und1", "1&1 Internet AG"] → Gleiche Firma
+- ["Amazon", "Amazon.de", "Amazon EU"] → Gleiche Firma
 
-Antworte NUR mit validem JSON im folgenden Format:
+KEINE Gruppen mit nur 1 Eintrag erstellen!
+Schreibe die Member-Namen EXAKT wie sie in der Liste stehen!
+
+Antworte NUR mit validem JSON:
 {
   "groups": [
     {
-      "suggested_name": "Vollständiger Firmenname GmbH",
-      "confidence": 0.95,
-      "members": ["name1", "name2", "name3"],
-      "reasoning": "Kurze Begründung warum diese zusammengehören"
+      "suggested_name": "Bester Name",
+      "confidence": 0.9,
+      "members": ["name1", "name2"],
+      "reasoning": "Begründung"
     }
   ]
 }
 
-Wenn keine ähnlichen Gruppen gefunden werden, gib zurück: {"groups": []}""",
+Bei keinen Ähnlichkeiten: {"groups": []}""",
 
     "tags": """Du bist ein Experte für die Analyse von Tags/Schlagwörtern in einem Dokumentenmanagementsystem.
 
@@ -67,46 +67,40 @@ Wenn keine ähnlichen Gruppen gefunden werden, gib zurück: {"groups": []}""",
 
     "document_types": """Du bist ein Experte für die Analyse von Dokumententypen in einem Dokumentenmanagementsystem.
 
-Analysiere die folgende Liste von Dokumententypen und gruppiere NUR Einträge, die exakt den gleichen Dokumenttyp beschreiben (verschiedene Schreibweisen).
+Analysiere die folgende Liste von Dokumententypen und finde Gruppen von ÄHNLICHEN Einträgen die zusammengelegt werden könnten.
 
 Dokumententypen-Liste:
 {items}
 
-WICHTIGE Regeln:
-1. Gruppiere NUR exakt gleiche Dokumenttypen mit verschiedenen Schreibweisen!
-2. NIEMALS verschiedene Kategorien zusammenlegen, auch wenn sie ähnlich klingen!
-3. Der suggested_name sollte der gebräuchlichste/klarste Begriff sein
-4. Bei Unsicherheit: NICHT gruppieren!
+WICHTIG - NUR Gruppen mit MINDESTENS 2 verschiedenen Einträgen erstellen!
 
-FALSCHES Gruppieren (NIEMALS machen!):
-- "Lohnabrechnung" und "Abrechnung" - NEIN! Lohnabrechnung ist eine spezifische Kategorie!
-- "Rechnung" und "Lohnabrechnung" - NEIN! Komplett verschiedene Dokumenttypen!
-- "Stromrechnung" und "Rechnung" - NEIN! Stromrechnung ist spezifischer!
-- "Mietvertrag" und "Vertrag" - NEIN! Mietvertrag ist eine spezifische Vertragsart!
-- "Kontoauszug" und "Abrechnung" - NEIN! Verschiedene Dokumenttypen!
-- "Bescheid" und "Brief" - NEIN! Ein Bescheid ist kein normaler Brief!
+Suche nach:
+1. Gleiche Typen mit verschiedenen Schreibweisen (z.B. "Rechnung" und "Invoice")
+2. Singular/Plural-Varianten (z.B. "Vertrag" und "Verträge")  
+3. Verwandte Dokumenttypen die konsolidiert werden könnten (z.B. "Auftrag", "Auftragsbestätigung")
+4. Abkürzungen und ausgeschriebene Formen (z.B. "KFZ-Brief" und "Fahrzeugbrief")
 
-RICHTIGES Gruppieren (NUR solche Fälle!):
-- "Rechnung" und "Invoice" und "Rechnungen" - JA! Gleicher Typ, verschiedene Sprachen/Plural
-- "Vertrag" und "Verträge" und "Contract" - JA! Gleicher Typ
-- "Lohnabrechnung" und "Gehaltsabrechnung" und "Lohn-Abrechnung" - JA! Gleicher Typ
-- "KFZ-Brief" und "Fahrzeugbrief" - JA! Gleicher Typ
+BEISPIELE für gute Gruppen (IMMER mindestens 2 Members!):
+- ["Rechnung", "Invoice", "Rechnungen"] → Gleiche Typen
+- ["Auftrag", "Auftragsbestätigung", "Bestellung"] → Verwandte Typen
+- ["Lohnabrechnung", "Gehaltsabrechnung"] → Synonyme
 
-Das Ziel ist Duplikate zu entfernen, NICHT Kategorien zu vereinfachen!
+KEINE Gruppen mit nur 1 Eintrag erstellen!
+Schreibe die Member-Namen EXAKT wie sie in der Liste stehen!
 
-Antworte NUR mit validem JSON im folgenden Format:
+Antworte NUR mit validem JSON:
 {
   "groups": [
     {
-      "suggested_name": "Bester Dokumententyp-Name",
-      "confidence": 0.92,
-      "members": ["typ1", "typ2", "typ3"],
-      "reasoning": "Kurze Begründung warum diese zusammengehören"
+      "suggested_name": "Bester Name",
+      "confidence": 0.85,
+      "members": ["name1", "name2"],
+      "reasoning": "Begründung"
     }
   ]
 }
 
-Wenn keine ähnlichen Gruppen gefunden werden, gib zurück: {"groups": []}""",
+Bei keinen Ähnlichkeiten: {"groups": []}""",
 
     "tags_nonsense": """Du bist ein Experte für Dokumentenmanagement und analysierst Tags auf ihre Sinnhaftigkeit.
 
