@@ -1,0 +1,15 @@
+# Exclude local data and secrets from Docker build context
+data/
+*.db
+*.sqlite*
+
+# Development artefacts
+__pycache__/
+.pytest_cache/
+.coverage
+
+# Environment & secrets
+.env
+.env.*
+secrets/
+
