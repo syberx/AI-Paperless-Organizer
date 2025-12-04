@@ -37,7 +37,7 @@ class PaperlessClient:
         
         url = f"{self.base_url}/api{endpoint}"
         
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, verify=False) as client:
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True, verify=False) as client:
             response = await client.request(
                 method=method,
                 url=url,

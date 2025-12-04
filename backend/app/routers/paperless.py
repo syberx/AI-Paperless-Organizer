@@ -1,15 +1,40 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from app.database import get_db
+from app.models import PaperlessCache
 from app.services.paperless_client import PaperlessClient, get_paperless_client
 from app.services.cache import get_cache
 
 router = APIRouter()
 
 
+async def update_db_cache(db: AsyncSession, key: str, data: list):
+    """Update the persistent DB cache."""
+    result = await db.execute(
+        select(PaperlessCache).where(PaperlessCache.cache_key == key)
+    )
+    cache_entry = result.scalar_one_or_none()
+    
+    if cache_entry:
+        cache_entry.data = data
+        cache_entry.count = len(data)
+    else:
+        cache_entry = PaperlessCache(
+            cache_key=key,
+            data=data,
+            count=len(data)
+        )
+        db.add(cache_entry)
+    
+    await db.commit()
+
+
 @router.get("/status")
-async def get_paperless_status(client: PaperlessClient = Depends(get_paperless_client)):
-    """Check connection status to Paperless-ngx."""
+async def get_paperless_status(
+    client: PaperlessClient = Depends(get_paperless_client)
+):
+    """Check connection status to Paperless-ngx - FAST, no data loading."""
     if not client.base_url:
         return {
             "connected": False,
@@ -17,25 +42,13 @@ async def get_paperless_status(client: PaperlessClient = Depends(get_paperless_c
         }
     
     try:
-        # Try to get correspondents as a real API test
-        correspondents = await client.get_correspondents()
+        # Quick connection test only - don't fetch all data!
+        is_connected = await client.test_connection()
         return {
-            "connected": True,
-            "url": client.base_url,
-            "correspondents_count": len(correspondents)
+            "connected": is_connected,
+            "url": client.base_url
         }
     except Exception as e:
-        # Fallback to simple connection test
-        try:
-            is_connected = await client.test_connection()
-            if is_connected:
-                return {
-                    "connected": True,
-                    "url": client.base_url
-                }
-        except:
-            pass
-        
         return {
             "connected": False,
             "url": client.base_url,
@@ -77,17 +90,25 @@ async def get_documents(
 
 
 @router.post("/refresh-cache")
-async def refresh_cache(client: PaperlessClient = Depends(get_paperless_client)):
-    """Refresh the cache by fetching fresh data from Paperless."""
+async def refresh_cache(
+    client: PaperlessClient = Depends(get_paperless_client),
+    db: AsyncSession = Depends(get_db)
+):
+    """Refresh the cache by fetching fresh data from Paperless and storing in DB."""
     cache = get_cache()
     
-    # Clear all Paperless cache
+    # Clear in-memory cache
     await cache.clear("paperless:")
     
-    # Fetch fresh data
+    # Fetch fresh data from Paperless
     correspondents = await client.get_correspondents(use_cache=False)
     tags = await client.get_tags(use_cache=False)
     doc_types = await client.get_document_types(use_cache=False)
+    
+    # Store in persistent DB cache for fast dashboard loading
+    await update_db_cache(db, 'correspondents', correspondents)
+    await update_db_cache(db, 'tags', tags)
+    await update_db_cache(db, 'document_types', doc_types)
     
     return {
         "success": True,
