@@ -1,93 +1,148 @@
-# AI Paperless Organizer
+<div align="center">
 
-Ein Docker-basiertes Webinterface zur intelligenten Bereinigung und Konsolidierung von Korrespondenten, Tags und Dokumententypen in Paperless-ngx mittels verschiedener LLM-Provider.
+# 🤖 AI Paperless Organizer
 
-## Features
+**KI-gestützte Metadaten-Bereinigung für Paperless-ngx**
 
-- **KI-gestützte Ähnlichkeitserkennung**: Findet automatisch ähnliche Einträge (z.B. "do", "do gmbh", "Domain Offensive GmbH")
-- **Multi-LLM Support**: OpenAI, Anthropic Claude, Azure OpenAI, Ollama (lokal)
-- **Hybrid-Workflow**: KI schlägt vor, Benutzer entscheidet, System führt aus
-- **Anpassbare Prompts**: Eigene Prompts für verschiedene Entitätstypen
-- **Merge-History**: Protokollierung aller Zusammenführungen
+[![GitHub](https://img.shields.io/badge/GitHub-syberx%2FAI--Paperless--Organizer-blue?logo=github)](https://github.com/syberx/AI-Paperless-Organizer)
+[![Docker Hub](https://img.shields.io/badge/Docker%20Hub-webdienste%2Fai--paperless--organizer-blue?logo=docker)](https://hub.docker.com/r/webdienste/ai-paperless-organizer)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Quick Start
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20me-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/chriswilms)
+[![PayPal](https://img.shields.io/badge/PayPal-Donate-00457C?logo=paypal&logoColor=white)](https://www.paypal.com/paypalme/withmoney)
 
-### Voraussetzungen
+---
 
-- Docker & Docker Compose
-- Paperless-ngx Installation mit API-Token
-- (Optional) LLM API Key (OpenAI, Anthropic) oder lokales Ollama
+**Bringe Ordnung in deine Paperless-ngx Metadaten mit der Kraft der KI!**
 
-### Installation
+Korrespondenten, Tags und Dokumententypen intelligent analysieren, gruppieren und zusammenführen.
 
-1. Repository klonen:
-```bash
-git clone <repository-url>
-cd paperless-organizer
+</div>
+
+---
+
+## 📸 Screenshots
+
+<div align="center">
+
+### Dashboard
+![Dashboard](docs/screenshots/dashboard.png)
+*Übersicht mit Statistiken und empfohlenem Workflow*
+
+### KI-Analyse
+![Analyse](docs/screenshots/analysis.png)
+*Intelligente Gruppierung ähnlicher Einträge mit Konfidenz-Werten*
+
+### Merge-Vorschau
+![Merge](docs/screenshots/merge.png)
+*Dokument-Vorschau vor dem Zusammenführen*
+
+</div>
+
+> 📷 **Screenshots folgen** - Füge deine eigenen Screenshots in `docs/screenshots/` hinzu!
+
+---
+
+## ✨ Features
+
+| Feature | Beschreibung |
+|---------|--------------|
+| 🧠 **KI-Analyse** | Findet automatisch ähnliche Einträge (z.B. "do", "do gmbh", "Domain Offensive GmbH") |
+| 🔌 **Multi-LLM** | OpenAI, Anthropic Claude, Azure OpenAI, Ollama (lokal & kostenlos) |
+| 👁️ **Dokument-Vorschau** | Sieh dir Dokumente an bevor du zusammenführst |
+| ✅ **Hybrid-Workflow** | KI schlägt vor, du entscheidest, System führt aus |
+| 📝 **Anpassbare Prompts** | Eigene Prompts für verschiedene Entitätstypen |
+| 📊 **Statistiken** | Dashboard mit Cleanup-Fortschritt und Zeitersparnis |
+| 🔒 **Passwort-Schutz** | Optionaler UI-Schutz mit Passwort |
+| 🗑️ **Leere entfernen** | Ein-Klick Löschung von ungenutzten Einträgen |
+
+---
+
+## 🚀 Quick Start
+
+### Option 1: Docker Hub (Empfohlen)
+
+```yaml
+# docker-compose.yml
+services:
+  backend:
+    image: webdienste/ai-paperless-organizer:backend-latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:///./data/organizer.db
+
+  frontend:
+    image: webdienste/ai-paperless-organizer:frontend-latest
+    ports:
+      - "3001:80"
+    depends_on:
+      - backend
 ```
 
-2. Docker Container starten:
 ```bash
 docker-compose up -d
 ```
 
-3. Webinterface öffnen: http://localhost:3001
+### Option 2: Selbst bauen
 
-4. In den Einstellungen konfigurieren:
-   - Paperless-ngx URL und API Token
-   - LLM Provider aktivieren und API Key hinterlegen
+```bash
+git clone https://github.com/syberx/AI-Paperless-Organizer.git
+cd AI-Paperless-Organizer
+docker-compose up -d --build
+```
 
-## Konfiguration
+### 🌐 Öffnen
 
-### Paperless-ngx
+**Webinterface:** http://localhost:3001
 
-1. Gehe zu Einstellungen -> Paperless-ngx Verbindung
-2. Gib die URL deiner Paperless Installation ein (z.B. `https://paperless.example.com`)
-3. Erstelle in Paperless unter Admin -> Auth Tokens einen neuen Token
-4. Füge den Token ein und teste die Verbindung
+---
 
-### LLM Provider
+## ⚙️ Konfiguration
 
-#### OpenAI
-- API Key von https://platform.openai.com/api-keys
-- Empfohlenes Model: `gpt-4o`
+### 1. Paperless-ngx verbinden
 
-#### Anthropic Claude
-- API Key von https://console.anthropic.com/
-- Empfohlenes Model: `claude-3-5-sonnet-20241022`
+1. Gehe zu **Einstellungen** → Paperless-ngx
+2. URL eingeben (z.B. `https://paperless.example.com`)
+3. API Token aus Paperless: *Admin → Auth Tokens → Neuer Token*
+4. **Verbindung testen**
 
-#### Ollama (Lokal)
-- Installiere Ollama: https://ollama.ai/
-- Kein API Key benötigt
-- URL: `http://host.docker.internal:11434` (für Docker)
-- Empfohlenes Model: `llama3.1` oder `mistral`
+### 2. LLM Provider einrichten
 
-#### Azure OpenAI
-- Azure OpenAI Endpoint URL
-- Deployment Name als Model
+| Provider | API Key von | Empfohlenes Modell |
+|----------|-------------|-------------------|
+| **OpenAI** | [platform.openai.com](https://platform.openai.com/api-keys) | `gpt-4o` |
+| **Anthropic** | [console.anthropic.com](https://console.anthropic.com/) | `claude-3-5-sonnet-20241022` |
+| **Ollama** | Kein Key nötig! | `llama3.1`, `mistral` |
+| **Azure** | Azure Portal | Dein Deployment |
 
-## Verwendung
+> 💡 **Tipp:** Mit Ollama kannst du komplett kostenlos und lokal arbeiten!
 
-### Korrespondenten/Tags/Dokumententypen bereinigen
+---
 
-1. Navigiere zum entsprechenden Bereich
-2. Klicke auf "Mit KI analysieren"
-3. Die KI gruppiert ähnliche Einträge und zeigt sie mit Konfidenz-Wert an
-4. Für jede Gruppe:
-   - Wähle welche Einträge zusammengeführt werden sollen
-   - Bestimme den Ziel-Eintrag (oder gib einen eigenen Namen ein)
-   - Bestätige mit "Zusammenführen"
-5. Alle Dokumente werden automatisch aktualisiert
+## 📖 Verwendung
 
-### Prompts anpassen
+### Empfohlener Workflow
 
-1. Gehe zu "Prompts"
-2. Wähle den Entitätstyp (Korrespondenten, Tags, Dokumententypen)
-3. Bearbeite den Prompt nach Bedarf
-4. Speichere die Änderungen
-5. Mit "Auf Standard zurücksetzen" kannst du den Original-Prompt wiederherstellen
+```
+1️⃣ Korrespondenten    →    2️⃣ Dokumententypen    →    3️⃣ Tags
+```
 
-## Architektur
+### Für jeden Bereich:
+
+1. **Leere entfernen** - Lösche ungenutzte Einträge (0 Dokumente)
+2. **Mit KI analysieren** - Finde ähnliche Einträge
+3. **Prüfen & Zusammenführen** - Bestätige oder ignoriere Vorschläge
+
+### Dokument-Vorschau
+
+Klicke auf 👁️ **Vorschau** bei jedem Eintrag um die zugehörigen Dokumente zu sehen - so erkennst du ob eine Gruppierung wirklich passt!
+
+---
+
+## 🏗️ Architektur
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -95,6 +150,12 @@ docker-compose up -d
 ├─────────────────────┬───────────────────────────────────────┤
 │   Frontend (React)  │           Backend (FastAPI)           │
 │   Port: 3001        │           Port: 8000                  │
+│                     │                                       │
+│   • Dashboard       │   • Paperless API Client              │
+│   • Korrespondenten │   • LLM Provider Layer                │
+│   • Tags            │   • Similarity Service                │
+│   • Dokumententypen │   • Merge Service                     │
+│   • Settings        │   • SQLite (Config/History)           │
 └─────────────────────┴───────────────────────────────────────┘
                               │
                               ▼
@@ -104,78 +165,55 @@ docker-compose up -d
                     └─────────────────┘
 ```
 
-## Tech Stack
+---
 
-- **Backend**: Python 3.11, FastAPI, SQLAlchemy, httpx
-- **Frontend**: React 18, TypeScript, Vite, TailwindCSS
-- **Database**: SQLite (für Config/History)
-- **Container**: Docker Compose
+## 🛠️ Tech Stack
 
-## Development
+| Bereich | Technologie |
+|---------|-------------|
+| **Backend** | Python 3.11, FastAPI, SQLAlchemy, httpx |
+| **Frontend** | React 18, TypeScript, Vite, TailwindCSS |
+| **Database** | SQLite |
+| **Container** | Docker, Docker Compose |
+| **LLM** | OpenAI, Anthropic, Azure, Ollama |
 
-### Backend
+---
 
-```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-```
+## 🤝 Beitragen
 
-### Frontend
+Beiträge sind willkommen! 
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
+1. Fork das Repository
+2. Erstelle einen Feature Branch (`git checkout -b feature/AmazingFeature`)
+3. Commit deine Änderungen (`git commit -m 'Add AmazingFeature'`)
+4. Push zum Branch (`git push origin feature/AmazingFeature`)
+5. Öffne einen Pull Request
 
-## Environment Variables
+---
 
-### Backend
+## 💖 Unterstützen
 
-| Variable | Beschreibung | Default |
-|----------|--------------|---------|
-| `DATABASE_URL` | SQLite Database URL | `sqlite+aiosqlite:///./data/organizer.db` |
+Wenn dir dieses Projekt gefällt, kannst du mich unterstützen:
 
-## API Endpoints
+<div align="center">
 
-### Paperless
-- `GET /api/paperless/status` - Verbindungsstatus
-- `GET /api/paperless/correspondents` - Alle Korrespondenten
-- `GET /api/paperless/tags` - Alle Tags
-- `GET /api/paperless/document-types` - Alle Dokumententypen
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20me-FF5E5B?logo=ko-fi&logoColor=white&style=for-the-badge)](https://ko-fi.com/chriswilms)
+[![PayPal](https://img.shields.io/badge/PayPal-Donate-00457C?logo=paypal&logoColor=white&style=for-the-badge)](https://www.paypal.com/paypalme/withmoney)
 
-### Correspondents
-- `GET /api/correspondents/` - Liste mit Dokumentenanzahl
-- `POST /api/correspondents/analyze` - KI-Analyse starten
-- `POST /api/correspondents/merge` - Zusammenführen
-- `GET /api/correspondents/history` - Merge-History
+</div>
 
-### Tags
-- `GET /api/tags/` - Liste mit Dokumentenanzahl
-- `POST /api/tags/analyze` - KI-Analyse starten
-- `POST /api/tags/merge` - Zusammenführen
+---
 
-### Document Types
-- `GET /api/document-types/` - Liste mit Dokumentenanzahl
-- `POST /api/document-types/analyze` - KI-Analyse starten
-- `POST /api/document-types/merge` - Zusammenführen
+## 📄 Lizenz
 
-### Settings
-- `GET/POST /api/settings/paperless` - Paperless Einstellungen
-- `GET /api/settings/llm-providers` - LLM Provider Liste
-- `PUT /api/settings/llm-providers/{id}` - Provider aktualisieren
-- `GET /api/settings/prompts` - Alle Prompts
-- `PUT /api/settings/prompts/{id}` - Prompt aktualisieren
-- `POST /api/settings/prompts/reset/{type}` - Prompt zurücksetzen
+Dieses Projekt ist unter der MIT-Lizenz lizenziert - siehe [LICENSE](LICENSE) für Details.
 
-### LLM
-- `POST /api/llm/test` - Aktiven Provider testen
-- `GET /api/llm/active-provider` - Aktiver Provider Info
+---
 
-## Lizenz
+<div align="center">
 
-MIT License
+**Made with ❤️ for the Paperless-ngx Community**
 
+[⬆ Nach oben](#-ai-paperless-organizer)
+
+</div>
