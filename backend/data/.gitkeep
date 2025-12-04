@@ -1,0 +1,2 @@
+# Diese Datei stellt sicher, dass das data/ Verzeichnis im Git existiert.
+# Die eigentliche Datenbank wird hier zur Laufzeit erstellt.
