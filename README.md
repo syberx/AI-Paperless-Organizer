@@ -39,7 +39,6 @@ Korrespondenten, Tags und Dokumententypen intelligent analysieren, gruppieren un
 
 </div>
 
-> 📷 **Screenshots folgen** - Füge deine eigenen Screenshots in `docs/screenshots/` hinzu!
 
 ---
 
