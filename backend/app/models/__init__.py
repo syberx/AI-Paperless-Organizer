@@ -2,6 +2,7 @@ from app.models.settings_model import PaperlessSettings, LLMProvider, CustomProm
 from app.models.merge_history import MergeHistory, MergeHistoryItem
 from app.models.statistics import CleanupStatistics, DailyStats
 from app.models.saved_analysis import SavedAnalysis
+from app.models.cache_model import PaperlessCache
 
 __all__ = [
     "PaperlessSettings",
@@ -13,6 +14,7 @@ __all__ = [
     "MergeHistoryItem",
     "CleanupStatistics",
     "DailyStats",
-    "SavedAnalysis"
+    "SavedAnalysis",
+    "PaperlessCache"
 ]
 

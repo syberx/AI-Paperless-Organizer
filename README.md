@@ -11,49 +11,87 @@
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20me-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/chriswilms)
 [![PayPal](https://img.shields.io/badge/PayPal-Donate-00457C?logo=paypal&logoColor=white)](https://www.paypal.com/paypalme/withmoney)
 
----
-
-**Bringe Ordnung in deine Paperless-ngx Metadaten mit der Kraft der KI!**
-
-Korrespondenten, Tags und Dokumententypen intelligent analysieren, gruppieren und zusammenführen.
-
 </div>
 
 ---
 
-## 📸 Screenshots
+## 😫 Das Problem
+
+Kennst du das? Deine **Paperless-ngx** Installation ist über die Zeit gewachsen und jetzt hast du:
+
+- **Hunderte doppelte Korrespondenten**: "Telekom", "Deutsche Telekom", "Telekom GmbH", "DTAG"...
+- **Unzählige unsinnige Tags**: Tippfehler, Test-Tags, automatisch generierte Einträge von Paperless-AI oder Paperless-GPT
+- **Chaos bei Dokumententypen**: "Rechnung", "Invoice", "Rechnungen", "rechnung"...
+
+Tools wie **Paperless-AI**, **Paperless-GPT** oder einfach jahrelange Nutzung hinterlassen ein Metadaten-Chaos, das manuell kaum zu bereinigen ist.
+
+## ✨ Die Lösung
+
+**AI Paperless Organizer** analysiert deine gesamten Metadaten mit KI und schlägt intelligente Zusammenführungen vor:
 
 <div align="center">
 
-### Dashboard
-![Dashboard](docs/screenshots/dashboard.png)
-*Übersicht mit Statistiken und empfohlenem Workflow*
-
-### KI-Analyse
-![Analyse](docs/screenshots/analysis.png)
-*Intelligente Gruppierung ähnlicher Einträge mit Konfidenz-Werten*
-
-### Merge-Vorschau
-![Merge](docs/screenshots/merge.png)
-*Dokument-Vorschau vor dem Zusammenführen*
+![Dashboard](docs/screenshots/dashboard1.png)
+*Dashboard mit Statistiken und Fortschritt*
 
 </div>
 
+---
+
+## 🎯 Features
+
+### 🧠 KI-gestützte Ähnlichkeitserkennung
+Die KI findet automatisch zusammengehörige Einträge - auch bei unterschiedlichen Schreibweisen, Abkürzungen oder Tippfehlern.
+
+<div align="center">
+
+![Korrespondenten Analyse](docs/screenshots/korrespondentten.png)
+*KI gruppiert ähnliche Korrespondenten mit Konfidenz-Werten*
+
+</div>
+
+### 💾 Analyse-Ergebnisse zwischenspeichern
+KI-Analysen werden gespeichert und können **kostenlos** wieder geladen werden. So kannst du die Vorschläge in Ruhe durchgehen, ohne jedes Mal neue KI-Kosten zu verursachen.
+
+<div align="center">
+
+![Zwischenspeicher](docs/screenshots/zwischenspeicher.png)
+*Gespeicherte Analyse laden oder neue starten*
+
+</div>
+
+### 🧹 Tag Cleanup Wizard
+5-stufiger Assistent zur systematischen Tag-Bereinigung:
+
+1. **Leere Tags löschen** - Tags ohne Dokumente entfernen
+2. **Unsinnige Tags** - KI identifiziert Tippfehler, Test-Tags, Fragmente
+3. **Korrespondenten-Tags** - Tags die eigentlich Firmen/Personen sind
+4. **Dokumententyp-Tags** - Tags die eigentlich Dokumententypen sind
+5. **Ähnliche zusammenlegen** - Duplikate und Varianten zusammenführen
+
+<div align="center">
+
+![Tag Wizard](docs/screenshots/tag-wizzard.png)
+*Tag Cleanup Wizard erkennt unsinnige Tags automatisch*
+
+</div>
+
+### 📝 Prompts anpassen
+Nicht zufrieden mit den KI-Vorschlägen? Passe die Prompts an deine Bedürfnisse an! Die KI verwendet deine individuellen Anweisungen für bessere Ergebnisse.
+
+### 👁️ Dokument-Vorschau
+Unsicher ob zwei Einträge wirklich zusammengehören? Schau dir die zugehörigen Dokumente direkt an, bevor du zusammenführst.
+
+### 📊 Statistiken & Fortschritt
+Behalte den Überblick: Wie viele Einträge wurden bereinigt? Wie viel Zeit gespart? Letzte Aktivitäten auf einen Blick.
 
 ---
 
-## ✨ Features
+## ⚠️ Hinweis zum aktuellen Stand
 
-| Feature | Beschreibung |
-|---------|--------------|
-| 🧠 **KI-Analyse** | Findet automatisch ähnliche Einträge (z.B. "do", "do gmbh", "Domain Offensive GmbH") |
-| 🔌 **Multi-LLM** | OpenAI, Anthropic Claude, Azure OpenAI, Ollama (lokal & kostenlos) |
-| 👁️ **Dokument-Vorschau** | Sieh dir Dokumente an bevor du zusammenführst |
-| ✅ **Hybrid-Workflow** | KI schlägt vor, du entscheidest, System führt aus |
-| 📝 **Anpassbare Prompts** | Eigene Prompts für verschiedene Entitätstypen |
-| 📊 **Statistiken** | Dashboard mit Cleanup-Fortschritt und Zeitersparnis |
-| 🔒 **Passwort-Schutz** | Optionaler UI-Schutz mit Passwort |
-| 🗑️ **Leere entfernen** | Ein-Klick Löschung von ungenutzten Einträgen |
+> **Aktuell getestet:** OpenAI (GPT-4o, GPT-4o-mini)
+> 
+> Andere LLM-Provider (Anthropic, Ollama, Azure) sind implementiert, aber noch nicht ausführlich getestet. Bei Problemen gerne ein Issue erstellen - wir verbessern kontinuierlich!
 
 ---
 
@@ -110,20 +148,16 @@ docker-compose up -d --build
 
 ### 2. LLM Provider einrichten
 
-| Provider | API Key von | Empfohlenes Modell |
-|----------|-------------|-------------------|
-| **OpenAI** | [platform.openai.com](https://platform.openai.com/api-keys) | `gpt-4o` |
-| **Anthropic** | [console.anthropic.com](https://console.anthropic.com/) | `claude-3-5-sonnet-20241022` |
-| **Ollama** | Kein Key nötig! | `llama3.1`, `mistral` |
-| **Azure** | Azure Portal | Dein Deployment |
-
-> 💡 **Tipp:** Mit Ollama kannst du komplett kostenlos und lokal arbeiten!
+| Provider | API Key von | Empfohlenes Modell | Status |
+|----------|-------------|-------------------|--------|
+| **OpenAI** | [platform.openai.com](https://platform.openai.com/api-keys) | `gpt-4o` | ✅ Getestet |
+| **Anthropic** | [console.anthropic.com](https://console.anthropic.com/) | `claude-3-5-sonnet` | 🔄 Beta |
+| **Ollama** | Kein Key nötig! | `llama3.1` | 🔄 Beta |
+| **Azure** | Azure Portal | Dein Deployment | 🔄 Beta |
 
 ---
 
-## 📖 Verwendung
-
-### Empfohlener Workflow
+## 📖 Empfohlener Workflow
 
 ```
 1️⃣ Korrespondenten    →    2️⃣ Dokumententypen    →    3️⃣ Tags
@@ -131,13 +165,15 @@ docker-compose up -d --build
 
 ### Für jeden Bereich:
 
-1. **Leere entfernen** - Lösche ungenutzte Einträge (0 Dokumente)
-2. **Mit KI analysieren** - Finde ähnliche Einträge
-3. **Prüfen & Zusammenführen** - Bestätige oder ignoriere Vorschläge
+1. **Leere entfernen** - Ungenutzte Einträge (0 Dokumente) löschen
+2. **Mit KI analysieren** - Ähnliche Einträge finden lassen
+3. **Vorschläge prüfen** - Bei Bedarf Dokumente ansehen
+4. **Zusammenführen oder Ignorieren** - Du entscheidest!
 
-### Dokument-Vorschau
-
-Klicke auf 👁️ **Vorschau** bei jedem Eintrag um die zugehörigen Dokumente zu sehen - so erkennst du ob eine Gruppierung wirklich passt!
+### Tipps:
+- Beginne mit **Korrespondenten** - sie sind die wichtigste Basis
+- Nutze den **Tag Cleanup Wizard** für systematische Tag-Bereinigung
+- **Gespeicherte Analysen** sparen KI-Kosten beim erneuten Öffnen
 
 ---
 
@@ -151,10 +187,11 @@ Klicke auf 👁️ **Vorschau** bei jedem Eintrag um die zugehörigen Dokumente 
 │   Port: 3001        │           Port: 8000                  │
 │                     │                                       │
 │   • Dashboard       │   • Paperless API Client              │
-│   • Korrespondenten │   • LLM Provider Layer                │
+│   • Korrespondenten │   • LLM Provider (OpenAI, etc.)       │
 │   • Tags            │   • Similarity Service                │
 │   • Dokumententypen │   • Merge Service                     │
-│   • Settings        │   • SQLite (Config/History)           │
+│   • Tag Wizard      │   • SQLite (Cache/History)            │
+│   • Prompts         │                                       │
 └─────────────────────┴───────────────────────────────────────┘
                               │
                               ▼
@@ -172,7 +209,7 @@ Klicke auf 👁️ **Vorschau** bei jedem Eintrag um die zugehörigen Dokumente 
 |---------|-------------|
 | **Backend** | Python 3.11, FastAPI, SQLAlchemy, httpx |
 | **Frontend** | React 18, TypeScript, Vite, TailwindCSS |
-| **Database** | SQLite |
+| **Database** | SQLite (für Cache, History, Einstellungen) |
 | **Container** | Docker, Docker Compose |
 | **LLM** | OpenAI, Anthropic, Azure, Ollama |
 
@@ -188,11 +225,17 @@ Beiträge sind willkommen!
 4. Push zum Branch (`git push origin feature/AmazingFeature`)
 5. Öffne einen Pull Request
 
+### Issues willkommen für:
+- 🐛 Bug Reports
+- 💡 Feature Requests  
+- 🔌 Andere LLM Provider testen
+- 🌍 Übersetzungen
+
 ---
 
 ## 💖 Unterstützen
 
-Wenn dir dieses Projekt gefällt, kannst du mich unterstützen:
+Wenn dir dieses Projekt gefällt und Zeit spart, kannst du mich unterstützen:
 
 <div align="center">
 
@@ -212,6 +255,8 @@ Dieses Projekt ist unter der MIT-Lizenz lizenziert - siehe [LICENSE](LICENSE) f�
 <div align="center">
 
 **Made with ❤️ for the Paperless-ngx Community**
+
+*Endlich Ordnung in deinen Metadaten!*
 
 [⬆ Nach oben](#-ai-paperless-organizer)
 
