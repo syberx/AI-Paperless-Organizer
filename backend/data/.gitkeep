@@ -1,2 +1,4 @@
+Dieses Platzhalter-File verhindert, dass reale Paperless-Daten versehentlich mit eingecheckt werden.
+Vor einem Commit oder Docker-Build bitte sicherstellen, dass hier nur Test- oder keine Daten liegen.
 # Diese Datei stellt sicher, dass das data/ Verzeichnis im Git existiert.
 # Die eigentliche Datenbank wird hier zur Laufzeit erstellt.

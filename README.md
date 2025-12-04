@@ -155,6 +155,12 @@ docker-compose up -d --build
 | **Ollama** | Kein Key nötig! | `llama3.1` | 🔄 Beta |
 | **Azure** | Azure Portal | Dein Deployment | 🔄 Beta |
 
+### 3. Sensible Daten schützen
+
+1. **Backend-Datenbank nie committen** – dank `.gitignore` und `backend/.dockerignore` wird `backend/data/organizer.db` automatisch ausgeschlossen. Vor einem Commit kannst du mit `python scripts/sanitize_data.py` (optional `--dry-run`) alle echten SQLite-Dateien aus dem Data-Ordner entfernen.
+2. **Docker-Builds bleiben sauber** – der neue `backend/.dockerignore` verhindert, dass lokale Dumps in Images landen. Für produktive Instanzen mountest du wie gehabt ein leeres Volume (`./backend/data:/app/data`).
+3. **Screenshots** – bleiben erhalten, aber prüfe vor Veröffentlichung, ob keine vertraulichen Informationen zu sehen sind.
+
 ---
 
 ## 📖 Empfohlener Workflow

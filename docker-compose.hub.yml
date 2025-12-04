@@ -1,0 +1,30 @@
+# Docker Compose für Docker Hub Images (wie ein neuer User)
+services:
+  backend:
+    image: webdienste/ai-paperless-organizer:backend-latest
+    container_name: paperless-organizer-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/data:/app/data
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:///./data/organizer.db
+    restart: unless-stopped
+    networks:
+      - paperless-organizer-net
+
+  frontend:
+    image: webdienste/ai-paperless-organizer:frontend-latest
+    container_name: paperless-organizer-frontend
+    ports:
+      - "3001:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - paperless-organizer-net
+
+networks:
+  paperless-organizer-net:
+    driver: bridge
+
