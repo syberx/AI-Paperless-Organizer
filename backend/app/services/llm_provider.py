@@ -234,11 +234,11 @@ class LLMProviderService:
         response = await client.chat.completions.create(
             model=self.provider.model or "gpt-4o",
             messages=[
-                {"role": "system", "content": "Du bist ein hilfreicher Assistent für Dokumentenmanagement."},
+                {"role": "system", "content": "Du bist ein hilfreicher Assistent für Dokumentenmanagement. Antworte immer mit vollständigem, validem JSON."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.3,
-            max_tokens=4096
+            temperature=0.2,
+            max_tokens=16384  # Increased for large responses
         )
         
         return response.choices[0].message.content
@@ -251,7 +251,8 @@ class LLMProviderService:
         
         response = await client.messages.create(
             model=self.provider.model or "claude-3-5-sonnet-20241022",
-            max_tokens=4096,
+            max_tokens=8192,
+            system="Du bist ein hilfreicher Assistent für Dokumentenmanagement. Antworte immer mit vollständigem, validem JSON.",
             messages=[
                 {"role": "user", "content": prompt}
             ]
@@ -272,11 +273,11 @@ class LLMProviderService:
         response = await client.chat.completions.create(
             model=self.provider.model or "gpt-4",
             messages=[
-                {"role": "system", "content": "Du bist ein hilfreicher Assistent für Dokumentenmanagement."},
+                {"role": "system", "content": "Du bist ein hilfreicher Assistent für Dokumentenmanagement. Antworte immer mit vollständigem, validem JSON."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.3,
-            max_tokens=4096
+            temperature=0.2,
+            max_tokens=16384
         )
         
         return response.choices[0].message.content
@@ -398,30 +399,103 @@ class LLMProviderService:
                 # Try to fix common JSON errors
                 # 1. Remove trailing commas before } or ]
                 json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
-                # 2. Fix unescaped quotes in strings (very basic)
-                # 3. Try to close unclosed brackets
+                # 2. Remove any control characters
+                json_str = re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', json_str)
                 
+                result = None
+                parse_error = None
+                
+                # Attempt 1: Direct parse
                 try:
                     result = json.loads(json_str)
-                except json.JSONDecodeError:
-                    # Try more aggressive cleanup
-                    # Find the last valid closing brace
-                    depth = 0
-                    last_valid = 0
-                    for i, c in enumerate(json_str):
-                        if c == '{':
-                            depth += 1
-                        elif c == '}':
-                            depth -= 1
-                            if depth == 0:
-                                last_valid = i + 1
-                                break
-                    
-                    if last_valid > 0:
-                        json_str = json_str[:last_valid]
-                        result = json.loads(json_str)
-                    else:
-                        raise
+                except json.JSONDecodeError as e:
+                    parse_error = e
+                    logger.warning(f"[LLM] JSON parse attempt 1 failed: {e}")
+                
+                # Attempt 2: Find balanced JSON
+                if result is None:
+                    try:
+                        depth = 0
+                        last_valid = 0
+                        in_string = False
+                        escape_next = False
+                        
+                        for i, c in enumerate(json_str):
+                            if escape_next:
+                                escape_next = False
+                                continue
+                            if c == '\\':
+                                escape_next = True
+                                continue
+                            if c == '"' and not escape_next:
+                                in_string = not in_string
+                                continue
+                            if in_string:
+                                continue
+                            if c == '{':
+                                depth += 1
+                            elif c == '}':
+                                depth -= 1
+                                if depth == 0:
+                                    last_valid = i + 1
+                                    break
+                        
+                        if last_valid > 0:
+                            json_str = json_str[:last_valid]
+                            result = json.loads(json_str)
+                            logger.info(f"[LLM] JSON parse attempt 2 succeeded (truncated to {last_valid} chars)")
+                    except json.JSONDecodeError as e:
+                        parse_error = e
+                        logger.warning(f"[LLM] JSON parse attempt 2 failed: {e}")
+                
+                # Attempt 3: Try to extract just the groups array
+                if result is None:
+                    try:
+                        groups_match = re.search(r'"groups"\s*:\s*\[([\s\S]*?)\](?=\s*[,}]|$)', json_str)
+                        if groups_match:
+                            # Find complete group objects
+                            groups_content = groups_match.group(1)
+                            # Extract individual group objects
+                            group_objects = []
+                            depth = 0
+                            start = -1
+                            in_str = False
+                            esc = False
+                            
+                            for i, c in enumerate(groups_content):
+                                if esc:
+                                    esc = False
+                                    continue
+                                if c == '\\':
+                                    esc = True
+                                    continue
+                                if c == '"':
+                                    in_str = not in_str
+                                    continue
+                                if in_str:
+                                    continue
+                                if c == '{':
+                                    if depth == 0:
+                                        start = i
+                                    depth += 1
+                                elif c == '}':
+                                    depth -= 1
+                                    if depth == 0 and start >= 0:
+                                        try:
+                                            obj = json.loads(groups_content[start:i+1])
+                                            group_objects.append(obj)
+                                        except:
+                                            pass
+                                        start = -1
+                            
+                            if group_objects:
+                                result = {"groups": group_objects}
+                                logger.info(f"[LLM] JSON parse attempt 3 succeeded, extracted {len(group_objects)} groups")
+                    except Exception as e:
+                        logger.warning(f"[LLM] JSON parse attempt 3 failed: {e}")
+                
+                if result is None:
+                    raise parse_error or json.JSONDecodeError("Could not parse JSON", json_str, 0)
                 
                 # Enrich groups with IDs from original items
                 items_dict = {item["name"]: item for item in items}
