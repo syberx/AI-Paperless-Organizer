@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { 
   Sparkles, Loader2, Tag, AlertCircle, Trash2,
   ChevronRight, ChevronLeft, Check, Users, FileText, Layers, RefreshCw, Brain,
-  Shield, Plus, X, Ban
+  Shield, Plus, X, Ban, Eye, ExternalLink
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
@@ -138,6 +138,11 @@ export default function TagCleanupWizard() {
     warning?: string
   } | null>(null)
   const [loadingEstimate, setLoadingEstimate] = useState(false)
+  
+  // Document preview in wizard steps
+  const [previewTagId, setPreviewTagId] = useState<number | null>(null)
+  const [previewDocs, setPreviewDocs] = useState<api.DocumentPreview[]>([])
+  const [loadingPreview, setLoadingPreview] = useState(false)
 
   useEffect(() => {
     loadInitialData()
@@ -145,6 +150,87 @@ export default function TagCleanupWizard() {
     loadIgnoredItemIds()
     loadSavedAnalysisInfo()
   }, [])
+  
+  // Load document previews for a tag
+  const toggleDocPreview = async (tagId: number) => {
+    if (previewTagId === tagId) {
+      setPreviewTagId(null)
+      setPreviewDocs([])
+      return
+    }
+    
+    setPreviewTagId(tagId)
+    setLoadingPreview(true)
+    try {
+      const docs = await api.getDocumentPreviews({ tag_id: tagId, limit: 4 })
+      setPreviewDocs(docs)
+    } catch (e) {
+      console.error('Failed to load document previews:', e)
+      setPreviewDocs([])
+    } finally {
+      setLoadingPreview(false)
+    }
+  }
+  
+  // Reusable document preview component
+  const renderDocPreview = (tagId: number, docCount: number) => {
+    if (previewTagId !== tagId) return null
+    
+    return (
+      <div className="mt-2 p-3 rounded bg-surface-800/50 border border-surface-700">
+        {loadingPreview ? (
+          <div className="flex items-center justify-center py-3">
+            <Loader2 className="w-4 h-4 animate-spin text-primary-400" />
+            <span className="ml-2 text-sm text-surface-400">Lade Dokumente...</span>
+          </div>
+        ) : previewDocs.length > 0 ? (
+          <div>
+            <div className="flex items-center gap-2 mb-2 text-xs text-surface-400">
+              <Eye className="w-3 h-3" />
+              <span>Vorschau ({previewDocs.length} von {docCount})</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {previewDocs.map(doc => (
+                <a
+                  key={doc.id}
+                  href={doc.document_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex items-center gap-2 p-2 rounded bg-surface-700/50 hover:bg-surface-700 
+                            border border-surface-600/30 hover:border-primary-500/50 transition-all group"
+                >
+                  <div className="w-8 h-8 rounded bg-surface-600 overflow-hidden flex-shrink-0">
+                    <img 
+                      src={doc.thumbnail_url}
+                      alt=""
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = 'none'
+                      }}
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-surface-200 truncate group-hover:text-primary-300">
+                      {doc.title}
+                    </p>
+                    <p className="text-[10px] text-surface-500">
+                      {new Date(doc.created).toLocaleDateString('de-DE')}
+                    </p>
+                  </div>
+                  <ExternalLink className="w-3 h-3 text-surface-500 group-hover:text-primary-400 flex-shrink-0" />
+                </a>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="text-center py-2 text-sm text-surface-400">
+            Keine Dokumente gefunden
+          </div>
+        )}
+      </div>
+    )
+  }
   
   const loadSavedAnalysisInfo = async () => {
     try {
@@ -713,41 +799,58 @@ export default function TagCleanupWizard() {
               {nonsenseTags
                 .filter(tag => !ignoredItemIds.nonsense.includes(tag.id))
                 .map(tag => (
-                <div key={tag.id} className="flex items-start gap-3 p-3 rounded bg-surface-700/30 hover:bg-surface-700/50">
-                  <input
-                    type="checkbox"
-                    checked={selectedNonsense.has(tag.id)}
-                    onChange={(e) => {
-                      const newSet = new Set(selectedNonsense)
-                      if (e.target.checked) newSet.add(tag.id)
-                      else newSet.delete(tag.id)
-                      setSelectedNonsense(newSet)
-                    }}
-                    className="w-4 h-4 mt-1 cursor-pointer"
-                  />
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <Tag className="w-4 h-4 text-amber-400" />
-                      <span className="text-surface-200 font-medium">{tag.name}</span>
-                      <span className="text-surface-500 text-sm">({tag.document_count} Dok.)</span>
-                      <span className="text-xs text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded">
-                        {Math.round(tag.confidence * 100)}%
-                      </span>
+                <div key={tag.id} className="p-3 rounded bg-surface-700/30 hover:bg-surface-700/50">
+                  <div className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedNonsense.has(tag.id)}
+                      onChange={(e) => {
+                        const newSet = new Set(selectedNonsense)
+                        if (e.target.checked) newSet.add(tag.id)
+                        else newSet.delete(tag.id)
+                        setSelectedNonsense(newSet)
+                      }}
+                      className="w-4 h-4 mt-1 cursor-pointer"
+                    />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Tag className="w-4 h-4 text-amber-400" />
+                        <span className="text-surface-200 font-medium">{tag.name}</span>
+                        <span className="text-surface-500 text-sm">({tag.document_count} Dok.)</span>
+                        <span className="text-xs text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded">
+                          {Math.round(tag.confidence * 100)}%
+                        </span>
+                        {tag.document_count > 0 && (
+                          <button
+                            onClick={() => toggleDocPreview(tag.id)}
+                            className={clsx(
+                              "text-xs px-2 py-0.5 rounded flex items-center gap-1 transition-colors",
+                              previewTagId === tag.id 
+                                ? "bg-primary-500/20 text-primary-300" 
+                                : "bg-surface-600/50 text-surface-400 hover:text-primary-300"
+                            )}
+                          >
+                            <Eye className="w-3 h-3" />
+                            Dokumente
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-sm text-surface-400 mt-1">{tag.reason}</p>
+                      {renderDocPreview(tag.id, tag.document_count)}
                     </div>
-                    <p className="text-sm text-surface-400 mt-1">{tag.reason}</p>
+                    <button
+                      onClick={() => handleIgnoreItem(tag.id, tag.name, 'nonsense')}
+                      disabled={ignoringItemId === tag.id}
+                      className="p-1.5 rounded text-surface-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                      title="Dauerhaft ignorieren"
+                    >
+                      {ignoringItemId === tag.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Ban className="w-4 h-4" />
+                      )}
+                    </button>
                   </div>
-                  <button
-                    onClick={() => handleIgnoreItem(tag.id, tag.name, 'nonsense')}
-                    disabled={ignoringItemId === tag.id}
-                    className="p-1.5 rounded text-surface-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                    title="Dauerhaft ignorieren"
-                  >
-                    {ignoringItemId === tag.id ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Ban className="w-4 h-4" />
-                    )}
-                  </button>
                 </div>
               ))}
               {nonsenseTags.filter(t => !ignoredItemIds.nonsense.includes(t.id)).length === 0 && (
@@ -820,45 +923,62 @@ export default function TagCleanupWizard() {
               {correspondentMatches
                 .filter(match => !ignoredItemIds.correspondent.includes(match.tag_id))
                 .map(match => (
-                <div key={match.tag_id} className="flex items-start gap-3 p-3 rounded bg-surface-700/30 hover:bg-surface-700/50">
-                  <input
-                    type="checkbox"
-                    checked={selectedCorrespondentMatches.has(match.tag_id)}
-                    onChange={(e) => {
-                      const newSet = new Set(selectedCorrespondentMatches)
-                      if (e.target.checked) newSet.add(match.tag_id)
-                      else newSet.delete(match.tag_id)
-                      setSelectedCorrespondentMatches(newSet)
-                    }}
-                    className="w-4 h-4 mt-1 cursor-pointer"
-                  />
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <Tag className="w-4 h-4 text-purple-400" />
-                      <span className="text-surface-200">Tag: {match.tag_name}</span>
-                      <span className="text-surface-500 text-sm">({match.document_count} Dok.)</span>
+                <div key={match.tag_id} className="p-3 rounded bg-surface-700/30 hover:bg-surface-700/50">
+                  <div className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedCorrespondentMatches.has(match.tag_id)}
+                      onChange={(e) => {
+                        const newSet = new Set(selectedCorrespondentMatches)
+                        if (e.target.checked) newSet.add(match.tag_id)
+                        else newSet.delete(match.tag_id)
+                        setSelectedCorrespondentMatches(newSet)
+                      }}
+                      className="w-4 h-4 mt-1 cursor-pointer"
+                    />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Tag className="w-4 h-4 text-purple-400" />
+                        <span className="text-surface-200">Tag: {match.tag_name}</span>
+                        <span className="text-surface-500 text-sm">({match.document_count} Dok.)</span>
+                        {match.document_count > 0 && (
+                          <button
+                            onClick={() => toggleDocPreview(match.tag_id)}
+                            className={clsx(
+                              "text-xs px-2 py-0.5 rounded flex items-center gap-1 transition-colors",
+                              previewTagId === match.tag_id 
+                                ? "bg-primary-500/20 text-primary-300" 
+                                : "bg-surface-600/50 text-surface-400 hover:text-primary-300"
+                            )}
+                          >
+                            <Eye className="w-3 h-3" />
+                            Dokumente
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 mt-1 text-sm">
+                        <Users className="w-4 h-4 text-blue-400" />
+                        <span className="text-surface-400">
+                          → Korrespondent: {match.suggested_correspondent}
+                          {match.correspondent_exists && <span className="text-emerald-400 ml-1">(existiert)</span>}
+                        </span>
+                      </div>
+                      <p className="text-sm text-surface-500 mt-1">{match.reason}</p>
+                      {renderDocPreview(match.tag_id, match.document_count)}
                     </div>
-                    <div className="flex items-center gap-2 mt-1 text-sm">
-                      <Users className="w-4 h-4 text-blue-400" />
-                      <span className="text-surface-400">
-                        → Korrespondent: {match.suggested_correspondent}
-                        {match.correspondent_exists && <span className="text-emerald-400 ml-1">(existiert)</span>}
-                      </span>
-                    </div>
-                    <p className="text-sm text-surface-500 mt-1">{match.reason}</p>
+                    <button
+                      onClick={() => handleIgnoreItem(match.tag_id, match.tag_name, 'correspondent')}
+                      disabled={ignoringItemId === match.tag_id}
+                      className="p-1.5 rounded text-surface-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                      title="Dauerhaft ignorieren"
+                    >
+                      {ignoringItemId === match.tag_id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Ban className="w-4 h-4" />
+                      )}
+                    </button>
                   </div>
-                  <button
-                    onClick={() => handleIgnoreItem(match.tag_id, match.tag_name, 'correspondent')}
-                    disabled={ignoringItemId === match.tag_id}
-                    className="p-1.5 rounded text-surface-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                    title="Dauerhaft ignorieren"
-                  >
-                    {ignoringItemId === match.tag_id ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Ban className="w-4 h-4" />
-                    )}
-                  </button>
                 </div>
               ))}
               {correspondentMatches.filter(m => !ignoredItemIds.correspondent.includes(m.tag_id)).length === 0 && (
@@ -931,45 +1051,62 @@ export default function TagCleanupWizard() {
               {docTypeMatches
                 .filter(match => !ignoredItemIds.doctype.includes(match.tag_id))
                 .map(match => (
-                <div key={match.tag_id} className="flex items-start gap-3 p-3 rounded bg-surface-700/30 hover:bg-surface-700/50">
-                  <input
-                    type="checkbox"
-                    checked={selectedDocTypeMatches.has(match.tag_id)}
-                    onChange={(e) => {
-                      const newSet = new Set(selectedDocTypeMatches)
-                      if (e.target.checked) newSet.add(match.tag_id)
-                      else newSet.delete(match.tag_id)
-                      setSelectedDocTypeMatches(newSet)
-                    }}
-                    className="w-4 h-4 mt-1 cursor-pointer"
-                  />
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <Tag className="w-4 h-4 text-purple-400" />
-                      <span className="text-surface-200">Tag: {match.tag_name}</span>
-                      <span className="text-surface-500 text-sm">({match.document_count} Dok.)</span>
+                <div key={match.tag_id} className="p-3 rounded bg-surface-700/30 hover:bg-surface-700/50">
+                  <div className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedDocTypeMatches.has(match.tag_id)}
+                      onChange={(e) => {
+                        const newSet = new Set(selectedDocTypeMatches)
+                        if (e.target.checked) newSet.add(match.tag_id)
+                        else newSet.delete(match.tag_id)
+                        setSelectedDocTypeMatches(newSet)
+                      }}
+                      className="w-4 h-4 mt-1 cursor-pointer"
+                    />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Tag className="w-4 h-4 text-purple-400" />
+                        <span className="text-surface-200">Tag: {match.tag_name}</span>
+                        <span className="text-surface-500 text-sm">({match.document_count} Dok.)</span>
+                        {match.document_count > 0 && (
+                          <button
+                            onClick={() => toggleDocPreview(match.tag_id)}
+                            className={clsx(
+                              "text-xs px-2 py-0.5 rounded flex items-center gap-1 transition-colors",
+                              previewTagId === match.tag_id 
+                                ? "bg-primary-500/20 text-primary-300" 
+                                : "bg-surface-600/50 text-surface-400 hover:text-primary-300"
+                            )}
+                          >
+                            <Eye className="w-3 h-3" />
+                            Dokumente
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 mt-1 text-sm">
+                        <FileText className="w-4 h-4 text-amber-400" />
+                        <span className="text-surface-400">
+                          → Dokumententyp: {match.suggested_doctype}
+                          {match.doctype_exists && <span className="text-emerald-400 ml-1">(existiert)</span>}
+                        </span>
+                      </div>
+                      <p className="text-sm text-surface-500 mt-1">{match.reason}</p>
+                      {renderDocPreview(match.tag_id, match.document_count)}
                     </div>
-                    <div className="flex items-center gap-2 mt-1 text-sm">
-                      <FileText className="w-4 h-4 text-amber-400" />
-                      <span className="text-surface-400">
-                        → Dokumententyp: {match.suggested_doctype}
-                        {match.doctype_exists && <span className="text-emerald-400 ml-1">(existiert)</span>}
-                      </span>
-                    </div>
-                    <p className="text-sm text-surface-500 mt-1">{match.reason}</p>
+                    <button
+                      onClick={() => handleIgnoreItem(match.tag_id, match.tag_name, 'doctype')}
+                      disabled={ignoringItemId === match.tag_id}
+                      className="p-1.5 rounded text-surface-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                      title="Dauerhaft ignorieren"
+                    >
+                      {ignoringItemId === match.tag_id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Ban className="w-4 h-4" />
+                      )}
+                    </button>
                   </div>
-                  <button
-                    onClick={() => handleIgnoreItem(match.tag_id, match.tag_name, 'doctype')}
-                    disabled={ignoringItemId === match.tag_id}
-                    className="p-1.5 rounded text-surface-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                    title="Dauerhaft ignorieren"
-                  >
-                    {ignoringItemId === match.tag_id ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Ban className="w-4 h-4" />
-                    )}
-                  </button>
                 </div>
               ))}
               {docTypeMatches.filter(m => !ignoredItemIds.doctype.includes(m.tag_id)).length === 0 && (

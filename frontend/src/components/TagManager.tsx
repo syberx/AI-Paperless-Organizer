@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { Sparkles, RefreshCw, Loader2, Tag, AlertCircle, Info, Trash2, X, Wand2, Clock, Check, History, Zap } from 'lucide-react'
+import { Sparkles, RefreshCw, Loader2, Tag, AlertCircle, Info, Trash2, X, Wand2, Clock, Check, History, Zap, ChevronDown, ChevronUp, ExternalLink, Eye } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
 import MergePreview from './MergePreview'
@@ -66,12 +66,38 @@ export default function TagManager() {
   const [showCleanupModal, setShowCleanupModal] = useState(false)
   const [cleaningUp, setCleaningUp] = useState(false)
   const [cleanupResult, setCleanupResult] = useState<{ deleted: number; total: number; errors?: string[] } | null>(null)
+  
+  // Document preview in list view
+  const [expandedRow, setExpandedRow] = useState<number | null>(null)
+  const [previewDocs, setPreviewDocs] = useState<api.DocumentPreview[]>([])
+  const [loadingPreview, setLoadingPreview] = useState(false)
 
   // Update time display every 10 seconds
   useEffect(() => {
     const interval = setInterval(() => setTick(t => t + 1), 10000)
     return () => clearInterval(interval)
   }, [])
+  
+  // Load document previews when expanding a row
+  const handleRowClick = async (tagId: number) => {
+    if (expandedRow === tagId) {
+      setExpandedRow(null)
+      setPreviewDocs([])
+      return
+    }
+    
+    setExpandedRow(tagId)
+    setLoadingPreview(true)
+    try {
+      const docs = await api.getDocumentPreviews({ tag_id: tagId, limit: 6 })
+      setPreviewDocs(docs)
+    } catch (e) {
+      console.error('Failed to load document previews:', e)
+      setPreviewDocs([])
+    } finally {
+      setLoadingPreview(false)
+    }
+  }
 
   useEffect(() => {
     loadTags()
@@ -474,24 +500,96 @@ export default function TagManager() {
                 <tr className="border-b border-surface-700">
                   <th className="px-4 py-3 text-left text-sm font-medium text-surface-400">Name</th>
                   <th className="px-4 py-3 text-right text-sm font-medium text-surface-400">Dokumente</th>
+                  <th className="px-4 py-3 w-10"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-surface-700/50">
                 {tags.map((tag) => (
-                  <tr 
-                    key={tag.id}
-                    className="hover:bg-surface-700/30 transition-colors"
-                  >
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <Tag className="w-4 h-4 text-purple-400" />
-                        <span className="text-surface-100">{tag.name}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-right text-surface-400">
-                      {tag.document_count}
-                    </td>
-                  </tr>
+                  <React.Fragment key={tag.id}>
+                    <tr 
+                      onClick={() => tag.document_count > 0 && handleRowClick(tag.id)}
+                      className={clsx(
+                        "transition-colors",
+                        tag.document_count > 0 
+                          ? "hover:bg-surface-700/30 cursor-pointer" 
+                          : "opacity-60",
+                        expandedRow === tag.id && "bg-surface-700/40"
+                      )}
+                    >
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <Tag className="w-4 h-4 text-purple-400" />
+                          <span className="text-surface-100">{tag.name}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-right text-surface-400">
+                        {tag.document_count}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {tag.document_count > 0 && (
+                          expandedRow === tag.id 
+                            ? <ChevronUp className="w-4 h-4 text-surface-400" />
+                            : <ChevronDown className="w-4 h-4 text-surface-400" />
+                        )}
+                      </td>
+                    </tr>
+                    {expandedRow === tag.id && (
+                      <tr>
+                        <td colSpan={3} className="px-4 py-4 bg-surface-800/50">
+                          {loadingPreview ? (
+                            <div className="flex items-center justify-center py-4">
+                              <Loader2 className="w-5 h-5 animate-spin text-primary-400" />
+                              <span className="ml-2 text-surface-400">Lade Dokumente...</span>
+                            </div>
+                          ) : previewDocs.length > 0 ? (
+                            <div>
+                              <div className="flex items-center gap-2 mb-3 text-sm text-surface-400">
+                                <Eye className="w-4 h-4" />
+                                <span>Vorschau ({Math.min(previewDocs.length, 6)} von {tag.document_count} Dokumenten)</span>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                                {previewDocs.map(doc => (
+                                  <a
+                                    key={doc.id}
+                                    href={doc.document_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="flex items-center gap-2 p-2 rounded bg-surface-700/50 hover:bg-surface-700 
+                                              border border-surface-600/30 hover:border-primary-500/50 transition-all group"
+                                  >
+                                    <div className="w-10 h-10 rounded bg-surface-600 overflow-hidden flex-shrink-0">
+                                      <img 
+                                        src={doc.thumbnail_url}
+                                        alt=""
+                                        className="w-full h-full object-cover"
+                                        onError={(e) => {
+                                          (e.target as HTMLImageElement).style.display = 'none'
+                                        }}
+                                      />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-xs text-surface-200 truncate group-hover:text-primary-300">
+                                        {doc.title}
+                                      </p>
+                                      <p className="text-[10px] text-surface-500">
+                                        {new Date(doc.created).toLocaleDateString('de-DE')}
+                                      </p>
+                                    </div>
+                                    <ExternalLink className="w-3 h-3 text-surface-500 group-hover:text-primary-400 flex-shrink-0" />
+                                  </a>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-center py-4 text-surface-400">
+                              Keine Dokumente gefunden
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>
