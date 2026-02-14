@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 
 from app.services.paperless_client import PaperlessClient, get_paperless_client
-from app.services.ocr_service import OcrService, batch_state, DEFAULT_OLLAMA_URL, DEFAULT_OCR_MODEL
+from app.services.ocr_service import OcrService, batch_state, load_review_queue, save_review_queue, DEFAULT_OLLAMA_URL, DEFAULT_OCR_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -344,3 +344,46 @@ async def ensure_ocr_tags(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Tag-Fehler: {str(e)}")
+
+
+# --- Review Queue ---
+
+@router.get("/review/queue")
+async def get_review_queue():
+    """Get all documents in the OCR review queue."""
+    queue = load_review_queue()
+    return {"items": queue, "count": len(queue)}
+
+
+@router.post("/review/apply/{document_id}")
+async def apply_review_item(
+    document_id: int,
+    client: PaperlessClient = Depends(get_paperless_client)
+):
+    """Apply review queue item (accept the new OCR text)."""
+    queue = load_review_queue()
+    item = next((q for q in queue if q["document_id"] == document_id), None)
+    if not item:
+        raise HTTPException(status_code=404, detail="Dokument nicht in Review Queue")
+    
+    try:
+        service = get_ocr_service()
+        await service.apply_ocr_result(client, document_id, item["new_content"], True)
+        # Remove from queue
+        queue = [q for q in queue if q["document_id"] != document_id]
+        save_review_queue(queue)
+        return {"applied": True, "document_id": document_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/review/dismiss/{document_id}")
+async def dismiss_review_item(document_id: int):
+    """Dismiss review queue item (discard the new OCR text)."""
+    queue = load_review_queue()
+    new_queue = [q for q in queue if q["document_id"] != document_id]
+    if len(new_queue) == len(queue):
+        raise HTTPException(status_code=404, detail="Dokument nicht in Review Queue")
+    save_review_queue(new_queue)
+    return {"dismissed": True, "document_id": document_id}
+

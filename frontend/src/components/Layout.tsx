@@ -14,7 +14,9 @@ import {
   Bug,
   Lock,
   ScanLine,
-  Trash2
+  Trash2,
+  FileSearch,
+  AlertCircle
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
@@ -30,7 +32,9 @@ const baseNavigation = [
   { name: '3. Tags', href: '/tags', icon: Tags, step: 3, alwaysShow: true },
   { name: 'Prompts', href: '/prompts', icon: MessageSquare, step: null, alwaysShow: true },
   { name: 'Einstellungen', href: '/settings', icon: Settings, step: null, alwaysShow: true },
-  { name: 'OCR', href: '/ocr', icon: ScanLine, step: null, alwaysShow: true },
+  { name: 'OCR Batch', href: '/ocr', icon: ScanLine, step: null, alwaysShow: true },
+  { name: 'Einzel-OCR', href: '/ocr/single', icon: FileSearch, step: null, alwaysShow: true },
+  { name: 'Prüfen', href: '/ocr/review', icon: AlertCircle, step: null, alwaysShow: true, badgeKey: 'review' },
   { name: 'Aufräumen', href: '/cleanup', icon: Trash2, step: null, alwaysShow: true },
   { name: 'Debug', href: '/debug', icon: Bug, step: null, alwaysShow: false, requiresDebug: true },
 ]
@@ -45,6 +49,7 @@ export default function Layout({ children }: LayoutProps) {
   const [passwordRequired, setPasswordRequired] = useState(false)
   const [passwordInput, setPasswordInput] = useState('')
   const [passwordError, setPasswordError] = useState(false)
+  const [reviewCount, setReviewCount] = useState(0)
 
   useEffect(() => {
     // First check if password is required
@@ -81,6 +86,13 @@ export default function Layout({ children }: LayoutProps) {
           setLlmConfigured(llm.configured)
         })
       })
+
+    // Load review count
+    api.getReviewQueue().then(r => setReviewCount(r.count)).catch(() => { })
+    const reviewPoll = setInterval(() => {
+      api.getReviewQueue().then(r => setReviewCount(r.count)).catch(() => { })
+    }, 15000)
+    return () => clearInterval(reviewPoll)
   }, [])
 
   const handlePasswordSubmit = async () => {
@@ -235,7 +247,12 @@ export default function Layout({ children }: LayoutProps) {
                 )}
               >
                 <Icon className={clsx('w-5 h-5', isActive && 'text-primary-400')} />
-                <span className="font-medium">{item.name}</span>
+                <span className="font-medium flex-1">{item.name}</span>
+                {(item as any).badgeKey === 'review' && reviewCount > 0 && (
+                  <span className="ml-auto px-2 py-0.5 text-xs font-bold bg-amber-500/20 text-amber-300 rounded-full border border-amber-500/30">
+                    {reviewCount}
+                  </span>
+                )}
               </Link>
             )
           })}

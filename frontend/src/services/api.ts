@@ -540,3 +540,30 @@ export const deleteJunkDocuments = (ids: number[]) =>
     method: 'POST',
     body: JSON.stringify({ document_ids: ids })
   })
+
+// --- OCR Review Queue API ---
+
+export interface ReviewQueueItem {
+  document_id: number
+  title: string
+  old_content: string
+  new_content: string
+  old_length: number
+  new_length: number
+  ratio: number
+  timestamp: string
+}
+
+export interface ReviewQueueResponse {
+  items: ReviewQueueItem[]
+  count: number
+}
+
+export const getReviewQueue = () =>
+  fetchJson<ReviewQueueResponse>('/ocr/review/queue')
+
+export const applyReviewItem = (documentId: number) =>
+  fetchJson<{ applied: boolean }>(`/ocr/review/apply/${documentId}`, { method: 'POST' })
+
+export const dismissReviewItem = (documentId: number) =>
+  fetchJson<{ dismissed: boolean }>(`/ocr/review/dismiss/${documentId}`, { method: 'POST' })
