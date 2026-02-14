@@ -10,11 +10,11 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
       ...options?.headers,
     },
   })
-  
+
   if (!response.ok) {
     throw new Error(`API Error: ${response.status} ${response.statusText}`)
   }
-  
+
   return response.json()
 }
 
@@ -24,7 +24,7 @@ export const checkHealth = () => fetchJson<{ status: string }>('/health')
 // Paperless Connection
 export const getPaperlessStatus = () => fetchJson<{ connected: boolean; url?: string; error?: string }>('/paperless/status')
 
-export const refreshPaperlessCache = () => 
+export const refreshPaperlessCache = () =>
   fetchJson<{ success: boolean; correspondents: number; tags: number; document_types: number; message: string }>('/paperless/refresh-cache', { method: 'POST' })
 
 // Document Previews
@@ -37,25 +37,25 @@ export interface DocumentPreview {
   download_url: string
 }
 
-export const getDocumentPreviews = (params: { 
+export const getDocumentPreviews = (params: {
   correspondent_id?: number
   tag_id?: number
   document_type_id?: number
-  limit?: number 
+  limit?: number
 }) => {
   const searchParams = new URLSearchParams()
   if (params.correspondent_id) searchParams.set('correspondent_id', String(params.correspondent_id))
   if (params.tag_id) searchParams.set('tag_id', String(params.tag_id))
   if (params.document_type_id) searchParams.set('document_type_id', String(params.document_type_id))
   if (params.limit) searchParams.set('limit', String(params.limit))
-  
+
   return fetchJson<DocumentPreview[]>(`/paperless/document-previews?${searchParams.toString()}`)
 }
 
 // Settings
 export const getPaperlessSettings = () => fetchJson<{ url: string; api_token: string; is_configured: boolean }>('/settings/paperless')
 
-export const savePaperlessSettings = (data: { url: string; api_token: string }) => 
+export const savePaperlessSettings = (data: { url: string; api_token: string }) =>
   fetchJson<{ success: boolean }>('/settings/paperless', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -63,7 +63,7 @@ export const savePaperlessSettings = (data: { url: string; api_token: string }) 
 
 export const getLLMProviders = () => fetchJson<any[]>('/settings/llm-providers')
 
-export const updateLLMProvider = (id: number, data: any) => 
+export const updateLLMProvider = (id: number, data: any) =>
   fetchJson<{ success: boolean }>(`/settings/llm-providers/${id}`, {
     method: 'PUT',
     body: JSON.stringify(data),
@@ -71,19 +71,19 @@ export const updateLLMProvider = (id: number, data: any) =>
 
 export const getPrompts = () => fetchJson<any[]>('/settings/prompts')
 
-export const updatePrompt = (id: number, data: any) => 
+export const updatePrompt = (id: number, data: any) =>
   fetchJson<{ success: boolean }>(`/settings/prompts/${id}`, {
     method: 'PUT',
     body: JSON.stringify(data),
   })
 
-export const resetPrompt = (entityType: string) => 
+export const resetPrompt = (entityType: string) =>
   fetchJson<{ success: boolean; prompt_template: string }>(`/settings/prompts/reset/${entityType}`, {
     method: 'POST',
   })
 
 // Ignored Tags
-export const getIgnoredTags = () => 
+export const getIgnoredTags = () =>
   fetchJson<{ id: number; pattern: string; reason: string; is_regex: boolean }[]>('/settings/ignored-tags')
 
 export const addIgnoredTag = (data: { pattern: string; reason?: string; is_regex?: boolean }) =>
@@ -106,11 +106,11 @@ export interface AppSettingsResponse {
 export const getAppSettings = () =>
   fetchJson<AppSettingsResponse>('/settings/app')
 
-export const updateAppSettings = (data: { 
+export const updateAppSettings = (data: {
   password_enabled?: boolean
   password?: string
   show_debug_menu?: boolean
-  sidebar_compact?: boolean 
+  sidebar_compact?: boolean
 }) =>
   fetchJson<{ success: boolean }>('/settings/app', {
     method: 'PUT',
@@ -129,16 +129,16 @@ export const removePassword = () =>
 // Correspondents
 export const getCorrespondents = () => fetchJson<any[]>('/correspondents/')
 
-export const estimateCorrespondents = () => 
+export const estimateCorrespondents = () =>
   fetchJson<{ items_info?: string; estimated_tokens: number; token_limit?: number; model?: string; recommended_batches: number; warning?: string }>('/correspondents/estimate')
 
-export const analyzeCorrespondents = (batchSize: number = 200) => 
-  fetchJson<{ groups: any[]; stats?: any; error?: string }>('/correspondents/analyze', { 
+export const analyzeCorrespondents = (batchSize: number = 200) =>
+  fetchJson<{ groups: any[]; stats?: any; error?: string }>('/correspondents/analyze', {
     method: 'POST',
     body: JSON.stringify({ batch_size: batchSize })
   })
 
-export const mergeCorrespondents = (data: { target_id: number; target_name: string; source_ids: number[] }) => 
+export const mergeCorrespondents = (data: { target_id: number; target_name: string; source_ids: number[] }) =>
   fetchJson<any>('/correspondents/merge', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -146,10 +146,10 @@ export const mergeCorrespondents = (data: { target_id: number; target_name: stri
 
 export const getCorrespondentHistory = () => fetchJson<any[]>('/correspondents/history')
 
-export const getEmptyCorrespondents = () => 
+export const getEmptyCorrespondents = () =>
   fetchJson<{ count: number; items: any[] }>('/correspondents/empty')
 
-export const deleteEmptyCorrespondents = () => 
+export const deleteEmptyCorrespondents = () =>
   fetchJson<{ deleted: number; total: number; errors?: string[] }>('/correspondents/empty', { method: 'DELETE' })
 
 export const deleteCorrespondent = (id: number) =>
@@ -187,24 +187,24 @@ export const markCorrespondentGroupProcessed = (groupIndex: number) =>
 // Tags
 export const getTags = () => fetchJson<any[]>('/tags/')
 
-export const estimateTags = (analysisType: 'nonsense' | 'correspondent' | 'doctype' | 'similar' = 'nonsense') => 
-  fetchJson<{ 
+export const estimateTags = (analysisType: 'nonsense' | 'correspondent' | 'doctype' | 'similar' = 'nonsense') =>
+  fetchJson<{
     analysis_type: string
     items_info: string
     estimated_tokens: number
     token_limit: number
     model: string
     recommended_batches: number
-    warning?: string 
+    warning?: string
   }>(`/tags/estimate?analysis_type=${analysisType}`)
 
-export const analyzeTags = (batchSize: number = 200) => 
-  fetchJson<{ groups: any[]; stats?: any; error?: string }>('/tags/analyze', { 
+export const analyzeTags = (batchSize: number = 200) =>
+  fetchJson<{ groups: any[]; stats?: any; error?: string }>('/tags/analyze', {
     method: 'POST',
     body: JSON.stringify({ batch_size: batchSize })
   })
 
-export const mergeTags = (data: { target_id: number; target_name: string; source_ids: number[] }) => 
+export const mergeTags = (data: { target_id: number; target_name: string; source_ids: number[] }) =>
   fetchJson<any>('/tags/merge', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -212,10 +212,10 @@ export const mergeTags = (data: { target_id: number; target_name: string; source
 
 export const getTagHistory = () => fetchJson<any[]>('/tags/history')
 
-export const getEmptyTags = () => 
+export const getEmptyTags = () =>
   fetchJson<{ count: number; items: any[] }>('/tags/empty')
 
-export const deleteEmptyTags = () => 
+export const deleteEmptyTags = () =>
   fetchJson<{ deleted: number; total: number; errors?: string[] }>('/tags/empty', { method: 'DELETE' })
 
 export const deleteTag = (tagId: number) =>
@@ -286,16 +286,16 @@ export const markTagGroupProcessed = (groupIndex: number) =>
 // Document Types
 export const getDocumentTypes = () => fetchJson<any[]>('/document-types/')
 
-export const estimateDocumentTypes = () => 
+export const estimateDocumentTypes = () =>
   fetchJson<{ items_info?: string; estimated_tokens: number; token_limit?: number; model?: string; recommended_batches: number; warning?: string }>('/document-types/estimate')
 
-export const analyzeDocumentTypes = (batchSize: number = 200) => 
-  fetchJson<{ groups: any[]; stats?: any; error?: string }>('/document-types/analyze', { 
+export const analyzeDocumentTypes = (batchSize: number = 200) =>
+  fetchJson<{ groups: any[]; stats?: any; error?: string }>('/document-types/analyze', {
     method: 'POST',
     body: JSON.stringify({ batch_size: batchSize })
   })
 
-export const mergeDocumentTypes = (data: { target_id: number; target_name: string; source_ids: number[] }) => 
+export const mergeDocumentTypes = (data: { target_id: number; target_name: string; source_ids: number[] }) =>
   fetchJson<any>('/document-types/merge', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -303,10 +303,10 @@ export const mergeDocumentTypes = (data: { target_id: number; target_name: strin
 
 export const getDocumentTypeHistory = () => fetchJson<any[]>('/document-types/history')
 
-export const getEmptyDocumentTypes = () => 
+export const getEmptyDocumentTypes = () =>
   fetchJson<{ count: number; items: any[] }>('/document-types/empty')
 
-export const deleteEmptyDocumentTypes = () => 
+export const deleteEmptyDocumentTypes = () =>
   fetchJson<{ deleted: number; total: number; errors?: string[] }>('/document-types/empty', { method: 'DELETE' })
 
 export const deleteDocumentType = (id: number) =>
@@ -333,10 +333,10 @@ export const recordStatistic = (entityType: string, operation: string, itemsAffe
   })
 
 // LLM
-export const testLLMConnection = () => 
+export const testLLMConnection = () =>
   fetchJson<{ success: boolean; provider?: string; model?: string; error?: string }>('/llm/test', { method: 'POST' })
 
-export const getActiveLLMProvider = () => 
+export const getActiveLLMProvider = () =>
   fetchJson<{ configured: boolean; provider?: string; display_name?: string; model?: string }>('/llm/active-provider')
 
 export interface ModelInfo {
@@ -348,14 +348,14 @@ export interface ModelInfo {
   description: string
 }
 
-export const getAvailableModels = (provider?: string) => 
+export const getAvailableModels = (provider?: string) =>
   fetchJson<{ models: ModelInfo[] }>(`/llm/models${provider ? `?provider=${provider}` : ''}`)
 
-export const getModelInfo = (modelId: string) => 
+export const getModelInfo = (modelId: string) =>
   fetchJson<ModelInfo & { model_id: string }>(`/llm/model-info/${modelId}`)
 
 // Statistics
-export const getStatisticsSummary = () => 
+export const getStatisticsSummary = () =>
   fetchJson<{
     current_counts: { correspondents: number; tags: number; document_types: number };
     cleanup_stats: {
@@ -408,3 +408,135 @@ export const removeIgnoredItem = (id: number) =>
 export const getIgnoredIds = (entityType: string, analysisType: string) =>
   fetchJson<number[]>(`/ignored-items/ids/${entityType}/${analysisType}`)
 
+// --- OCR API ---
+
+export interface OcrResult {
+  document_id: number
+  title: string
+  old_content: string
+  new_content: string
+  old_length: number
+  new_length: number
+  pages_processed: number
+  processing_time_seconds: number
+}
+
+export interface OcrConnectionResult {
+  connected: boolean
+  model_available: boolean
+  ollama_url?: string
+  model?: string
+  error?: string
+}
+
+export interface BatchOcrStatus {
+  running: boolean
+  paused: boolean
+  total: number
+  processed: number
+  failed: number
+  current_document?: string
+  errors: string[]
+  log: string[]
+  start_time?: string
+  mode?: string
+}
+
+export interface WatchdogStatus {
+  enabled: boolean
+  running: boolean
+  interval_minutes: number
+  last_run?: string
+  documents_found?: number
+}
+
+export interface OcrStats {
+  doc_id: number
+  title: string
+  timestamp: string
+  pages: number
+  chars: number
+  duration: number
+  server: string
+}
+
+// OCR Settings
+export const getOcrSettings = () =>
+  fetchJson<{ ollama_url: string; ollama_urls: string[]; model: string; watchdog_enabled?: boolean; watchdog_interval?: number }>('/ocr/settings')
+
+export const saveOcrSettings = (data: { ollama_url: string; ollama_urls?: string[]; model: string }) =>
+  fetchJson<{ success: boolean }>('/ocr/settings', {
+    method: 'POST',
+    body: JSON.stringify(data)
+  })
+
+// OCR Connection Test
+export const testOcrConnection = () =>
+  fetchJson<OcrConnectionResult>('/ocr/test-connection', { method: 'POST' })
+
+// OCR Stats
+export const getOcrStats = () =>
+  fetchJson<OcrStats[]>('/ocr/stats')
+
+// Single Document OCR
+export const ocrSingleDocument = (documentId: number) =>
+  fetchJson<OcrResult>(`/ocr/single/${documentId}`, { method: 'POST' })
+
+export const applyOcrResult = (documentId: number, content: string, setFinishTag: boolean = true) =>
+  fetchJson<{ success: boolean }>(`/ocr/apply/${documentId}`, {
+    method: 'POST',
+    body: JSON.stringify({ content, set_finish_tag: setFinishTag })
+  })
+
+// Batch OCR
+export const startBatchOcr = (mode: string = 'all', documentIds?: number[], setFinishTag: boolean = true, removeRunocrTag: boolean = true) =>
+  fetchJson<{ success: boolean; message: string }>('/ocr/batch/start', {
+    method: 'POST',
+    body: JSON.stringify({ mode, document_ids: documentIds, set_finish_tag: setFinishTag, remove_runocr_tag: removeRunocrTag })
+  })
+
+export const getBatchOcrStatus = () =>
+  fetchJson<BatchOcrStatus>('/ocr/batch/status')
+
+export const stopBatchOcr = () =>
+  fetchJson<{ success: boolean }>('/ocr/batch/stop', { method: 'POST' })
+
+export const pauseBatchOcr = () =>
+  fetchJson<{ success: boolean }>('/ocr/batch/pause', { method: 'POST' })
+
+export const resumeBatchOcr = () =>
+  fetchJson<{ success: boolean }>('/ocr/batch/resume', { method: 'POST' })
+
+// Watchdog
+export const getWatchdogStatus = () =>
+  fetchJson<WatchdogStatus>('/ocr/watchdog/status')
+
+export const setWatchdogSettings = (enabled: boolean, intervalMinutes: number = 5) =>
+  fetchJson<{ success: boolean }>('/ocr/watchdog/settings', {
+    method: 'POST',
+    body: JSON.stringify({ enabled, interval_minutes: intervalMinutes })
+  })
+
+// --- Cleanup API ---
+
+export interface CleanupDocument {
+  id: number
+  title: string
+  created: string
+  correspondent: number | null
+  thumbnail_url: string
+}
+
+export interface ScanResult {
+  documents: CleanupDocument[]
+  total_count: number
+}
+
+export const scanJunkDocuments = (query: string, limit: number = 50) =>
+  fetchJson<ScanResult>(`/cleanup/scan?query=${encodeURIComponent(query)}&limit=${limit}`)
+
+export const deleteJunkDocuments = (ids: number[]) =>
+  fetchJson<{ success: boolean; deleted_count: number; errors: any[] }>('/cleanup/delete', {
+    method: 'POST',
+    body: JSON.stringify({ document_ids: ids })
+  })

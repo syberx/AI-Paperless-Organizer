@@ -1,18 +1,20 @@
 import { ReactNode, useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { 
-  LayoutDashboard, 
-  Users, 
-  Tags, 
-  FileText, 
-  Settings, 
+import {
+  LayoutDashboard,
+  Users,
+  Tags,
+  FileText,
+  Settings,
   MessageSquare,
   Menu,
   X,
   CheckCircle2,
   XCircle,
   Bug,
-  Lock
+  Lock,
+  ScanLine,
+  Trash2
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
@@ -28,6 +30,8 @@ const baseNavigation = [
   { name: '3. Tags', href: '/tags', icon: Tags, step: 3, alwaysShow: true },
   { name: 'Prompts', href: '/prompts', icon: MessageSquare, step: null, alwaysShow: true },
   { name: 'Einstellungen', href: '/settings', icon: Settings, step: null, alwaysShow: true },
+  { name: 'OCR', href: '/ocr', icon: ScanLine, step: null, alwaysShow: true },
+  { name: 'Aufräumen', href: '/cleanup', icon: Trash2, step: null, alwaysShow: true },
   { name: 'Debug', href: '/debug', icon: Bug, step: null, alwaysShow: false, requiresDebug: true },
 ]
 
@@ -47,7 +51,7 @@ export default function Layout({ children }: LayoutProps) {
     api.getAppSettings()
       .then(appSettings => {
         setShowDebugMenu(appSettings.show_debug_menu)
-        
+
         // Check if password is required - this blocks EVERYTHING
         if (appSettings.password_enabled && appSettings.password_set) {
           const savedAuth = localStorage.getItem('app_authenticated')
@@ -57,7 +61,7 @@ export default function Layout({ children }: LayoutProps) {
             return // Don't load anything else until authenticated!
           }
         }
-        
+
         // Only load status after authentication
         Promise.all([
           api.getPaperlessStatus().catch(() => ({ connected: false })),
@@ -98,7 +102,7 @@ export default function Layout({ children }: LayoutProps) {
     }
   }
 
-  const navigation = baseNavigation.filter(item => 
+  const navigation = baseNavigation.filter(item =>
     item.alwaysShow || (item.requiresDebug && showDebugMenu)
   )
 
@@ -148,7 +152,7 @@ export default function Layout({ children }: LayoutProps) {
     <div className="min-h-screen flex">
       {/* Mobile sidebar backdrop */}
       {sidebarOpen && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/50 z-40 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
@@ -172,7 +176,7 @@ export default function Layout({ children }: LayoutProps) {
               Organizer
             </span>
           </Link>
-          <button 
+          <button
             className="lg:hidden p-2 hover:bg-surface-800 rounded-lg"
             onClick={() => setSidebarOpen(false)}
           >
@@ -217,7 +221,7 @@ export default function Layout({ children }: LayoutProps) {
           {navigation.map((item) => {
             const isActive = location.pathname === item.href
             const Icon = item.icon
-            
+
             return (
               <Link
                 key={item.name}
@@ -225,8 +229,8 @@ export default function Layout({ children }: LayoutProps) {
                 onClick={() => setSidebarOpen(false)}
                 className={clsx(
                   'flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200',
-                  isActive 
-                    ? 'bg-primary-600/20 text-primary-400 border border-primary-500/30' 
+                  isActive
+                    ? 'bg-primary-600/20 text-primary-400 border border-primary-500/30'
                     : 'text-surface-400 hover:text-surface-100 hover:bg-surface-800/50'
                 )}
               >
@@ -260,7 +264,7 @@ export default function Layout({ children }: LayoutProps) {
       <div className="flex-1 flex flex-col min-h-screen">
         {/* Top bar */}
         <header className="h-16 flex items-center gap-4 px-6 border-b border-surface-700/50 bg-surface-900/50 backdrop-blur-sm">
-          <button 
+          <button
             className="lg:hidden p-2 hover:bg-surface-800 rounded-lg"
             onClick={() => setSidebarOpen(true)}
           >

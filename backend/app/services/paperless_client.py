@@ -180,6 +180,7 @@ class PaperlessClient:
         correspondent_id: int = None,
         tag_id: int = None,
         document_type_id: int = None,
+        query: str = None,
         page_size: int = 10000
     ) -> List[Dict]:
         """Get documents with optional filters."""
@@ -191,6 +192,8 @@ class PaperlessClient:
             params["tags__id__in"] = tag_id
         if document_type_id:
             params["document_type__id"] = document_type_id
+        if query:
+            params["query"] = query
         
         result = await self._request("GET", "/documents/", params=params)
         return result.get("results", []) if result else []
@@ -207,6 +210,10 @@ class PaperlessClient:
         """Get all documents of a specific type."""
         return await self.get_documents(document_type_id=doc_type_id)
     
+    async def delete_document(self, document_id: int) -> None:
+        """Delete a document."""
+        await self._request("DELETE", f"/documents/{document_id}/")
+
     async def update_document(self, document_id: int, data: Dict) -> Dict:
         """Update a document."""
         return await self._request("PATCH", f"/documents/{document_id}/", json=data)
@@ -277,6 +284,80 @@ class PaperlessClient:
     def get_document_view_url(self, document_id: int) -> str:
         """Get URL to view document in Paperless UI."""
         return f"{self.base_url}/documents/{document_id}/"
+    
+    # OCR-related methods
+    async def get_document(self, document_id: int) -> Optional[Dict]:
+        """Get a single document by ID."""
+        return await self._request("GET", f"/documents/{document_id}/")
+    
+    async def download_document_file(self, document_id: int) -> bytes:
+        """Download the original document file as bytes."""
+        if not self.base_url:
+            raise ValueError("Paperless URL not configured")
+        
+        url = f"{self.base_url}/api/documents/{document_id}/download/"
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True, verify=False) as client:
+            response = await client.get(url, headers={"Authorization": f"Token {self.api_token}"})
+            response.raise_for_status()
+            return response.content
+    
+    async def get_document_thumbnail_bytes(self, document_id: int) -> bytes:
+        """Download thumbnail image as bytes."""
+        if not self.base_url:
+            raise ValueError("Paperless URL not configured")
+        
+        url = f"{self.base_url}/api/documents/{document_id}/thumb/"
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True, verify=False) as client:
+            response = await client.get(url, headers={"Authorization": f"Token {self.api_token}"})
+            response.raise_for_status()
+            return response.content
+    
+    async def get_document_preview_image(self, document_id: int) -> bytes:
+        """Download preview/full image of the document as bytes."""
+        if not self.base_url:
+            raise ValueError("Paperless URL not configured")
+        
+        url = f"{self.base_url}/api/documents/{document_id}/preview/"
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True, verify=False) as client:
+            response = await client.get(url, headers={"Authorization": f"Token {self.api_token}"})
+            response.raise_for_status()
+            return response.content
+
+    async def create_tag(self, name: str) -> Dict:
+        """Create a new tag in Paperless."""
+        result = await self._request("POST", "/tags/", json={"name": name})
+        # Invalidate tag cache
+        cache = get_cache()
+        await cache.clear("paperless:tags:")
+        return result
+    
+    async def get_or_create_tag(self, name: str) -> Dict:
+        """Get tag by name or create it if it doesn't exist."""
+        tags = await self.get_tags(use_cache=False)
+        for tag in tags:
+            if tag.get("name", "").lower() == name.lower():
+                return tag
+        return await self.create_tag(name)
+    
+    async def add_tag_to_document(self, document_id: int, tag_id: int) -> Dict:
+        """Add a tag to a document."""
+        doc = await self.get_document(document_id)
+        if doc:
+            current_tags = doc.get("tags", [])
+            if tag_id not in current_tags:
+                current_tags.append(tag_id)
+                return await self.update_document(document_id, {"tags": current_tags})
+        return doc
+    
+    async def remove_tag_from_document(self, document_id: int, tag_id: int) -> Dict:
+        """Remove a tag from a document."""
+        doc = await self.get_document(document_id)
+        if doc:
+            current_tags = doc.get("tags", [])
+            if tag_id in current_tags:
+                current_tags.remove(tag_id)
+                return await self.update_document(document_id, {"tags": current_tags})
+        return doc
 
 
 async def get_paperless_client(db: AsyncSession = Depends(get_db)) -> PaperlessClient:

@@ -2,7 +2,7 @@
 
 # 🤖 AI Paperless Organizer
 
-**KI-gestützte Metadaten-Bereinigung für Paperless-ngx**
+**KI-gestützte Metadaten-Bereinigung & OCR für Paperless-ngx**
 
 [![GitHub](https://img.shields.io/badge/GitHub-syberx%2FAI--Paperless--Organizer-blue?logo=github)](https://github.com/syberx/AI-Paperless-Organizer)
 [![Docker Hub](https://img.shields.io/badge/Docker%20Hub-webdienste%2Fai--paperless--organizer-blue?logo=docker)](https://hub.docker.com/r/webdienste/ai-paperless-organizer)
@@ -85,6 +85,27 @@ Unsicher ob zwei Einträge wirklich zusammengehören? Schau dir die zugehörigen
 ### 📊 Statistiken & Fortschritt
 Behalte den Überblick: Wie viele Einträge wurden bereinigt? Wie viel Zeit gespart? Letzte Aktivitäten auf einen Blick.
 
+### 🔍 OCR mit Ollama Vision
+Dokumente mit besserer OCR-Erkennung neu verarbeiten – powered by **Ollama Vision Models** (z.B. `qwen2.5vl:7b`):
+
+- **Einzel-OCR**: Dokument-ID eingeben, alten und neuen Text vergleichen, übernehmen
+- **Batch-OCR**: Alle Dokumente oder nur getaggte in einem Durchlauf verarbeiten
+- **Multi-Server Failover**: Mehrere Ollama-Server konfigurieren für Ausfallsicherheit
+- **Statistiken**: Verarbeitete Seiten, Zeichen, Dauer pro Dokument im Überblick
+- **Watchdog**: Automatische OCR-Verarbeitung neuer Dokumente im Hintergrund
+- **Tag-basierter Workflow**: `runocr` und `ocrfinish` Tags für flexible Steuerung
+
+> 💡 **Vorteil:** Deine Dokumente verlassen nie den Server – Ollama läuft lokal!
+
+### 🗑️ Dokumente Aufräumen
+Junk-Dokumente wie AGB, Widerrufsbelehrungen und Datenschutzerklärungen automatisch finden und entfernen:
+
+- **Titel-basierte Suche**: Findet nur Dokumente mit typischen Junk-Titeln (keine falschen Treffer bei normalen Dokumenten)
+- **Kartenansicht mit Vorschaubildern**: Große Thumbnails für schnelle visuelle Prüfung
+- **Mehrfachauswahl**: Einzeln oder alle auf einmal auswählen
+- **Bestätigungsdialog**: Sicherheitsabfrage vor endgültiger Löschung
+- **Standard-Suchbegriffe**: AGB, Widerruf, Datenschutzerklärung, Impressum, Nutzungsbedingungen u.v.m.
+
 ---
 
 ## ⚠️ Hinweis zum aktuellen Stand
@@ -92,6 +113,20 @@ Behalte den Überblick: Wie viele Einträge wurden bereinigt? Wie viel Zeit gesp
 > **Aktuell getestet:** OpenAI (GPT-4o, GPT-4o-mini)
 > 
 > Andere LLM-Provider (Anthropic, Ollama, Azure) sind implementiert, aber noch nicht ausführlich getestet. Bei Problemen gerne ein Issue erstellen - wir verbessern kontinuierlich!
+
+---
+
+## 🔒 Datenschutz
+
+**Wichtig:** An das LLM werden **ausschließlich Metadaten** übermittelt:
+- Namen von Tags, Korrespondenten und Dokumententypen
+- Anzahl der zugehörigen Dokumente
+
+**❌ Es werden KEINE Dokumenteninhalte, Texte oder Dateien an das LLM gesendet!**
+
+Die KI sieht nur die Namen deiner Metadaten (z.B. "Telekom", "Rechnung", "Steuer 2024") um Ähnlichkeiten zu erkennen - niemals den Inhalt deiner Dokumente.
+
+> 💡 **Tipp:** Für maximalen Datenschutz nutze **Ollama** mit lokalen Modellen - dann verlassen keine Daten deinen Server!
 
 ---
 
@@ -196,15 +231,17 @@ docker-compose up -d --build
 │   • Korrespondenten │   • LLM Provider (OpenAI, etc.)       │
 │   • Tags            │   • Similarity Service                │
 │   • Dokumententypen │   • Merge Service                     │
-│   • Tag Wizard      │   • SQLite (Cache/History)            │
+│   • Tag Wizard      │   • OCR Service (Ollama Vision)       │
+│   • OCR Manager     │   • Cleanup Service                   │
+│   • Aufräumen       │   • SQLite (Cache/History)            │
 │   • Prompts         │                                       │
 └─────────────────────┴───────────────────────────────────────┘
-                              │
-                              ▼
-                    ┌─────────────────┐
-                    │  Paperless-ngx  │
-                    │      API        │
-                    └─────────────────┘
+                          │               │
+                          ▼               ▼
+                ┌─────────────┐   ┌─────────────┐
+                │ Paperless   │   │   Ollama     │
+                │    -ngx     │   │  (lokal)     │
+                └─────────────┘   └─────────────┘
 ```
 
 ---
@@ -218,6 +255,7 @@ docker-compose up -d --build
 | **Database** | SQLite (für Cache, History, Einstellungen) |
 | **Container** | Docker, Docker Compose |
 | **LLM** | OpenAI, Anthropic, Azure, Ollama |
+| **OCR** | Ollama Vision API (qwen2.5vl, llava, etc.) |
 
 ---
 
