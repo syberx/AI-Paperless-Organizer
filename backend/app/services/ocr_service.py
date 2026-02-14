@@ -3,9 +3,11 @@
 import base64
 import httpx
 import asyncio
+import json
 import logging
 import time
 import io
+from pathlib import Path
 from typing import Optional, Dict, List, Any
 from PIL import Image
 from pdf2image import convert_from_bytes
@@ -32,6 +34,29 @@ batch_state = {
     "mode": None,
     "paused": False
 }
+
+# Review queue file
+REVIEW_QUEUE_FILE = Path("/app/data/ocr_review_queue.json")
+
+# Quality threshold: if new text is less than this ratio of old text, flag for review
+QUALITY_THRESHOLD = 0.5
+
+def load_review_queue() -> List[Dict]:
+    """Load review queue from file."""
+    try:
+        if REVIEW_QUEUE_FILE.exists():
+            return json.loads(REVIEW_QUEUE_FILE.read_text())
+    except Exception:
+        pass
+    return []
+
+def save_review_queue(queue: List[Dict]):
+    """Save review queue to file."""
+    try:
+        REVIEW_QUEUE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        REVIEW_QUEUE_FILE.write_text(json.dumps(queue, ensure_ascii=False, indent=2))
+    except Exception as e:
+        logger.error(f"Error saving review queue: {e}")
 
 # Watchdog state
 watchdog_state = {
@@ -438,22 +463,49 @@ class OcrService:
                     # Use the multi-page aware OCR logic
                     ocr_result = await self.ocr_document(paperless_client, doc_id)
                     new_content = ocr_result.get("new_content")
+                    old_content = ocr_result.get("old_content", "")
+                    old_len = len(old_content) if old_content else 0
+                    new_len = len(new_content) if new_content else 0
                     
                     if new_content:
-                        # Apply the new content
-                        await paperless_client.update_document(doc_id, {"content": new_content})
+                        # Quality check: if new text is significantly shorter, flag for review
+                        needs_review = False
+                        if old_len > 100 and new_len < old_len * QUALITY_THRESHOLD:
+                            needs_review = True
+                            ratio = round(new_len / old_len * 100) if old_len > 0 else 0
+                            batch_state["log"].append(
+                                f"⚠️ {doc_title}: Qualitätsprüfung! Neuer Text nur {ratio}% des Originals "
+                                f"({new_len} vs {old_len} Zeichen) → Manuell prüfen"
+                            )
+                            # Add to review queue
+                            queue = load_review_queue()
+                            queue.append({
+                                "document_id": doc_id,
+                                "title": doc_title,
+                                "old_content": old_content,
+                                "new_content": new_content,
+                                "old_length": old_len,
+                                "new_length": new_len,
+                                "ratio": ratio,
+                                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S")
+                            })
+                            save_review_queue(queue)
                         
-                        # Set ocrfinish tag
-                        if set_finish_tag and ocrfinish_tag_id:
-                            await paperless_client.add_tag_to_document(doc_id, ocrfinish_tag_id)
-                        
-                        # Remove runocr tag if present
-                        if remove_runocr_tag and runocr_tag_id:
-                            doc_tags = doc.get("tags", [])
-                            if runocr_tag_id in doc_tags:
-                                await paperless_client.remove_tag_from_document(doc_id, runocr_tag_id)
-                        
-                        batch_state["log"].append(f"✅ {doc_title}: OCR erfolgreich ({len(new_content)} Zeichen)")
+                        if not needs_review:
+                            # Apply the new content
+                            await paperless_client.update_document(doc_id, {"content": new_content})
+                            
+                            # Set ocrfinish tag
+                            if set_finish_tag and ocrfinish_tag_id:
+                                await paperless_client.add_tag_to_document(doc_id, ocrfinish_tag_id)
+                            
+                            # Remove runocr tag if present
+                            if remove_runocr_tag and runocr_tag_id:
+                                doc_tags = doc.get("tags", [])
+                                if runocr_tag_id in doc_tags:
+                                    await paperless_client.remove_tag_from_document(doc_id, runocr_tag_id)
+                            
+                            batch_state["log"].append(f"✅ {doc_title}: OCR erfolgreich ({new_len} Zeichen)")
                     else:
                         batch_state["log"].append(f"⚠️ {doc_title}: Kein Text erkannt")
                         batch_state["errors"].append(f"{doc_title}: Kein Text erkannt")
