@@ -471,13 +471,25 @@ export const saveOcrSettings = (data: { ollama_url: string; ollama_urls?: string
   })
 
 // OCR Connection Test
-export const testOcrConnection = () =>
-  fetchJson<OcrConnectionResult>('/ocr/test-connection', { method: 'POST' })
+export const ensureOcrTags = async () => {
+  await fetchJson('/api/ocr/tags', { method: 'POST' })
+}
 
-// OCR Stats
-export const getOcrStats = () =>
-  fetchJson<OcrStats[]>('/ocr/stats')
+export const testOcrConnection = async () => {
+  return fetchJson<{
+    connected: boolean;
+    model_available: boolean;
+    available_models?: string[];
+    requested_model?: string;
+    model?: string;
+    url?: string;
+    error?: string
+  }>('/api/ocr/test-connection', { method: 'POST' })
+}
 
+export const getOcrStats = async () => {
+  return fetchJson<OcrStats[]>('/api/ocr/stats')
+}
 // Single Document OCR
 export const ocrSingleDocument = (documentId: number) =>
   fetchJson<OcrResult>(`/ocr/single/${documentId}`, { method: 'POST' })
