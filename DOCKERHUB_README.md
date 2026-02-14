@@ -11,12 +11,22 @@
 - **🚫 Globale Ignorierliste**: Bestimmte Einträge dauerhaft von der Analyse ausschließen
 - **📊 Token-Schätzung**: Sehe vor jeder KI-Analyse wieviele Tokens benötigt werden
 
+## 🔒 Datenschutz
+
+**Wichtig:** An das LLM werden **ausschließlich Metadaten** übermittelt:
+- Namen von Tags, Korrespondenten und Dokumententypen
+- Anzahl der zugehörigen Dokumente
+
+**Es werden KEINE Dokumenteninhalte, Texte oder Dateien an das LLM gesendet!**
+
+Für maximalen Datenschutz kannst du Ollama mit lokalen Modellen verwenden - dann verlassen keine Daten deinen Server.
+
 ## Unterstützte LLM-Provider
 
 - OpenAI (GPT-4, GPT-4o, GPT-3.5)
 - Anthropic (Claude 3)
 - Azure OpenAI
-- Ollama (lokale Modelle)
+- Ollama (lokale Modelle) ← **Empfohlen für maximalen Datenschutz**
 
 ## Quick Start
 

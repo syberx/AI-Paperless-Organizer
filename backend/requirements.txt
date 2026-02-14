@@ -23,3 +23,7 @@ python-dotenv==1.0.0
 # Security
 cryptography==42.0.2
 
+# Image processing (OCR)
+Pillow==10.2.0
+pdf2image==1.17.0
+
