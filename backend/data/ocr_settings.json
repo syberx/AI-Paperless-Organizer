@@ -1,1 +1,1 @@
-{"ollama_url": "http://192.168.168.65:11434", "model": "qwen2.5vl:7b", "ollama_urls": ["http://192.168.168.65:11434"]}
+{"ollama_url": "http://localhost:11434", "model": "qwen2.5vl:7b", "ollama_urls": ["http://localhost:11434", "http://192.168.168.65:11434"], "watchdog_enabled": false, "watchdog_interval": 5}
