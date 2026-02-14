@@ -92,30 +92,42 @@ class OcrService:
             print(f"[OCR] Switched to backup server: {self.get_current_url()}")
     
     async def test_connection(self) -> Dict[str, Any]:
-        """Test connection to Ollama and check if the model is available."""
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                # Check Ollama is running
-                url = self.get_current_url()
-                response = await client.get(f"{url}/api/tags")
-                response.raise_for_status()
-                models = response.json().get("models", [])
-                model_names = [m.get("name", "") for m in models]
-                
-                # Check if our model is available
-                model_available = any(
-                    self.model in name or name.startswith(self.model.split(":")[0])
-                    for name in model_names
-                )
-                
-                return {
-                    "connected": True,
-                    "model_available": model_available,
-                    "available_models": model_names,
-                    "requested_model": self.model
-                }
-        except Exception as e:
-            return {"connected": False, "model_available": False, "error": str(e)}
+        """Test connection to Ollama and check if the model is available.
+        Attempts all configured URLs until one works.
+        """
+        last_error = None
+        for url in self.ollama_urls:
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    # Check Ollama is running
+                    response = await client.get(f"{url}/api/tags")
+                    response.raise_for_status()
+                    models = response.json().get("models", [])
+                    model_names = [m.get("name", "") for m in models]
+                    
+                    # Check if our model is available
+                    model_available = any(
+                        self.model in name or name.startswith(self.model.split(":")[0])
+                        for name in model_names
+                    )
+                    
+                    return {
+                        "connected": True,
+                        "model_available": model_available,
+                        "available_models": model_names,
+                        "requested_model": self.model,
+                        "url": url
+                    }
+            except Exception as e:
+                logger.warning(f"Connection test failed for {url}: {e}")
+                last_error = str(e)
+        
+        return {
+            "connected": False, 
+            "model_available": False, 
+            "error": f"Alle Versuche fehlgeschlagen. Letzter Fehler: {last_error}",
+            "tried_urls": self.ollama_urls
+        }
     
     def _prepare_image_for_ollama(self, img: Image.Image, max_size: int = 2240) -> bytes:
         """Convert PIL Image to PNG bytes, resized and aligned for Ollama Vision.

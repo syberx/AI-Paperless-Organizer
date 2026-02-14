@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 
 from app.services.paperless_client import PaperlessClient, get_paperless_client
-from app.services.ocr_service import OcrService, batch_state, load_review_queue, save_review_queue, DEFAULT_OLLAMA_URL, DEFAULT_OCR_MODEL
+from app.services.ocr_service import OcrService, batch_state, watchdog_state, load_review_queue, save_review_queue, DEFAULT_OLLAMA_URL, DEFAULT_OCR_MODEL
 
 logger = logging.getLogger(__name__)
 

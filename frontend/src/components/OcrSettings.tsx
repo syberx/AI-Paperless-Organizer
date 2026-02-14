@@ -13,6 +13,8 @@ export default function OcrSettings() {
     const [connectionStatus, setConnectionStatus] = useState<api.OcrConnectionResult | null>(null)
     const [watchdogEnabled, setWatchdogEnabled] = useState(false)
     const [watchdogInterval, setWatchdogInterval] = useState(5)
+    const [editingIndex, setEditingIndex] = useState<number | null>(null)
+    const [editValue, setEditValue] = useState('')
 
     useEffect(() => {
         loadSettings()
@@ -38,15 +40,56 @@ export default function OcrSettings() {
         }
     }
 
-    const addUrl = () => {
+    const addUrl = async () => {
         if (newUrl && !ollamaUrls.includes(newUrl)) {
-            setOllamaUrls([...ollamaUrls, newUrl])
+            const updatedUrls = [...ollamaUrls, newUrl]
+            setOllamaUrls(updatedUrls)
             setNewUrl('')
+            // Auto-save
+            const primaryUrl = updatedUrls.length > 0 ? updatedUrls[0] : 'http://localhost:11434'
+            await api.saveOcrSettings({
+                ollama_url: primaryUrl,
+                ollama_urls: updatedUrls,
+                model: ocrModel
+            })
         }
     }
 
-    const removeUrl = (url: string) => {
-        setOllamaUrls(ollamaUrls.filter(u => u !== url))
+    const removeUrl = async (url: string) => {
+        const updatedUrls = ollamaUrls.filter(u => u !== url)
+        setOllamaUrls(updatedUrls)
+        // Auto-save
+        const primaryUrl = updatedUrls.length > 0 ? updatedUrls[0] : 'http://localhost:11434'
+        await api.saveOcrSettings({
+            ollama_url: primaryUrl,
+            ollama_urls: updatedUrls,
+            model: ocrModel
+        })
+    }
+
+    const startEditing = (index: number) => {
+        setEditingIndex(index)
+        setEditValue(ollamaUrls[index])
+    }
+
+    const saveEdit = async () => {
+        if (editingIndex !== null && editValue.trim()) {
+            const updatedUrls = [...ollamaUrls]
+            updatedUrls[editingIndex] = editValue.trim()
+            setOllamaUrls(updatedUrls)
+            setEditingIndex(null)
+            // Auto-save
+            const primaryUrl = updatedUrls.length > 0 ? updatedUrls[0] : 'http://localhost:11434'
+            await api.saveOcrSettings({
+                ollama_url: primaryUrl,
+                ollama_urls: updatedUrls,
+                model: ocrModel
+            })
+        }
+    }
+
+    const cancelEdit = () => {
+        setEditingIndex(null)
     }
 
     const saveSettings = async () => {
@@ -112,11 +155,39 @@ export default function OcrSettings() {
                         {ollamaUrls.map((url, index) => (
                             <div key={index} className="group flex items-center gap-2 p-2 rounded-lg bg-surface-900/50 border border-surface-700/50 hover:border-surface-600 transition-colors">
                                 <div className="flex-1 px-2 text-sm text-surface-200 flex items-center justify-between font-mono">
-                                    <span>{url}</span>
-                                    {index === 0 && (
-                                        <span className="text-[10px] uppercase font-bold tracking-wider bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded">
-                                            Primär
-                                        </span>
+                                    {editingIndex === index ? (
+                                        <div className="flex-1 flex gap-2">
+                                            <input
+                                                type="text"
+                                                value={editValue}
+                                                onChange={(e) => setEditValue(e.target.value)}
+                                                className="flex-1 bg-surface-900 border-blue-500 rounded px-2 py-0.5 text-sm"
+                                                autoFocus
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') saveEdit()
+                                                    if (e.key === 'Escape') cancelEdit()
+                                                }}
+                                            />
+                                            <button onClick={saveEdit} className="text-emerald-400 hover:text-emerald-300">Save</button>
+                                            <button onClick={cancelEdit} className="text-surface-500 hover:text-surface-400">Cancel</button>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <span className="truncate">{url}</span>
+                                            <div className="flex items-center gap-2">
+                                                {index === 0 && (
+                                                    <span className="text-[10px] uppercase font-bold tracking-wider bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded">
+                                                        Primär
+                                                    </span>
+                                                )}
+                                                <button
+                                                    onClick={() => startEditing(index)}
+                                                    className="opacity-0 group-hover:opacity-100 text-[10px] uppercase font-bold text-surface-500 hover:text-white transition-all"
+                                                >
+                                                    Edit
+                                                </button>
+                                            </div>
+                                        </>
                                     )}
                                 </div>
                                 <button
