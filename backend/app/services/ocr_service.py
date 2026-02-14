@@ -158,6 +158,21 @@ class OcrService:
             logger.error(f"Image preparation failed: {e}")
             raise ValueError(f"Bildvorbereitung fehlgeschlagen: {e}")
 
+    async def find_best_server(self) -> bool:
+        """Find the first working server and set it as current. Returns True if one is found."""
+        for i, url in enumerate(self.ollama_urls):
+            try:
+                # Short timeout for checking availability
+                async with httpx.AsyncClient(timeout=3.0) as client:
+                    response = await client.get(f"{url}/api/tags")
+                    if response.status_code == 200:
+                        self.current_url_index = i
+                        logger.info(f"Connected to fast server: {url}")
+                        return True
+            except Exception:
+                continue
+        return False
+
     async def _ocr_single_image(self, image_bytes: bytes) -> str:
         """Run OCR on a single prepared image bytes block. Retries with failover URLs."""
         image_b64 = base64.b64encode(image_bytes).decode("utf-8")
@@ -182,6 +197,7 @@ class OcrService:
                             ),
                             "images": [image_b64],
                             "stream": False,
+                            "keep_alive": "30m", # Keep model loaded for 30 minutes
                             "options": {"temperature": 0.1, "num_predict": 4096}
                         }
                     )
@@ -404,6 +420,13 @@ class OcrService:
             # Determine which documents to process
             documents = []
             
+            # OPTIMIZATION: Check for best server before starting
+            batch_state["log"].append("🔎 Prüfe verfügbare Ollama-Server...")
+            if await self.find_best_server():
+                batch_state["log"].append(f"🚀 Verbunden mit: {self.get_current_url()}")
+            else:
+                 batch_state["log"].append(f"⚠️ Warnung: Kein Server antwortet schnell. Nutze {self.get_current_url()}")
+
             if mode == "all":
                 # Get all documents
                 all_docs = await paperless_client.get_documents()
