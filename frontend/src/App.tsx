@@ -9,8 +9,6 @@ import SettingsPanel from './components/SettingsPanel'
 import PromptEditor from './components/PromptEditor'
 import DebugPanel from './components/DebugPanel'
 import OcrManager from './components/OcrManager'
-import SingleOcr from './components/SingleOcr'
-import OcrReview from './components/OcrReview'
 import CleanupManager from './components/CleanupManager'
 
 function App() {
@@ -19,8 +17,6 @@ function App() {
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/ocr" element={<OcrManager />} />
-        <Route path="/ocr/single" element={<SingleOcr />} />
-        <Route path="/ocr/review" element={<OcrReview />} />
         <Route path="/cleanup" element={<CleanupManager />} />
         <Route path="/correspondents" element={<CorrespondentManager />} />
         <Route path="/tags" element={<TagManager />} />

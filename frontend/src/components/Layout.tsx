@@ -15,7 +15,6 @@ import {
   Lock,
   ScanLine,
   Trash2,
-  FileSearch,
   AlertCircle
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -32,9 +31,7 @@ const baseNavigation = [
   { name: '3. Tags', href: '/tags', icon: Tags, step: 3, alwaysShow: true },
   { name: 'Prompts', href: '/prompts', icon: MessageSquare, step: null, alwaysShow: true },
   { name: 'Einstellungen', href: '/settings', icon: Settings, step: null, alwaysShow: true },
-  { name: 'OCR Batch', href: '/ocr', icon: ScanLine, step: null, alwaysShow: true },
-  { name: 'Einzel-OCR', href: '/ocr/single', icon: FileSearch, step: null, alwaysShow: true },
-  { name: 'Prüfen', href: '/ocr/review', icon: AlertCircle, step: null, alwaysShow: true, badgeKey: 'review' },
+  { name: 'OCR', href: '/ocr', icon: ScanLine, step: null, alwaysShow: true },
   { name: 'Aufräumen', href: '/cleanup', icon: Trash2, step: null, alwaysShow: true },
   { name: 'Debug', href: '/debug', icon: Bug, step: null, alwaysShow: false, requiresDebug: true },
 ]
@@ -49,7 +46,10 @@ export default function Layout({ children }: LayoutProps) {
   const [passwordRequired, setPasswordRequired] = useState(false)
   const [passwordInput, setPasswordInput] = useState('')
   const [passwordError, setPasswordError] = useState(false)
-  const [reviewCount, setReviewCount] = useState(0)
+  const [ollamaConnected, setOllamaConnected] = useState<boolean | null>(null)
+  const [ollamaModelAvailable, setOllamaModelAvailable] = useState<boolean | null>(null)
+  const [ollamaModel, setOllamaModel] = useState<string | null>(null)
+  const [reviewCount, setReviewCount] = useState<number>(0)
 
   useEffect(() => {
     // First check if password is required
@@ -87,12 +87,25 @@ export default function Layout({ children }: LayoutProps) {
         })
       })
 
-    // Load review count
-    api.getReviewQueue().then(r => setReviewCount(r.count)).catch(() => { })
-    const reviewPoll = setInterval(() => {
-      api.getReviewQueue().then(r => setReviewCount(r.count)).catch(() => { })
-    }, 15000)
-    return () => clearInterval(reviewPoll)
+    // Poll for statuses
+    const checkStatuses = async () => {
+      try {
+        const ocrStatus = await api.testOcrConnection()
+        setOllamaConnected(ocrStatus.connected)
+        setOllamaModelAvailable(ocrStatus.model_available)
+        setOllamaModel(ocrStatus.requested_model || ocrStatus.model || null)
+
+        const queue = await api.getReviewQueue()
+        setReviewCount(queue.count)
+      } catch {
+        setOllamaConnected(false)
+        setOllamaModelAvailable(false)
+      }
+    }
+
+    checkStatuses()
+    const interval = setInterval(checkStatuses, 30000)
+    return () => clearInterval(interval)
   }, [])
 
   const handlePasswordSubmit = async () => {
@@ -226,6 +239,31 @@ export default function Layout({ children }: LayoutProps) {
               LLM {llmConfigured ? 'konfiguriert' : 'nicht konfiguriert'}
             </span>
           </div>
+          <div className="flex items-center gap-2 text-sm">
+            {ollamaConnected === null ? (
+              <div className="w-2 h-2 rounded-full bg-surface-500 animate-pulse" />
+            ) : (ollamaConnected && ollamaModelAvailable) ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            ) : ollamaConnected ? (
+              <AlertCircle className="w-4 h-4 text-amber-400" />
+            ) : (
+              <XCircle className="w-4 h-4 text-red-400" />
+            )}
+            <span className={clsx(
+              (ollamaConnected && ollamaModelAvailable) ? 'text-emerald-400' :
+                ollamaConnected ? 'text-amber-400' : 'text-surface-400'
+            )} title={ollamaModel ? `Modell: ${ollamaModel}` : undefined}>
+              Ollama {ollamaConnected ? (ollamaModelAvailable ? 'Online' : 'Modell fehlt') : 'Offline'}
+            </span>
+          </div>
+          {reviewCount > 0 && (
+            <div className="flex items-center gap-2 text-sm mt-1 animate-pulse">
+              <AlertCircle className="w-4 h-4 text-amber-400" />
+              <span className="text-amber-400 font-medium">
+                {reviewCount} OCR-Prüfung{reviewCount !== 1 ? 'en' : ''} offen
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Navigation */}
@@ -247,12 +285,7 @@ export default function Layout({ children }: LayoutProps) {
                 )}
               >
                 <Icon className={clsx('w-5 h-5', isActive && 'text-primary-400')} />
-                <span className="font-medium flex-1">{item.name}</span>
-                {(item as any).badgeKey === 'review' && reviewCount > 0 && (
-                  <span className="ml-auto px-2 py-0.5 text-xs font-bold bg-amber-500/20 text-amber-300 rounded-full border border-amber-500/30">
-                    {reviewCount}
-                  </span>
-                )}
+                <span className="font-medium">{item.name}</span>
               </Link>
             )
           })}
@@ -261,7 +294,7 @@ export default function Layout({ children }: LayoutProps) {
         {/* Footer */}
         <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-surface-700/50">
           <div className="text-xs text-surface-500 text-center">
-            AI Paperless Organizer v1.0
+            AI Paperless Organizer v1.1
           </div>
           {localStorage.getItem('app_authenticated') === 'true' && (
             <button

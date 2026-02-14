@@ -7,15 +7,19 @@ import {
     Loader2,
     BarChart3,
     LayoutDashboard,
-    Pause
+    Pause,
+    FileSearch,
+    AlertCircle
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
 import OcrSettings from './OcrSettings'
 import OcrStats from './OcrStats'
+import SingleOcr from './SingleOcr'
+import OcrReview from './OcrReview'
 
 type BatchMode = 'all' | 'tagged' | 'manual'
-type Tab = 'processing' | 'stats' | 'settings'
+type Tab = 'processing' | 'single' | 'review' | 'stats' | 'settings'
 
 export default function OcrManager() {
     const [activeTab, setActiveTab] = useState<Tab>('processing')
@@ -31,20 +35,30 @@ export default function OcrManager() {
 
     // Watchdog state
     const [watchdogStatus, setWatchdogStatus] = useState<api.WatchdogStatus | null>(null)
-
-    const logEndRef = useRef<HTMLDivElement>(null)
     const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null)
+    const logEndRef = useRef<HTMLDivElement>(null)
+    const [reviewCount, setReviewCount] = useState(0)
 
-    // Check status on mount
+    // Check status on mount and set up background polling
     useEffect(() => {
         checkStatus()
+        // Poll review count
+        api.getReviewQueue().then(r => setReviewCount(r.count)).catch(() => { })
+        const rPoll = setInterval(() => {
+            api.getReviewQueue().then(r => setReviewCount(r.count)).catch(() => { })
+        }, 15000)
+
         // Always poll for watchdog and batch status every 5 seconds if not running
         const bgPoll = setInterval(() => {
             if (!batchRunning) checkStatus()
         }, 5000)
 
-        return () => clearInterval(bgPoll)
-    }, [batchRunning])
+        return () => {
+            if (pollInterval.current) clearInterval(pollInterval.current)
+            clearInterval(rPoll)
+            clearInterval(bgPoll)
+        }
+    }, [batchRunning]) // batchRunning is a dependency for the bgPoll condition
 
     // Auto-scroll log
     useEffect(() => {
@@ -202,6 +216,35 @@ export default function OcrManager() {
                 >
                     <Settings className="w-4 h-4" />
                     Einstellungen
+                </button>
+                <button
+                    onClick={() => setActiveTab('single')}
+                    className={clsx(
+                        'flex-1 py-3 px-4 rounded-lg text-sm font-medium transition-all duration-200 flex items-center justify-center gap-2',
+                        activeTab === 'single'
+                            ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-900/20 ring-1 ring-white/10'
+                            : 'text-surface-400 hover:text-white hover:bg-surface-700/50'
+                    )}
+                >
+                    <FileSearch className="w-4 h-4" />
+                    Einzel-OCR
+                </button>
+                <button
+                    onClick={() => setActiveTab('review')}
+                    className={clsx(
+                        'flex-1 py-3 px-4 rounded-lg text-sm font-medium transition-all duration-200 flex items-center justify-center gap-2',
+                        activeTab === 'review'
+                            ? 'bg-amber-600 text-white shadow-lg shadow-amber-900/20 ring-1 ring-white/10'
+                            : 'text-surface-400 hover:text-white hover:bg-surface-700/50'
+                    )}
+                >
+                    <AlertCircle className="w-4 h-4" />
+                    Prüfen
+                    {reviewCount > 0 && (
+                        <span className="px-1.5 py-0.5 text-xs font-bold bg-amber-500/30 text-amber-200 rounded-full">
+                            {reviewCount}
+                        </span>
+                    )}
                 </button>
             </div>
 
@@ -381,6 +424,20 @@ export default function OcrManager() {
             {activeTab === 'settings' && (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                     <OcrSettings />
+                </div>
+            )}
+
+            {/* Tab: Einzel-OCR */}
+            {activeTab === 'single' && (
+                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                    <SingleOcr />
+                </div>
+            )}
+
+            {/* Tab: Prüfen */}
+            {activeTab === 'review' && (
+                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                    <OcrReview />
                 </div>
             )}
         </div>

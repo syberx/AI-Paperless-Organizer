@@ -227,6 +227,9 @@ async def test_ocr_connection():
     """Test connection to Ollama."""
     service = get_ocr_service()
     result = await service.test_connection()
+    # Add model name to result for UI feedback
+    result["model"] = service.model
+    result["url"] = service.get_current_url()
     return result
 
 
