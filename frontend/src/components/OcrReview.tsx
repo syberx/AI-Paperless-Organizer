@@ -7,7 +7,8 @@ import {
     ArrowRightLeft,
     FileText,
     Trash2,
-    RefreshCw
+    RefreshCw,
+    RotateCcw
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
@@ -23,7 +24,11 @@ interface ReviewItem {
     timestamp: string
 }
 
-export default function OcrReview() {
+interface OcrReviewProps {
+    onRecheckDocument?: (docId: number) => void
+}
+
+export default function OcrReview({ onRecheckDocument }: OcrReviewProps = {}) {
     const [items, setItems] = useState<ReviewItem[]>([])
     const [loading, setLoading] = useState(true)
     const [expandedId, setExpandedId] = useState<number | null>(null)
@@ -176,6 +181,17 @@ export default function OcrReview() {
 
                             {/* Action buttons */}
                             <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+                                {onRecheckDocument && (
+                                    <button
+                                        onClick={() => onRecheckDocument(item.document_id)}
+                                        disabled={actionLoading === item.document_id}
+                                        className="btn bg-cyan-600 hover:bg-cyan-700 text-white text-sm px-4 py-2 flex items-center gap-2 disabled:opacity-50"
+                                        title="Dokument erneut per Einzel-OCR prüfen"
+                                    >
+                                        <RotateCcw className="w-4 h-4" />
+                                        Neu-OCR
+                                    </button>
+                                )}
                                 <button
                                     onClick={() => applyItem(item.document_id, item.title)}
                                     disabled={actionLoading === item.document_id}

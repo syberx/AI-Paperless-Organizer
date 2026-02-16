@@ -209,69 +209,36 @@ class LLMProviderService:
             "response": response
         }
     
-    async def complete(self, prompt: str) -> str:
-        """Send a completion request to the active LLM provider."""
+    async def complete(self, prompt: str, model_override: str = None) -> str:
+        """Send a completion request to the active LLM provider.
+        
+        Args:
+            prompt: The prompt text
+            model_override: Optional model name to use instead of the configured one
+        """
         if not self.provider:
             raise ValueError("No LLM provider configured")
         
         if self.provider.name == "openai":
-            return await self._complete_openai(prompt)
+            return await self._complete_openai(prompt, model_override)
         elif self.provider.name == "anthropic":
-            return await self._complete_anthropic(prompt)
+            return await self._complete_anthropic(prompt, model_override)
         elif self.provider.name == "azure":
-            return await self._complete_azure(prompt)
+            return await self._complete_azure(prompt, model_override)
         elif self.provider.name == "ollama":
-            return await self._complete_ollama(prompt)
+            return await self._complete_ollama(prompt, model_override)
         else:
             raise ValueError(f"Unknown provider: {self.provider.name}")
     
-    async def _complete_openai(self, prompt: str) -> str:
+    async def _complete_openai(self, prompt: str, model_override: str = None) -> str:
         """Complete using OpenAI API."""
         from openai import AsyncOpenAI
         
+        model = model_override or self.provider.model or "gpt-4o"
         client = AsyncOpenAI(api_key=self.provider.api_key)
         
         response = await client.chat.completions.create(
-            model=self.provider.model or "gpt-4o",
-            messages=[
-                {"role": "system", "content": "Du bist ein hilfreicher Assistent für Dokumentenmanagement. Antworte immer mit vollständigem, validem JSON."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.2,
-            max_tokens=16384  # Increased for large responses
-        )
-        
-        return response.choices[0].message.content
-    
-    async def _complete_anthropic(self, prompt: str) -> str:
-        """Complete using Anthropic API."""
-        from anthropic import AsyncAnthropic
-        
-        client = AsyncAnthropic(api_key=self.provider.api_key)
-        
-        response = await client.messages.create(
-            model=self.provider.model or "claude-3-5-sonnet-20241022",
-            max_tokens=8192,
-            system="Du bist ein hilfreicher Assistent für Dokumentenmanagement. Antworte immer mit vollständigem, validem JSON.",
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
-        )
-        
-        return response.content[0].text
-    
-    async def _complete_azure(self, prompt: str) -> str:
-        """Complete using Azure OpenAI API."""
-        from openai import AsyncAzureOpenAI
-        
-        client = AsyncAzureOpenAI(
-            api_key=self.provider.api_key,
-            api_version="2024-02-15-preview",
-            azure_endpoint=self.provider.api_base_url
-        )
-        
-        response = await client.chat.completions.create(
-            model=self.provider.model or "gpt-4",
+            model=model,
             messages=[
                 {"role": "system", "content": "Du bist ein hilfreicher Assistent für Dokumentenmanagement. Antworte immer mit vollständigem, validem JSON."},
                 {"role": "user", "content": prompt}
@@ -282,17 +249,59 @@ class LLMProviderService:
         
         return response.choices[0].message.content
     
-    async def _complete_ollama(self, prompt: str) -> str:
+    async def _complete_anthropic(self, prompt: str, model_override: str = None) -> str:
+        """Complete using Anthropic API."""
+        from anthropic import AsyncAnthropic
+        
+        model = model_override or self.provider.model or "claude-3-5-sonnet-20241022"
+        client = AsyncAnthropic(api_key=self.provider.api_key)
+        
+        response = await client.messages.create(
+            model=model,
+            max_tokens=8192,
+            system="Du bist ein hilfreicher Assistent für Dokumentenmanagement. Antworte immer mit vollständigem, validem JSON.",
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        return response.content[0].text
+    
+    async def _complete_azure(self, prompt: str, model_override: str = None) -> str:
+        """Complete using Azure OpenAI API."""
+        from openai import AsyncAzureOpenAI
+        
+        model = model_override or self.provider.model or "gpt-4"
+        client = AsyncAzureOpenAI(
+            api_key=self.provider.api_key,
+            api_version="2024-02-15-preview",
+            azure_endpoint=self.provider.api_base_url
+        )
+        
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "Du bist ein hilfreicher Assistent für Dokumentenmanagement. Antworte immer mit vollständigem, validem JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.2,
+            max_tokens=16384
+        )
+        
+        return response.choices[0].message.content
+    
+    async def _complete_ollama(self, prompt: str, model_override: str = None) -> str:
         """Complete using local Ollama."""
         import httpx
         
+        model = model_override or self.provider.model or "llama3.1"
         base_url = self.provider.api_base_url or "http://localhost:11434"
         
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
                 f"{base_url}/api/generate",
                 json={
-                    "model": self.provider.model or "llama3.1",
+                    "model": model,
                     "prompt": prompt,
                     "stream": False,
                     "options": {

@@ -332,11 +332,20 @@ class PaperlessClient:
         return result
     
     async def get_or_create_tag(self, name: str) -> Dict:
-        """Get tag by name or create it if it doesn't exist."""
+        """Get tag by name or create it if it doesn't exist. Uses cache first."""
+        # Try cache first (fast path)
+        tags = await self.get_tags(use_cache=True)
+        for tag in tags:
+            if tag.get("name", "").lower() == name.lower():
+                return tag
+        
+        # Not in cache? Refresh and try again (tag might have been created externally)
         tags = await self.get_tags(use_cache=False)
         for tag in tags:
             if tag.get("name", "").lower() == name.lower():
                 return tag
+        
+        # Still not found? Create it
         return await self.create_tag(name)
     
     async def add_tag_to_document(self, document_id: int, tag_id: int) -> Dict:
