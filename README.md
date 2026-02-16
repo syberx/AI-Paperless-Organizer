@@ -86,7 +86,7 @@ Unsicher ob zwei Einträge wirklich zusammengehören? Schau dir die zugehörigen
 Behalte den Überblick: Wie viele Einträge wurden bereinigt? Wie viel Zeit gespart? Letzte Aktivitäten auf einen Blick.
 
 ### 🔍 OCR mit Ollama Vision
-Dokumente mit besserer OCR-Erkennung neu verarbeiten – powered by **Ollama Vision Models** (z.B. `qwen2.5vl:7b`):
+Dokumente mit besserer OCR-Erkennung neu verarbeiten – powered by **Ollama Vision Models**:
 
 - **Einzel-OCR**: Dokument-ID eingeben, alten und neuen Text vergleichen, übernehmen
 - **Batch-OCR**: Alle Dokumente oder nur getaggte in einem Durchlauf verarbeiten
@@ -94,8 +94,55 @@ Dokumente mit besserer OCR-Erkennung neu verarbeiten – powered by **Ollama Vis
 - **Statistiken**: Verarbeitete Seiten, Zeichen, Dauer pro Dokument im Überblick
 - **Watchdog**: Automatische OCR-Verarbeitung neuer Dokumente im Hintergrund
 - **Tag-basierter Workflow**: `runocr` und `ocrfinish` Tags für flexible Steuerung
+- **Ollama-Modelle automatisch erkennen**: Dropdown in den Einstellungen statt manueller Eingabe
 
 > 💡 **Vorteil:** Deine Dokumente verlassen nie den Server – Ollama läuft lokal!
+
+### 🏆 OCR Modell-Vergleich & KI-Benchmark
+
+Vergleiche verschiedene Ollama-Vision-Modelle direkt auf demselben Dokument – mit detaillierter KI-Qualitätsbewertung:
+
+<div align="center">
+
+![OCR Modell-Vergleich](docs/ocr-benchmark/ocr-model-compare-ui.png)
+*OCR Vergleichstool: Mehrere Modelle auf einem Dokument testen*
+
+</div>
+
+- **Bis zu 5 Modelle** gleichzeitig vergleichen (z.B. qwen3-vl:4b vs. 8b vs. glm-ocr vs. minicpm-v)
+- **Seite-für-Seite** Ergebnisse nebeneinander mit Zeitangabe
+- **Modellspezifische Prompts**: Jedes Modell bekommt den optimalen Prompt (qwen, glm-ocr, deepseek-ocr, gemma3, minicpm-v)
+- **Health-Check & Auto-Recovery**: Prüft Ollama vor jedem Modell, wartet bei Absturz
+
+#### KI-Qualitätsbewertung
+
+Nach dem Vergleich kann ein **Cloud-LLM** (z.B. GPT-4o, o3, GPT-4.1) die OCR-Ergebnisse bewerten:
+
+<div align="center">
+
+![KI-Qualitätsbewertung](docs/ocr-benchmark/ocr-ki-quality-assessment.png)
+*KI-Bewertung: 10 Kategorien, Fehler-Erkennung und Modell-Empfehlung*
+
+</div>
+
+- **10 Bewertungskategorien**: Namen, Datum, IBAN, Beträge, Adressen, Formularlogik, Vollständigkeit, Formatierung, Halluzinierung, Automatisierbarkeit
+- **Kritische Felder** mit strenger Bewertung (IBAN-Fehler = sofort kritisch)
+- **Cross-Comparison**: Wo stimmen alle Modelle überein, wo gibt es Widersprüche?
+- **Strukturierte Empfehlung**: Bestes Modell für Qualität, Geschwindigkeit und Preis/Leistung
+
+#### Empfohlene OCR-Modelle
+
+| Modell | Parameter | VRAM | Stärke |
+|--------|-----------|------|--------|
+| **`qwen3-vl:4b-instruct`** | 4B | ~3 GB | Bester Allrounder, zuverlässig bei IBANs |
+| **`huihui_ai/qwen3-vl-abliterated:8b`** | 8B | ~6 GB | 8B ohne Safety-Filter (erkennt IBANs!) |
+| **`glm-ocr`** | 1.1B | ~2 GB | Ultra-schnell, gut bei Standard-Dokumenten |
+| **`minicpm-v`** | 8B | ~5.5 GB | Stark bei OCR-Benchmarks, Multi-Image |
+| **`qwen2.5vl:7b`** | 7B | ~6 GB | Bewährt, gute Qualität |
+
+> ⚠️ **Hinweis:** Das Standard-Modell `qwen3-vl:8b-instruct` hat **Safety-Filter** von Alibaba, die sensible Felder wie IBANs filtern. Für vollständige Transkription die **abliterated-Variante** oder `4b-instruct` verwenden.
+
+> Mehr Details & Benchmark-Infos: [docs/ocr-benchmark/](docs/ocr-benchmark/)
 
 ### 🗑️ Dokumente Aufräumen
 Junk-Dokumente wie AGB, Widerrufsbelehrungen und Datenschutzerklärungen automatisch finden und entfernen:
@@ -255,7 +302,7 @@ docker-compose up -d --build
 | **Database** | SQLite (für Cache, History, Einstellungen) |
 | **Container** | Docker, Docker Compose |
 | **LLM** | OpenAI, Anthropic, Azure, Ollama |
-| **OCR** | Ollama Vision API (qwen2.5vl, llava, etc.) |
+| **OCR** | Ollama Vision API (qwen3-vl, glm-ocr, minicpm-v, etc.) |
 
 ---
 
