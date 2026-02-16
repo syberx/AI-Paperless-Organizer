@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
     FileSearch,
     Play,
@@ -12,14 +12,56 @@ import {
 import clsx from 'clsx'
 import * as api from '../services/api'
 
-export default function SingleOcr() {
+interface SingleOcrProps {
+    initialDocId?: number | null
+}
+
+export default function SingleOcr({ initialDocId }: SingleOcrProps = {}) {
     const [docId, setDocId] = useState('')
+    const autoStartTriggered = useRef(false)
     const [loading, setLoading] = useState(false)
     const [result, setResult] = useState<api.OcrResult | null>(null)
     const [error, setError] = useState('')
     const [applying, setApplying] = useState(false)
     const [applied, setApplied] = useState(false)
     const [setFinishTag, setSetFinishTag] = useState(true)
+    const [forceOcr, setForceOcr] = useState(false)
+
+    // Auto-start when initialDocId is passed (from Review queue "Recheck" button)
+    useEffect(() => {
+        if (initialDocId && !autoStartTriggered.current) {
+            autoStartTriggered.current = true
+            setDocId(String(initialDocId))
+            setForceOcr(true)
+            setResult(null)
+            setError('')
+            setApplied(false)
+            // Small delay to let state update, then auto-start
+            setTimeout(() => {
+                runOcrForId(initialDocId)
+            }, 100)
+        }
+    }, [initialDocId])
+
+    // Reset trigger when initialDocId changes
+    useEffect(() => {
+        autoStartTriggered.current = false
+    }, [initialDocId])
+
+    const runOcrForId = async (id: number) => {
+        setLoading(true)
+        setResult(null)
+        setError('')
+        setApplied(false)
+        try {
+            const res = await api.ocrSingleDocument(id, true)
+            setResult(res)
+        } catch (e: any) {
+            setError(e?.message || 'Unbekannter Fehler')
+        } finally {
+            setLoading(false)
+        }
+    }
 
     const runOcr = async () => {
         const id = parseInt(docId)
@@ -31,7 +73,7 @@ export default function SingleOcr() {
         setApplied(false)
 
         try {
-            const res = await api.ocrSingleDocument(id)
+            const res = await api.ocrSingleDocument(id, forceOcr)
             setResult(res)
         } catch (e: any) {
             setError(e?.message || 'Unbekannter Fehler')
@@ -111,7 +153,7 @@ export default function SingleOcr() {
                         </button>
                     </div>
 
-                    <div className="flex items-center gap-3 mt-4">
+                    <div className="flex items-center gap-6 mt-4">
                         <label className="flex items-center gap-2 cursor-pointer text-sm text-surface-400 hover:text-surface-200 transition-colors">
                             <input
                                 type="checkbox"
@@ -120,6 +162,18 @@ export default function SingleOcr() {
                                 className="rounded bg-surface-700 border-surface-600 text-cyan-500 focus:ring-cyan-500/30"
                             />
                             <span>ocrfinish-Tag setzen</span>
+                        </label>
+
+                        <label className="flex items-center gap-2 cursor-pointer text-sm text-surface-400 hover:text-surface-200 transition-colors">
+                            <input
+                                type="checkbox"
+                                checked={forceOcr}
+                                onChange={(e) => setForceOcr(e.target.checked)}
+                                className="rounded bg-surface-700 border-surface-600 text-amber-500 focus:ring-amber-500/30"
+                            />
+                            <span className={clsx(forceOcr && "text-amber-400 font-medium")}>
+                                Neuberechnung erzwingen (Force OCR)
+                            </span>
                         </label>
                     </div>
                 </div>
@@ -222,8 +276,8 @@ export default function SingleOcr() {
                         <div className="p-5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-3">
                             <CheckCircle2 className="w-6 h-6 text-emerald-400" />
                             <div>
-                                <p className="font-bold text-emerald-200">Text erfolgreich übernommen!</p>
-                                <p className="text-sm text-emerald-300/70 mt-0.5">Das Dokument wurde in Paperless-ngx aktualisiert.</p>
+                                <p className="font-bold text-emerald-200">Text wird gespeichert!</p>
+                                <p className="text-sm text-emerald-300/70 mt-0.5">Paperless-ngx aktualisiert den Suchindex im Hintergrund. Das kann einige Sekunden dauern.</p>
                             </div>
                         </div>
                     )}

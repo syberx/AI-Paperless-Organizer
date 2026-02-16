@@ -64,12 +64,21 @@ Thumbs.db
 backend/data/*.db
 backend/data/*.sqlite
 backend/data/*.sqlite3
+backend/data/ocr_stats.json
+backend/data/ocr_settings.json
+backend/data/ocr_review_queue.json
+backend/data/failed_ocr_debug.png
 *.db
 *.sqlite
 *.sqlite3
 
 # Aber: Behalte das data Verzeichnis
 !backend/data/.gitkeep
+
+# Debug-Skripte (können lokale DB/Token referenzieren)
+backend/app/debug_5529.py
+backend/app/simple_debug.py
+backend/app/start_retry.py
 
 # =========================
 # Environment & Secrets

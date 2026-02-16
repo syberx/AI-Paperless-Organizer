@@ -71,7 +71,7 @@ watchdog_state = {
 class OcrService:
     """Service for OCR using Ollama Vision models."""
     
-    def __init__(self, ollama_url: str = DEFAULT_OLLAMA_URL, model: str = DEFAULT_OCR_MODEL, ollama_urls: List[str] = None):
+    def __init__(self, ollama_url: str = DEFAULT_OLLAMA_URL, model: str = DEFAULT_OCR_MODEL, ollama_urls: List[str] = None, max_image_size: int = 1344, smart_skip_enabled: bool = True):
         if ollama_urls and len(ollama_urls) > 0:
             self.ollama_urls = [u.rstrip("/") for u in ollama_urls if u.strip()]
         else:
@@ -79,6 +79,8 @@ class OcrService:
             
         self.current_url_index = 0
         self.model = model
+        self.max_image_size = max_image_size
+        self.smart_skip_enabled = smart_skip_enabled
     
     def get_current_url(self) -> str:
         if not self.ollama_urls:
@@ -129,19 +131,129 @@ class OcrService:
             "tried_urls": self.ollama_urls
         }
     
-    def _prepare_image_for_ollama(self, img: Image.Image, max_size: int = 2240) -> bytes:
+    @staticmethod
+    def get_model_params(model_name: str) -> dict:
+        """Get optimal OCR parameters based on model name/size.
+        
+        Model-specific overrides come first (deepseek-ocr, glm-ocr, etc.)
+        then generic size-based defaults for Qwen and similar.
+        """
+        name = model_name.lower()
+
+        # ── deepseek-ocr (3.3B, own encoder, needs <|grounding|> prompt) ──
+        if "deepseek-ocr" in name:
+            return {
+                "max_image_size": 1344,
+                "render_dpi": 300,
+                "num_ctx": 8192,
+                "num_predict": 8192,
+                "repeat_penalty": 1.4,
+                "temperature": 0.1,
+            }
+
+        # ── glm-ocr (1.1B, GLM-V encoder-decoder, 128K context) ──
+        if "glm-ocr" in name or "glm_ocr" in name:
+            return {
+                "max_image_size": 1344,
+                "render_dpi": 300,
+                "num_ctx": 8192,
+                "num_predict": 8192,
+                "repeat_penalty": 1.3,
+                "temperature": 0.1,
+            }
+
+        # ── gemma3 (echoes long prompts, keep image small) ──
+        if "gemma3" in name or "gemma-3" in name:
+            return {
+                "max_image_size": 1344,
+                "render_dpi": 300,
+                "num_ctx": 8192,
+                "num_predict": 8192,
+                "repeat_penalty": 1.3,
+                "temperature": 0.1,
+            }
+
+        # ── minicpm-v (8B, strong OCR, supports up to 1.8M pixels) ──
+        if "minicpm" in name:
+            return {
+                "max_image_size": 1344,
+                "render_dpi": 300,
+                "num_ctx": 8192,
+                "num_predict": 8192,
+                "repeat_penalty": 1.2,
+                "temperature": 0.1,
+            }
+        
+        # ── Generic size-based defaults (Qwen, etc.) ──
+        # render_dpi=400 gives high-quality source for downscaling (A4 @ 400 DPI = ~3307x4677px)
+        # max_image_size controls the final pixel size sent to the model
+        param_size = 0
+        if ":1b" in name or ":1.5b" in name or ":2b" in name or ":3b" in name:
+            param_size = 3
+        elif ":4b" in name or ":5b" in name:
+            param_size = 4
+        elif ":7b" in name or ":8b" in name:
+            param_size = 8
+        elif ":13b" in name or ":14b" in name or ":15b" in name:
+            param_size = 14
+        elif ":32b" in name or ":34b" in name:
+            param_size = 32
+        elif ":70b" in name or ":72b" in name:
+            param_size = 70
+        else:
+            param_size = 4  # Conservative default
+        
+        if param_size <= 4:
+            return {
+                "max_image_size": 1344,
+                "render_dpi": 400,
+                "num_ctx": 8192,
+                "num_predict": 8192,
+                "repeat_penalty": 1.3,
+                "temperature": 0.1,
+            }
+        elif param_size <= 8:
+            return {
+                "max_image_size": 1344,
+                "render_dpi": 400,
+                "num_ctx": 16384,
+                "num_predict": 16384,
+                "repeat_penalty": 1.2,
+                "temperature": 0.1,
+            }
+        elif param_size <= 14:
+            return {
+                "max_image_size": 1680,
+                "render_dpi": 400,
+                "num_ctx": 16384,
+                "num_predict": 16384,
+                "repeat_penalty": 1.2,
+                "temperature": 0.1,
+            }
+        else:
+            return {
+                "max_image_size": 2016,
+                "render_dpi": 400,
+                "num_ctx": 32768,
+                "num_predict": 16384,
+                "repeat_penalty": 1.1,
+                "temperature": 0.1,
+            }
+
+    def _prepare_image_for_ollama(self, img: Image.Image, max_size: int = None) -> bytes:
         """Convert PIL Image to PNG bytes, resized and aligned for Ollama Vision.
         
         qwen2.5vl requires dimensions visible by 28.
-        We resize to max 2240px (80*28) for high quality.
+        Uses configured max_image_size (default 1344) or override.
         """
+        target_size = max_size if max_size is not None else self.max_image_size
         try:
             if img.mode not in ("RGB", "L"):
                 img = img.convert("RGB")
             
             w, h = img.size
-            if max(w, h) > max_size:
-                ratio = max_size / max(w, h)
+            if max(w, h) > target_size:
+                ratio = target_size / max(w, h)
                 w = int(w * ratio)
                 h = int(h * ratio)
             
@@ -150,6 +262,7 @@ class OcrService:
             h = max(28, (h // 28) * 28)
             
             img = img.resize((w, h), Image.LANCZOS)
+            logger.info(f"Prepared image size: {w}x{h}")
             
             output = io.BytesIO()
             img.save(output, format="PNG")
@@ -173,9 +286,151 @@ class OcrService:
                 continue
         return False
 
-    async def _ocr_single_image(self, image_bytes: bytes) -> str:
-        """Run OCR on a single prepared image bytes block. Retries with failover URLs."""
+    @staticmethod
+    def _strip_reasoning(text: str) -> str:
+        """Remove <think>...</think> reasoning blocks from model output.
+        Inspired by paperless-gpt's stripReasoning approach."""
+        import re
+        cleaned = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+        return cleaned if cleaned else text.strip()
+
+    def _build_ocr_prompt(self, page_num: int = 0, total_pages: int = 0) -> str:
+        """Build model-specific OCR prompt.
+        
+        Based on paperless-gpt's proven universal prompt as baseline.
+        Model-specific adjustments only where absolutely needed:
+        - deepseek-ocr: Minimal prompt (echoes anything longer)
+        - glm-ocr: Keyword format per official docs
+        - gemma3: Shorter version (echoes long prompts)
+        - minicpm-v / qwen (default): Full paperless-gpt style prompt
+        """
+        name = (self.model or "").lower()
+
+        # ── deepseek-ocr: ultra-minimal, NO <|grounding|> (that's for bounding boxes!) ──
+        if "deepseek-ocr" in name:
+            return "OCR this document."
+
+        # ── glm-ocr: keyword-based per official Ollama docs ──
+        if "glm-ocr" in name or "glm_ocr" in name:
+            return "Text Recognition:"
+
+        # ── gemma3: shorter prompt (echoes/repeats long prompts verbatim) ──
+        if "gemma3" in name or "gemma-3" in name:
+            prompt = (
+                "Just transcribe the text in this image. Preserve the formatting and layout. "
+                "Be thorough, continue until the bottom of the page. "
+                "Use markdown format but without a code block."
+            )
+            if page_num > 0 and total_pages > 0:
+                prompt += f" This is page {page_num} of {total_pages}."
+            return prompt
+
+        # ── Default: paperless-gpt proven prompt + German hints ──
+        # Works for: qwen2.5vl, qwen3-vl, minicpm-v, and other full-featured models
+        parts = [
+            "Just transcribe the text in this image and preserve the formatting and layout (high quality OCR).",
+            "Do that for ALL the text in the image. Be thorough and pay attention. This is very important.",
+            "The image is from a text document so be sure to continue until the bottom of the page.",
+            "Thanks a lot! You tend to forget about some text in the image so please focus!",
+            "Use markdown format but without a code block.",
+        ]
+        if page_num > 0 and total_pages > 0:
+            parts.append(f"This is page {page_num} of {total_pages}.")
+        parts.append(
+            "The document is likely in German. "
+            "Pay special attention to: names, dates (DD.MM.YYYY), "
+            "IBANs, BIC codes, account numbers, monetary amounts, and addresses. "
+            "Transcribe everything exactly as shown."
+        )
+        return "\n".join(parts)
+
+    @staticmethod
+    def _clean_repetitions(text: str) -> str:
+        """Detect and remove repetition loops from OCR output.
+        
+        Some models (e.g. deepseek-ocr) echo instruction phrases in a loop.
+        Truncate at the first long run of the same line, then clean remaining repeats.
+        """
+        lines = text.split('\n')
+        if len(lines) < 5:
+            return text
+
+        # Truncate when the same line repeats many times in a row (instruction echo)
+        run_start = 0
+        last_stripped = ""
+        run_count = 0
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped and stripped == last_stripped:
+                run_count += 1
+                if run_count >= 5:
+                    lines = lines[:run_start]
+                    break
+            else:
+                run_start = i
+                run_count = 1 if stripped else 0
+                last_stripped = stripped
+
+        if len(lines) < 10:
+            return "\n".join(lines).strip()
+
+        cleaned = []
+        repeat_count = 0
+        last_line = ""
+
+        for line in lines:
+            stripped = line.strip()
+            if stripped == last_line and stripped:
+                repeat_count += 1
+                if repeat_count >= 3:
+                    continue
+            else:
+                repeat_count = 0
+            cleaned.append(line)
+            last_line = stripped
+
+        # Also detect multi-line pattern repetition (e.g. 2-line blocks repeating)
+        if len(cleaned) > 20:
+            result = []
+            seen_blocks = set()
+            i = 0
+            while i < len(cleaned):
+                block = (cleaned[i].strip(), cleaned[i+1].strip() if i+1 < len(cleaned) else "")
+                block_key = f"{block[0]}||{block[1]}"
+                if block_key in seen_blocks and block[0] and block[1]:
+                    i += 2
+                    continue
+                seen_blocks.add(block_key)
+                result.append(cleaned[i])
+                i += 1
+            cleaned = result
+
+        original_lines = len(lines)
+        cleaned_lines = len(cleaned)
+        if original_lines - cleaned_lines > 5:
+            print(f"[OCR] Repetition cleanup: {original_lines} -> {cleaned_lines} lines (removed {original_lines - cleaned_lines} repeated lines)")
+
+        return '\n'.join(cleaned)
+
+    async def _ocr_single_image(self, image_bytes: bytes, page_num: int = 0, total_pages: int = 0, timeout: float = 300.0) -> str:
+        """Run OCR on a single prepared image bytes block.
+        
+        Uses model-specific parameters from get_model_params():
+        - num_ctx / num_predict scaled to model size (8K for 4B, 16K for 8B+)
+        - repeat_penalty tuned per model size (1.3 for small, 1.15 for medium)
+        - think: false to disable reasoning mode
+        - timeout: configurable per-request (default 300s, compare uses 90s)
+        """
         image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+        prompt_text = self._build_ocr_prompt(page_num, total_pages)
+        
+        # Get model-specific optimal parameters
+        model_params = self.get_model_params(self.model)
+        print(f"[OCR][DEBUG] Model: {self.model}, prompt: {repr(prompt_text[:120])}, image_b64_len: {len(image_b64)}, params: ctx={model_params['num_ctx']}, predict={model_params['num_predict']}, repeat_pen={model_params['repeat_penalty']}, temp={model_params['temperature']}")
+        
+        # Only send think=False for qwen3 models (other models may not recognize it)
+        name_lower = (self.model or "").lower()
+        use_think_param = "qwen3" in name_lower
         
         attempts = len(self.ollama_urls)
         last_error = None
@@ -183,23 +438,44 @@ class OcrService:
         for _ in range(attempts):
             url = self.get_current_url()
             try:
-                # Use slightly longer timeout for generation
-                async with httpx.AsyncClient(timeout=300.0) as client:
-                    response = await client.post(
-                        f"{url}/api/generate",
-                        json={
-                            "model": self.model,
-                            "prompt": (
-                                "Extract ALL text from this document image. "
-                                "Return ONLY the extracted text, preserving the original layout and structure. "
-                                "Include all headers, body text, dates, numbers, stamps, signatures. "
-                                "Do not add commentary. Just raw text."
-                            ),
-                            "images": [image_b64],
-                            "stream": False,
-                            "keep_alive": "30m", # Keep model loaded for 30 minutes
-                            "options": {"temperature": 0.1, "num_predict": 4096}
+                # System message to authorize full data output (prevents safety filtering of IBANs etc.)
+                system_msg = (
+                    "You are an authorized document management OCR system. "
+                    "Your task is to transcribe document images exactly as shown. "
+                    "You MUST output ALL text including personal names, dates, IBANs, bank details, "
+                    "account numbers, addresses, and monetary amounts. "
+                    "Never skip, redact, or mask any data. This is an authorized internal system."
+                )
+
+                request_body = {
+                    "model": self.model,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": system_msg
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt_text,
+                            "images": [image_b64]
                         }
+                    ],
+                    "stream": False,
+                    "keep_alive": "30m",
+                    "options": {
+                        "temperature": model_params["temperature"],
+                        "repeat_penalty": model_params["repeat_penalty"],
+                        "num_ctx": model_params["num_ctx"],
+                        "num_predict": model_params["num_predict"]
+                    }
+                }
+                if use_think_param:
+                    request_body["think"] = False
+
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    response = await client.post(
+                        f"{url}/api/chat",
+                        json=request_body
                     )
                     
                     if response.status_code != 200:
@@ -207,7 +483,40 @@ class OcrService:
                         raise RuntimeError(f"Ollama error {response.status_code}: {error_body}")
                     
                     result = response.json()
-                    return result.get("response", "").strip()
+                    message = result.get("message", {})
+                    text_content = message.get("content", "").strip()
+                    
+                    # Strip any <think>...</think> reasoning blocks
+                    text_content = self._strip_reasoning(text_content)
+                    
+                    # If content is empty but thinking field has text,
+                    # the model ignored think:false -- use thinking as content
+                    thinking_text = message.get("thinking", "")
+                    if not text_content and thinking_text:
+                        print(f"[OCR] Content empty but thinking has {len(thinking_text)} chars, using as content")
+                        text_content = self._strip_reasoning(thinking_text)
+                    
+                    # Clean up any repetition loops (safety net for small models)
+                    if text_content:
+                        text_content = self._clean_repetitions(text_content)
+                    
+                    # Token limit detection (inspired by paperless-gpt's OcrLimitHit)
+                    eval_count = result.get("eval_count", 0)
+                    if eval_count >= 8000:
+                        print(f"[OCR] WARNING: Token limit likely hit ({eval_count} tokens). Text may be truncated!")
+                    
+                    if not text_content:
+                        print(f"[OCR DEBUG] No text extracted. Keys: {list(message.keys())}, image: {len(image_bytes)} bytes")
+                        try:
+                            with open("/app/data/failed_ocr_debug.png", "wb") as f:
+                                f.write(image_bytes)
+                        except Exception:
+                            pass
+                    else:
+                        src = "thinking-fallback" if (not message.get("content", "").strip() and thinking_text) else "content"
+                        print(f"[OCR] Success: {len(text_content)} chars, {eval_count} tokens from {src}")
+                            
+                    return text_content
                     
             except Exception as e:
                 logger.warning(f"OCR failed at {url}: {e}")
@@ -265,7 +574,48 @@ class OcrService:
                 pass
         return []
 
-    async def ocr_document(self, paperless_client, document_id: int) -> Dict[str, Any]:
+    
+    def _extract_text_from_pdf(self, file_bytes: bytes) -> Optional[str]:
+        """Extract text from PDF bytes using pypdf.
+        
+        Refined Logic (v1.1.7):
+        - If text is found, we check metadata.
+        - If metadata indicates previous OCR (Abbyy, Tesseract, Paperless), we IGNORE the text 
+          and return None (force new Vision OCR), because the user wants to improve it.
+        - If metadata indicates 'Digital Born' (Word, LaTeX, Invoice Systems), we RETURN the text (Skip OCR).
+        """
+        # If Smart-Skip is disabled via settings, always return None to force OCR
+        if not self.smart_skip_enabled:
+            logger.info("Smart-Skip disabled in settings. Forcing OCR.")
+            return None
+
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(io.BytesIO(file_bytes))
+            
+            # 1. Check Metadata for "Bad" OCR sources
+            meta = reader.metadata or {}
+            creator = (meta.get("/Creator", "") or "").lower()
+            producer = (meta.get("/Producer", "") or "").lower()
+            
+            ocr_keywords = ["abbyy", "finereader", "tesseract", "paperless", "ocr", "scan"]
+            if any(k in creator for k in ocr_keywords) or any(k in producer for k in ocr_keywords):
+                logger.info(f"Detected previous OCR tool in metadata ({creator} / {producer}). Forcing new OCR.")
+                return None
+            
+            # 2. Extract Text (if not blacklisted)
+            text = ""
+            # Limit to first 5 pages for detection speed
+            for i, page in enumerate(reader.pages):
+                if i > 5: break 
+                text += page.extract_text() + "\n\n"
+            
+            return text.strip()
+        except Exception as e:
+            logger.warning(f"Native PDF text extraction failed: {e}")
+            return None
+
+    async def ocr_document(self, paperless_client, document_id: int, force: bool = False) -> Dict[str, Any]:
         """OCR a document (all pages). Download original file, convert pages to images, OCR each."""
         start_time = time.time()
         print(f"[OCR] Starting OCR for document {document_id}")
@@ -286,13 +636,47 @@ class OcrService:
         except Exception as e:
             raise ValueError(f"Download fehlgeschlagen: {e}")
 
-        # Convert to images
+        # OPTIMIZATION: Check for native text first (skip OCR if present)
+        # Unless force=True is passed
+        if not force:
+            native_text = self._extract_text_from_pdf(file_bytes)
+            if native_text and len(native_text) > 50:
+                logger.info(f"Found native text in PDF ({len(native_text)} chars). Skipping OCR.")
+                print(f"[OCR] Native text found ({len(native_text)} chars). Skipping vision OCR.")
+                
+                # Save stats for skipped document
+                try:
+                    duration = time.time() - start_time
+                    # Use a special model name to indicate skipped OCR
+                    original_model = self.model
+                    self.model = "native_pdf (skipped)" 
+                    self.save_stats(document_id, duration, 0, len(native_text))
+                    self.model = original_model
+                except Exception as e:
+                    logger.error(f"Failed to save skipped stats: {e}")
+
+                return {
+                    "document_id": document_id,
+                    "title": title,
+                    "old_content": old_content,
+                    "new_content": native_text,
+                    "old_length": len(old_content),
+                    "new_length": len(native_text),
+                    "source": "native_pdf"
+                }
+
+        # Convert to images with model-appropriate DPI
         images = []
+        model_params = self.get_model_params(self.model)
+        render_dpi = model_params.get("render_dpi", 200)
         try:
             # Try parsing as PDF first - run in thread pool to not block loop
             loop = asyncio.get_running_loop()
-            images = await loop.run_in_executor(None, convert_from_bytes, file_bytes)
-            msg = f"Converted PDF to {len(images)} pages"
+            images = await loop.run_in_executor(
+                None,
+                lambda: convert_from_bytes(file_bytes, dpi=render_dpi)
+            )
+            msg = f"Converted PDF to {len(images)} pages at {render_dpi} DPI"
             logger.info(msg)
             print(f"[OCR] {msg}")
         except Exception as e:
@@ -312,25 +696,32 @@ class OcrService:
 
         # Process all pages
         full_text_parts = []
-        errors = []
+        
         for i, img in enumerate(images):
             try:
                 msg = f"Processing page {i+1}/{len(images)}"
                 logger.info(msg)
                 print(f"[OCR] {msg}")
-                prepared_bytes = self._prepare_image_for_ollama(img)
-                page_text = await self._ocr_single_image(prepared_bytes)
-                if page_text:
-                    full_text_parts.append(page_text)
+                # Use model-optimal image size
+                model_params = self.get_model_params(self.model)
+                optimal_size = max(self.max_image_size, model_params["max_image_size"])
+                prepared_bytes = self._prepare_image_for_ollama(img, max_size=optimal_size)
+                page_text = await self._ocr_single_image(prepared_bytes, page_num=i+1, total_pages=len(images))
+                
+                if not page_text or not page_text.strip():
+                     raise ValueError("Empty result from OCR model")
+                     
+                full_text_parts.append(page_text)
             except Exception as e:
-                logger.error(f"Error processing page {i+1}: {e}")
-                print(f"[OCR] Error processing page {i+1}: {e}")
-                errors.append(f"Seite {i+1}: {e}")
+                # STRICT MODE: If ONE page fails, the whole document fails.
+                # We do not want partial documents in Paperless.
+                error_msg = f"Error on page {i+1}: {e}"
+                logger.error(error_msg)
+                print(f"[OCR] {error_msg}")
+                raise ValueError(f"Multi-page consistency check failed: {error_msg}")
 
-        if not full_text_parts:
-            # All pages failed
-            error_details = "; ".join(errors) if errors else "Result empty"
-            raise ValueError(f"OCR failed for all pages: {error_details}")
+        if len(full_text_parts) != len(images):
+             raise ValueError(f"Page count mismatch: Expected {len(images)}, got {len(full_text_parts)}")
 
         new_content = "\n\n".join(full_text_parts)
         
@@ -371,16 +762,28 @@ class OcrService:
         new_content: str,
         set_finish_tag: bool = True
     ) -> Dict[str, Any]:
-        """Apply OCR result to document and optionally set ocrfinish tag."""
-        # Update document content
+        """Apply OCR result to document and optionally set ocrfinish tag.
+        
+        Optimized v2 (inspired by paperless-gpt's approach):
+        - Content PATCH is sent with ONLY content (no tags) for faster re-indexing
+        - Tag is added separately via lightweight bulk_edit API (no re-index)
+        - get_document() call eliminated (was only needed to get tag list)
+        """
+        # Step 1: PATCH only content -- this triggers Paperless re-indexing
         await paperless_client.update_document(document_id, {"content": new_content})
         
+        # Step 2: Add ocrfinish tag via bulk_edit (lightweight, no content re-index)
         if set_finish_tag:
-            # Ensure ocrfinish tag exists
-            tag = await paperless_client.get_or_create_tag(TAG_OCR_FINISH)
-            tag_id = tag.get("id")
-            if tag_id:
-                await paperless_client.add_tag_to_document(document_id, tag_id)
+            try:
+                tag = await paperless_client.get_or_create_tag(TAG_OCR_FINISH)
+                tag_id = tag.get("id")
+                if tag_id:
+                    await paperless_client.bulk_update_documents(
+                        document_ids=[document_id],
+                        add_tags=[tag_id]
+                    )
+            except Exception as e:
+                logger.warning(f"Tag update failed (non-critical): {e}")
         
         return {"success": True, "document_id": document_id}
     
@@ -527,18 +930,27 @@ class OcrService:
                             save_review_queue(queue)
                         
                         if not needs_review:
-                            # Apply the new content
+                            # Step 1: PATCH only content (fast, no tag overhead)
                             await paperless_client.update_document(doc_id, {"content": new_content})
                             
-                            # Set ocrfinish tag
-                            if set_finish_tag and ocrfinish_tag_id:
-                                await paperless_client.add_tag_to_document(doc_id, ocrfinish_tag_id)
+                            # Step 2: Tag changes via lightweight bulk_edit API
+                            add_tags = []
+                            remove_tags = []
                             
-                            # Remove runocr tag if present
+                            if set_finish_tag and ocrfinish_tag_id:
+                                add_tags.append(ocrfinish_tag_id)
                             if remove_runocr_tag and runocr_tag_id:
-                                doc_tags = doc.get("tags", [])
-                                if runocr_tag_id in doc_tags:
-                                    await paperless_client.remove_tag_from_document(doc_id, runocr_tag_id)
+                                remove_tags.append(runocr_tag_id)
+                            
+                            if add_tags or remove_tags:
+                                try:
+                                    await paperless_client.bulk_update_documents(
+                                        document_ids=[doc_id],
+                                        add_tags=add_tags if add_tags else None,
+                                        remove_tags=remove_tags if remove_tags else None
+                                    )
+                                except Exception as e:
+                                    logger.warning(f"Tag update for doc {doc_id} failed: {e}")
                             
                             batch_state["log"].append(f"✅ {doc_title}: OCR erfolgreich ({new_len} Zeichen)")
                     else:

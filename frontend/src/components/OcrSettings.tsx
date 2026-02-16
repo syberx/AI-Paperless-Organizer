@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, Save, Wifi, CheckCircle2, XCircle, Loader2, Server, Clock, Zap } from 'lucide-react'
+import { Plus, Trash2, Save, Wifi, CheckCircle2, XCircle, Loader2, Server, Clock, Zap, RefreshCw } from 'lucide-react'
 import * as api from '../services/api'
 import clsx from 'clsx'
 
@@ -15,10 +15,27 @@ export default function OcrSettings() {
     const [watchdogInterval, setWatchdogInterval] = useState(5)
     const [editingIndex, setEditingIndex] = useState<number | null>(null)
     const [editValue, setEditValue] = useState('')
+    const [maxImageSize, setMaxImageSize] = useState(1344)
+    const [smartSkipEnabled, setSmartSkipEnabled] = useState(true)
+    const [availableModels, setAvailableModels] = useState<string[]>([])
+    const [loadingModels, setLoadingModels] = useState(false)
 
     useEffect(() => {
         loadSettings()
+        loadModels()
     }, [])
+
+    const loadModels = async () => {
+        setLoadingModels(true)
+        try {
+            const result = await api.getOllamaModels()
+            setAvailableModels(result.models || [])
+        } catch (e) {
+            console.error('Failed to load Ollama models', e)
+        } finally {
+            setLoadingModels(false)
+        }
+    }
 
     const loadSettings = async () => {
         try {
@@ -29,6 +46,9 @@ export default function OcrSettings() {
                 setOllamaUrls([settings.ollama_url])
             }
             setOcrModel(settings.model)
+            setMaxImageSize(settings.max_image_size || 1344)
+            setSmartSkipEnabled(settings.smart_skip_enabled !== undefined ? settings.smart_skip_enabled : true)
+
             if (settings.watchdog_enabled !== undefined) {
                 setWatchdogEnabled(settings.watchdog_enabled)
                 setWatchdogInterval(settings.watchdog_interval || 5)
@@ -50,7 +70,9 @@ export default function OcrSettings() {
             await api.saveOcrSettings({
                 ollama_url: primaryUrl,
                 ollama_urls: updatedUrls,
-                model: ocrModel
+                model: ocrModel,
+                max_image_size: maxImageSize,
+                smart_skip_enabled: smartSkipEnabled
             })
         }
     }
@@ -63,7 +85,9 @@ export default function OcrSettings() {
         await api.saveOcrSettings({
             ollama_url: primaryUrl,
             ollama_urls: updatedUrls,
-            model: ocrModel
+            model: ocrModel,
+            max_image_size: maxImageSize,
+            smart_skip_enabled: smartSkipEnabled
         })
     }
 
@@ -83,7 +107,9 @@ export default function OcrSettings() {
             await api.saveOcrSettings({
                 ollama_url: primaryUrl,
                 ollama_urls: updatedUrls,
-                model: ocrModel
+                model: ocrModel,
+                max_image_size: maxImageSize,
+                smart_skip_enabled: smartSkipEnabled
             })
         }
     }
@@ -99,7 +125,9 @@ export default function OcrSettings() {
             await api.saveOcrSettings({
                 ollama_url: primaryUrl,
                 ollama_urls: ollamaUrls,
-                model: ocrModel
+                model: ocrModel,
+                max_image_size: maxImageSize,
+                smart_skip_enabled: smartSkipEnabled
             })
             // Save watchdog settings separately
             await api.setWatchdogSettings(watchdogEnabled, watchdogInterval)
@@ -228,15 +256,98 @@ export default function OcrSettings() {
                 {/* Model */}
                 <div>
                     <label className="block text-sm font-medium text-surface-300 mb-2">
-                        OCR Modell <span className="text-surface-500 font-normal">(muss auf allen Servern installiert sein)</span>
+                        OCR Modell
                     </label>
-                    <input
-                        type="text"
-                        value={ocrModel}
-                        onChange={(e) => setOcrModel(e.target.value)}
-                        className="w-full input bg-surface-900/50 border-surface-700 focus:border-blue-500 font-mono text-sm"
-                        placeholder="qwen2.5vl:7b"
-                    />
+                    <div className="flex gap-2">
+                        {availableModels.length > 0 ? (
+                            <select
+                                value={ocrModel}
+                                onChange={(e) => setOcrModel(e.target.value)}
+                                className="flex-1 input bg-surface-900/50 border-surface-700 focus:border-blue-500 font-mono text-sm"
+                            >
+                                {!availableModels.includes(ocrModel) && ocrModel && (
+                                    <option value={ocrModel}>{ocrModel} (nicht installiert)</option>
+                                )}
+                                {availableModels.map(m => (
+                                    <option key={m} value={m}>{m}</option>
+                                ))}
+                            </select>
+                        ) : (
+                            <input
+                                type="text"
+                                value={ocrModel}
+                                onChange={(e) => setOcrModel(e.target.value)}
+                                className="flex-1 input bg-surface-900/50 border-surface-700 focus:border-blue-500 font-mono text-sm"
+                                placeholder="qwen3-vl:4b-instruct"
+                            />
+                        )}
+                        <button
+                            onClick={loadModels}
+                            disabled={loadingModels}
+                            className="btn bg-surface-700 hover:bg-surface-600 text-white border-surface-600 px-3"
+                            title="Modelle neu laden"
+                        >
+                            <RefreshCw className={clsx("w-4 h-4", loadingModels && "animate-spin")} />
+                        </button>
+                    </div>
+                    <p className="text-xs text-surface-500 mt-1">
+                        {availableModels.length > 0 ? (
+                            <span><span className="text-surface-300 font-bold">{availableModels.length}</span> Modelle auf Ollama gefunden.</span>
+                        ) : loadingModels ? (
+                            <span>Lade Modelle von Ollama...</span>
+                        ) : (
+                            <span>Keine Verbindung zu Ollama - Modellname manuell eingeben.</span>
+                        )}
+                        {' '}Empfohlen: <span className="text-surface-300 font-mono">qwen3-vl:4b-instruct</span>
+                    </p>
+                </div>
+
+                {/* Performance & Quality Settings */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Resolution */}
+                    <div>
+                        <label className="block text-sm font-medium text-surface-300 mb-2">
+                            Auflösung & Performance
+                        </label>
+                        <select
+                            value={maxImageSize}
+                            onChange={(e) => setMaxImageSize(parseInt(e.target.value))}
+                            className="w-full input bg-surface-900/50 border-surface-700 focus:border-blue-500 text-sm"
+                        >
+                            <option value={896}>896px - Schnell (wenig VRAM)</option>
+                            <option value={1120}>1120px - Standard</option>
+                            <option value={1344}>1344px - Hoch (Empfohlen)</option>
+                            <option value={1680}>1680px - Sehr hoch</option>
+                            <option value={2016}>2016px - Maximum (beste Qualität)</option>
+                        </select>
+                        <p className="text-xs text-surface-500 mt-1">
+                            Maximale Bildgröße die ans Modell gesendet wird. Quelle wird immer in 400 DPI gerendert.
+                        </p>
+                    </div>
+
+                    {/* Smart Skip */}
+                    <div>
+                        <label className="block text-sm font-medium text-surface-300 mb-2">
+                            Intelligente Funktionen
+                        </label>
+                        <div className="bg-surface-900/30 rounded-xl p-3 border border-surface-700/50">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <span className="text-sm font-medium text-surface-200 block">Smart-Skip (Metadaten)</span>
+                                    <p className="text-xs text-surface-500">Überspringt digitale PDFs, erzwingt bei Scans OCR</p>
+                                </div>
+                                <label className="relative inline-flex items-center cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        className="sr-only peer"
+                                        checked={smartSkipEnabled}
+                                        onChange={(e) => setSmartSkipEnabled(e.target.checked)}
+                                    />
+                                    <div className="w-9 h-5 bg-surface-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 {/* Watchdog / Continuous Mode */}

@@ -12,7 +12,15 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   })
 
   if (!response.ok) {
-    throw new Error(`API Error: ${response.status} ${response.statusText}`)
+    // Try to extract detailed error message from response body
+    let detail = ''
+    try {
+      const errorBody = await response.json()
+      detail = errorBody?.detail || ''
+    } catch {
+      // Response body not JSON, ignore
+    }
+    throw new Error(detail || `API Error: ${response.status} ${response.statusText}`)
   }
 
   return response.json()
@@ -462,9 +470,9 @@ export interface OcrStats {
 
 // OCR Settings
 export const getOcrSettings = () =>
-  fetchJson<{ ollama_url: string; ollama_urls: string[]; model: string; watchdog_enabled?: boolean; watchdog_interval?: number }>('/ocr/settings')
+  fetchJson<{ ollama_url: string; ollama_urls: string[]; model: string; max_image_size: number; smart_skip_enabled: boolean; watchdog_enabled?: boolean; watchdog_interval?: number }>('/ocr/settings')
 
-export const saveOcrSettings = (data: { ollama_url: string; ollama_urls?: string[]; model: string }) =>
+export const saveOcrSettings = (data: { ollama_url: string; ollama_urls?: string[]; model: string; max_image_size: number; smart_skip_enabled: boolean }) =>
   fetchJson<{ success: boolean }>('/ocr/settings', {
     method: 'POST',
     body: JSON.stringify(data)
@@ -491,8 +499,8 @@ export const getOcrStats = async () => {
   return fetchJson<OcrStats[]>('/ocr/stats')
 }
 // Single Document OCR
-export const ocrSingleDocument = (documentId: number) =>
-  fetchJson<OcrResult>(`/ocr/single/${documentId}`, { method: 'POST' })
+export const ocrSingleDocument = (documentId: number, force: boolean = false) =>
+  fetchJson<OcrResult>(`/ocr/single/${documentId}?force=${force}`, { method: 'POST' })
 
 export const applyOcrResult = (documentId: number, content: string, setFinishTag: boolean = true) =>
   fetchJson<{ success: boolean }>(`/ocr/apply/${documentId}`, {
@@ -579,3 +587,127 @@ export const applyReviewItem = (documentId: number) =>
 
 export const dismissReviewItem = (documentId: number) =>
   fetchJson<{ dismissed: boolean }>(`/ocr/review/dismiss/${documentId}`, { method: 'POST' })
+
+// --- OCR Model Comparison API ---
+
+export interface OcrModelCompareResult {
+  model: string
+  text: string
+  chars: number
+  duration_seconds: number
+  pages_processed: number
+  error: string | null
+}
+
+export interface OcrCompareResponse {
+  document_id: number
+  title: string
+  total_pages: number
+  compared_page: number
+  old_content: string
+  results: OcrModelCompareResult[]
+}
+
+export const getOllamaModels = () =>
+  fetchJson<{ models: string[]; current_model: string }>('/ocr/models')
+
+export const startOcrCompare = (documentId: number, models: string[], page: number = 1) =>
+  fetchJson<{ started: boolean; models: number }>('/ocr/compare', {
+    method: 'POST',
+    body: JSON.stringify({ document_id: documentId, models, page })
+  })
+
+export interface OcrCompareStatus {
+  running: boolean
+  phase: string
+  current_model: string
+  current_model_index: number
+  total_models: number
+  current_page: number
+  total_pages: number
+  models: string[]
+  document_id: number
+  title: string
+  old_content: string
+  compared_page: number
+  results: OcrModelCompareResult[]
+  error: string | null
+  elapsed_seconds: number
+}
+
+export const getOcrCompareStatus = () =>
+  fetchJson<OcrCompareStatus>('/ocr/compare/status')
+
+// OCR Quality Evaluation via external LLM
+export interface OcrSpecificError {
+  field: string
+  expected: string
+  got: string
+  severity: 'critical' | 'high' | 'medium' | 'low'
+}
+
+export interface OcrCategoryScores {
+  names_persons: number
+  dates_periods: number
+  iban_banking: number
+  amounts_numbers: number
+  addresses: number
+  form_logic: number
+  completeness: number
+  formatting: number
+  no_hallucinations: number
+  automatizability: number
+}
+
+export interface OcrEvaluationRanking {
+  rank: number
+  model: string
+  overall_score: number
+  category_scores?: OcrCategoryScores
+  speed_seconds?: number
+  strengths: string[]
+  weaknesses: string[]
+  specific_errors?: OcrSpecificError[]
+  verdict?: string
+}
+
+export interface OcrEvaluation {
+  ranking: OcrEvaluationRanking[]
+  best_quality?: string
+  best_speed?: string
+  best_value?: string
+  best_model?: string
+  recommendation?: string
+  critical_finding?: string
+  summary?: string
+  cross_comparison?: {
+    agreement?: string[]
+    disagreement?: string[]
+  }
+  quality_notes?: Record<string, string>
+  detected_errors?: Record<string, string[]>
+}
+
+export interface OcrEvaluateResponse {
+  success: boolean
+  evaluation: OcrEvaluation | null
+  provider?: string
+  model?: string
+  raw_response?: string
+  parse_error?: string
+}
+
+export const evaluateOcrResults = (documentTitle: string, results: OcrModelCompareResult[], evaluationModel?: string) =>
+  fetchJson<OcrEvaluateResponse>('/ocr/compare/evaluate', {
+    method: 'POST',
+    body: JSON.stringify({
+      document_title: documentTitle,
+      results: results.map(r => ({
+        model: r.model,
+        text: r.text,
+        chars: r.chars,
+        duration_seconds: r.duration_seconds
+      })),
+      evaluation_model: evaluationModel || null
+    })
+  })

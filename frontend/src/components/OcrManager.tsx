@@ -9,7 +9,8 @@ import {
     LayoutDashboard,
     Pause,
     FileSearch,
-    AlertCircle
+    AlertCircle,
+    FlaskConical
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
@@ -17,12 +18,20 @@ import OcrSettings from './OcrSettings'
 import OcrStats from './OcrStats'
 import SingleOcr from './SingleOcr'
 import OcrReview from './OcrReview'
+import OcrCompare from './OcrCompare'
 
 type BatchMode = 'all' | 'tagged' | 'manual'
-type Tab = 'processing' | 'single' | 'review' | 'stats' | 'settings'
+type Tab = 'processing' | 'single' | 'review' | 'compare' | 'stats' | 'settings'
 
 export default function OcrManager() {
     const [activeTab, setActiveTab] = useState<Tab>('processing')
+    const [recheckDocId, setRecheckDocId] = useState<number | null>(null)
+
+    // Handler: Review -> SingleOcr recheck
+    const handleRecheckDocument = (docId: number) => {
+        setRecheckDocId(docId)
+        setActiveTab('single')
+    }
 
     // Batch OCR state
     const [batchMode, setBatchMode] = useState<BatchMode>('all')
@@ -218,7 +227,7 @@ export default function OcrManager() {
                     Einstellungen
                 </button>
                 <button
-                    onClick={() => setActiveTab('single')}
+                    onClick={() => { setRecheckDocId(null); setActiveTab('single') }}
                     className={clsx(
                         'flex-1 py-3 px-4 rounded-lg text-sm font-medium transition-all duration-200 flex items-center justify-center gap-2',
                         activeTab === 'single'
@@ -228,6 +237,18 @@ export default function OcrManager() {
                 >
                     <FileSearch className="w-4 h-4" />
                     Einzel-OCR
+                </button>
+                <button
+                    onClick={() => setActiveTab('compare')}
+                    className={clsx(
+                        'flex-1 py-3 px-4 rounded-lg text-sm font-medium transition-all duration-200 flex items-center justify-center gap-2',
+                        activeTab === 'compare'
+                            ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/20 ring-1 ring-white/10'
+                            : 'text-surface-400 hover:text-white hover:bg-surface-700/50'
+                    )}
+                >
+                    <FlaskConical className="w-4 h-4" />
+                    Vergleich
                 </button>
                 <button
                     onClick={() => setActiveTab('review')}
@@ -430,14 +451,21 @@ export default function OcrManager() {
             {/* Tab: Einzel-OCR */}
             {activeTab === 'single' && (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                    <SingleOcr />
+                    <SingleOcr initialDocId={recheckDocId} />
+                </div>
+            )}
+
+            {/* Tab: Vergleich */}
+            {activeTab === 'compare' && (
+                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                    <OcrCompare />
                 </div>
             )}
 
             {/* Tab: Prüfen */}
             {activeTab === 'review' && (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                    <OcrReview />
+                    <OcrReview onRecheckDocument={handleRecheckDocument} />
                 </div>
             )}
         </div>

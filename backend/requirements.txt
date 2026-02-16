@@ -26,4 +26,5 @@ cryptography==42.0.2
 # Image processing (OCR)
 Pillow==10.2.0
 pdf2image==1.17.0
+pypdf==3.17.4
 
