@@ -7,13 +7,15 @@ import time
 import traceback
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi.responses import Response
 from pydantic import BaseModel
 from typing import Optional, List
 
 import httpx
 
 from app.services.paperless_client import PaperlessClient, get_paperless_client
-from app.services.ocr_service import OcrService, batch_state, watchdog_state, load_review_queue, save_review_queue, DEFAULT_OLLAMA_URL, DEFAULT_OCR_MODEL
+from app.services.ocr_service import OcrService, batch_state, watchdog_state, single_ocr_running, load_review_queue, save_review_queue, load_ocr_ignore_list, save_ocr_ignore_list, DEFAULT_OLLAMA_URL, DEFAULT_OCR_MODEL
+import app.services.ocr_service as ocr_service_module
 from app.services.llm_provider import LLMProviderService, get_llm_service
 
 logger = logging.getLogger(__name__)
@@ -137,7 +139,7 @@ async def save_ocr_settings_endpoint(request: OcrSettingsRequest, client: Paperl
 
 class WatchdogSettingsRequest(BaseModel):
     enabled: bool
-    interval_minutes: int = 5
+    interval_minutes: int = 1
 
 @router.get("/watchdog/status")
 async def get_watchdog_status():
@@ -217,7 +219,7 @@ async def on_startup():
             
             logger.info("Starting Watchdog on startup...")
             watchdog_state["enabled"] = True
-            watchdog_state["interval_minutes"] = ocr_settings.get("watchdog_interval", 5)
+            watchdog_state["interval_minutes"] = ocr_settings.get("watchdog_interval", 1)
             
             loop = asyncio.get_running_loop()
             watchdog_state["task"] = loop.create_task(service.watchdog_loop(client))
@@ -262,6 +264,35 @@ async def get_ocr_stats():
     return service.get_stats()
 
 
+@router.get("/status")
+async def get_ocr_status(
+    client: PaperlessClient = Depends(get_paperless_client)
+):
+    """Get overall OCR status - total docs, finished docs, percentage. Uses count-only queries for speed."""
+    try:
+        # Get ocrfinish tag ID (cached via get_or_create_tag)
+        ocrfinish_tag = await client.get_or_create_tag("ocrfinish")
+        ocrfinish_id = ocrfinish_tag.get("id")
+        
+        # Fast parallel count queries (page_size=1, only reads "count" field)
+        total_count = await client.get_document_count()
+        finished_count = await client.get_document_count(tag_id=ocrfinish_id) if ocrfinish_id else 0
+        
+        percentage = round((finished_count / total_count * 100), 1) if total_count > 0 else 0
+        pending_count = total_count - finished_count
+        
+        return {
+            "total_documents": total_count,
+            "finished_documents": finished_count,
+            "pending_documents": pending_count,
+            "percentage": percentage,
+            "ocrfinish_tag_id": ocrfinish_id
+        }
+    except Exception as e:
+        logger.error(f"Error getting OCR status: {e}")
+        raise HTTPException(status_code=500, detail=f"Fehler beim Abrufen des OCR-Status: {str(e)}")
+
+
 # --- Single Document OCR ---
 
 @router.post("/single/{document_id}")
@@ -272,20 +303,21 @@ async def ocr_single_document(
 ):
     """Run OCR on a single document and return old vs new content."""
     try:
+        ocr_service_module.single_ocr_running = True
         service = get_ocr_service()
         result = await service.ocr_document(client, document_id, force=force)
         return result
     except ValueError as e:
         error_msg = str(e)
         logger.error(f"OCR ValueError for doc {document_id}: {error_msg}")
-        # Only 404 if document truly not found in Paperless
         if "nicht gefunden" in error_msg and f"Dokument {document_id}" in error_msg:
             raise HTTPException(status_code=404, detail=error_msg)
-        # All other ValueErrors are processing errors -> 422
         raise HTTPException(status_code=422, detail=f"OCR Verarbeitungsfehler: {error_msg}")
     except Exception as e:
         logger.error(f"OCR single document error: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"OCR Fehler: {str(e)}")
+    finally:
+        ocr_service_module.single_ocr_running = False
 
 
 @router.post("/apply/{document_id}")
@@ -427,6 +459,121 @@ async def dismiss_review_item(document_id: int):
         raise HTTPException(status_code=404, detail="Dokument nicht in Review Queue")
     save_review_queue(new_queue)
     return {"dismissed": True, "document_id": document_id}
+
+
+@router.post("/review/ignore/{document_id}")
+async def ignore_review_item(document_id: int):
+    """Ignore document permanently: remove from review queue and add to OCR ignore list."""
+    # Remove from review queue
+    queue = load_review_queue()
+    item = next((q for q in queue if q["document_id"] == document_id), None)
+    title = item["title"] if item else f"Dokument {document_id}"
+    new_queue = [q for q in queue if q["document_id"] != document_id]
+    save_review_queue(new_queue)
+    
+    # Add to ignore list (avoid duplicates)
+    ignore_list = load_ocr_ignore_list()
+    if not any(entry["document_id"] == document_id for entry in ignore_list):
+        ignore_list.append({
+            "document_id": document_id,
+            "title": title,
+            "reason": "Original besser als OCR",
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S")
+        })
+        save_ocr_ignore_list(ignore_list)
+    
+    return {"ignored": True, "document_id": document_id, "title": title}
+
+
+# --- OCR Ignore List ---
+
+@router.get("/ignore/list")
+async def get_ocr_ignore_list():
+    """Get all documents on the OCR ignore list."""
+    ignore_list = load_ocr_ignore_list()
+    return {"items": ignore_list, "count": len(ignore_list)}
+
+
+@router.post("/ignore/add/{document_id}")
+async def add_to_ocr_ignore_list(
+    document_id: int,
+    client: PaperlessClient = Depends(get_paperless_client)
+):
+    """Add a document to the OCR ignore list."""
+    ignore_list = load_ocr_ignore_list()
+    if any(entry["document_id"] == document_id for entry in ignore_list):
+        return {"already_ignored": True, "document_id": document_id}
+    
+    # Try to get document title from Paperless
+    title = f"Dokument {document_id}"
+    try:
+        doc = await client.get_document(document_id)
+        if doc:
+            title = doc.get("title", title)
+    except Exception:
+        pass
+    
+    ignore_list.append({
+        "document_id": document_id,
+        "title": title,
+        "reason": "Original besser als OCR",
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S")
+    })
+    save_ocr_ignore_list(ignore_list)
+    return {"added": True, "document_id": document_id, "title": title}
+
+
+@router.delete("/ignore/remove/{document_id}")
+async def remove_from_ocr_ignore_list(document_id: int):
+    """Remove a document from the OCR ignore list."""
+    ignore_list = load_ocr_ignore_list()
+    new_list = [entry for entry in ignore_list if entry["document_id"] != document_id]
+    if len(new_list) == len(ignore_list):
+        raise HTTPException(status_code=404, detail="Dokument nicht in der Ignore-Liste")
+    save_ocr_ignore_list(new_list)
+    return {"removed": True, "document_id": document_id}
+
+
+# --- Document Preview Proxy ---
+
+@router.get("/preview/{document_id}")
+async def get_document_preview(
+    document_id: int,
+    client: PaperlessClient = Depends(get_paperless_client)
+):
+    """Proxy document preview from Paperless. Auto-detects PDF vs image."""
+    try:
+        file_bytes = await client.get_document_preview_image(document_id)
+        
+        if file_bytes[:4] == b'%PDF':
+            return Response(content=file_bytes, media_type="application/pdf")
+        elif file_bytes[:4] == b'\x89PNG':
+            return Response(content=file_bytes, media_type="image/png")
+        elif file_bytes[:2] == b'\xff\xd8':
+            return Response(content=file_bytes, media_type="image/jpeg")
+        elif file_bytes[:4] == b'RIFF':
+            return Response(content=file_bytes, media_type="image/webp")
+        else:
+            return Response(content=file_bytes, media_type="application/octet-stream")
+    except Exception as e:
+        logger.error(f"Error getting preview for {document_id}: {e}")
+        raise HTTPException(status_code=404, detail="Preview not found")
+
+
+@router.get("/thumbnail/{document_id}")
+async def get_document_thumbnail(
+    document_id: int,
+    client: PaperlessClient = Depends(get_paperless_client)
+):
+    """Proxy document thumbnail from Paperless (small image, handles auth)."""
+    try:
+        image_bytes = await client.get_document_thumbnail_bytes(document_id)
+        if image_bytes[:4] == b'\x89PNG':
+            return Response(content=image_bytes, media_type="image/png")
+        return Response(content=image_bytes, media_type="image/webp")
+    except Exception as e:
+        logger.error(f"Error getting thumbnail for {document_id}: {e}")
+        raise HTTPException(status_code=404, detail="Thumbnail not found")
 
 
 # --- OCR Model Comparison ---
@@ -677,7 +824,7 @@ async def _run_compare_job(paperless_client, document_id: int, models: list, tar
                         prepared_bytes,
                         page_num=page_idx + 1,
                         total_pages=total_pages,
-                        timeout=120.0
+                        timeout=300.0
                     )
                     # Debug: log first 200 chars of OCR result
                     preview = page_text[:200].replace('\n', ' ') if page_text else "(empty)"

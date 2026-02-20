@@ -8,10 +8,13 @@ import {
     FileText,
     Trash2,
     RefreshCw,
-    RotateCcw
+    RotateCcw,
+    Ban,
+    ShieldOff,
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
+import DocumentPreview from './DocumentPreview'
 
 interface ReviewItem {
     document_id: number
@@ -24,20 +27,30 @@ interface ReviewItem {
     timestamp: string
 }
 
+interface IgnoreItem {
+    document_id: number
+    title: string
+    reason: string
+    timestamp: string
+}
+
 interface OcrReviewProps {
     onRecheckDocument?: (docId: number) => void
 }
 
 export default function OcrReview({ onRecheckDocument }: OcrReviewProps = {}) {
     const [items, setItems] = useState<ReviewItem[]>([])
+    const [ignoreList, setIgnoreList] = useState<IgnoreItem[]>([])
     const [loading, setLoading] = useState(true)
     const [expandedId, setExpandedId] = useState<number | null>(null)
     const [actionLoading, setActionLoading] = useState<number | null>(null)
     const [error, setError] = useState('')
     const [success, setSuccess] = useState('')
+    const [showIgnoreList, setShowIgnoreList] = useState(false)
 
     useEffect(() => {
         loadQueue()
+        loadIgnoreList()
     }, [])
 
     const loadQueue = async () => {
@@ -49,6 +62,15 @@ export default function OcrReview({ onRecheckDocument }: OcrReviewProps = {}) {
             setError(e?.message || 'Fehler beim Laden')
         } finally {
             setLoading(false)
+        }
+    }
+
+    const loadIgnoreList = async () => {
+        try {
+            const data = await api.getOcrIgnoreList()
+            setIgnoreList(data.items || [])
+        } catch {
+            // silent
         }
     }
 
@@ -77,6 +99,37 @@ export default function OcrReview({ onRecheckDocument }: OcrReviewProps = {}) {
             setTimeout(() => setSuccess(''), 4000)
         } catch (e: any) {
             setError(e?.message || 'Fehler beim Verwerfen')
+        } finally {
+            setActionLoading(null)
+        }
+    }
+
+    const ignoreItem = async (docId: number, title: string) => {
+        setActionLoading(docId)
+        setError('')
+        try {
+            await api.ignoreReviewItem(docId)
+            setItems(prev => prev.filter(i => i.document_id !== docId))
+            setIgnoreList(prev => [...prev, { document_id: docId, title, reason: 'Original besser als OCR', timestamp: new Date().toISOString() }])
+            setSuccess(`"${title}" – Auf Ignore-Liste gesetzt. Wird bei zukünftigem OCR übersprungen.`)
+            setTimeout(() => setSuccess(''), 5000)
+        } catch (e: any) {
+            setError(e?.message || 'Fehler beim Ignorieren')
+        } finally {
+            setActionLoading(null)
+        }
+    }
+
+    const removeFromIgnoreList = async (docId: number, title: string) => {
+        setActionLoading(docId)
+        setError('')
+        try {
+            await api.removeFromOcrIgnoreList(docId)
+            setIgnoreList(prev => prev.filter(i => i.document_id !== docId))
+            setSuccess(`"${title}" – Von Ignore-Liste entfernt.`)
+            setTimeout(() => setSuccess(''), 4000)
+        } catch (e: any) {
+            setError(e?.message || 'Fehler beim Entfernen')
         } finally {
             setActionLoading(null)
         }
@@ -213,33 +266,48 @@ export default function OcrReview({ onRecheckDocument }: OcrReviewProps = {}) {
                                     <Trash2 className="w-4 h-4" />
                                     Verwerfen
                                 </button>
+                                <button
+                                    onClick={() => ignoreItem(item.document_id, item.title)}
+                                    disabled={actionLoading === item.document_id}
+                                    className="btn bg-surface-700 hover:bg-orange-600/80 text-surface-300 hover:text-white text-sm px-4 py-2 flex items-center gap-2 disabled:opacity-50"
+                                    title="Dauerhaft ignorieren — Original behalten, bei zukünftigem OCR überspringen"
+                                >
+                                    <Ban className="w-4 h-4" />
+                                    Ignorieren
+                                </button>
                             </div>
                         </div>
                     </div>
 
-                    {/* Expanded Text Comparison */}
+                    {/* Expanded: PDF Preview + Text Comparison */}
                     {expandedId === item.document_id && (
                         <div className="p-6 border-t border-surface-700/50 bg-surface-900/30 animate-in slide-in-from-top-2 duration-300">
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                {/* PDF Preview */}
+                                <div>
+                                    <DocumentPreview documentId={item.document_id} />
+                                </div>
+                                {/* Original OCR Text */}
                                 <div>
                                     <h4 className="text-sm font-semibold text-surface-300 mb-3 flex items-center gap-2">
                                         <span className="w-2 h-2 rounded-full bg-surface-500"></span>
                                         Original OCR
                                         <span className="text-xs text-surface-500 font-mono ml-auto">{item.old_length.toLocaleString()} Zeichen</span>
                                     </h4>
-                                    <div className="bg-surface-900/60 rounded-xl p-4 border border-surface-700/50 max-h-[400px] overflow-y-auto custom-scrollbar">
+                                    <div className="bg-surface-900/60 rounded-xl p-4 border border-surface-700/50 max-h-[500px] overflow-y-auto custom-scrollbar">
                                         <pre className="text-sm text-surface-300 whitespace-pre-wrap font-mono leading-relaxed">
                                             {item.old_content || '(leer)'}
                                         </pre>
                                     </div>
                                 </div>
+                                {/* New Vision OCR Text */}
                                 <div>
                                     <h4 className="text-sm font-semibold text-cyan-300 mb-3 flex items-center gap-2">
                                         <span className="w-2 h-2 rounded-full bg-cyan-500"></span>
                                         Ollama Vision OCR
                                         <span className="text-xs text-surface-500 font-mono ml-auto">{item.new_length.toLocaleString()} Zeichen</span>
                                     </h4>
-                                    <div className="bg-surface-900/60 rounded-xl p-4 border border-cyan-500/20 max-h-[400px] overflow-y-auto custom-scrollbar">
+                                    <div className="bg-surface-900/60 rounded-xl p-4 border border-cyan-500/20 max-h-[500px] overflow-y-auto custom-scrollbar">
                                         <pre className="text-sm text-cyan-100 whitespace-pre-wrap font-mono leading-relaxed">
                                             {item.new_content || '(leer)'}
                                         </pre>
@@ -250,6 +318,60 @@ export default function OcrReview({ onRecheckDocument }: OcrReviewProps = {}) {
                     )}
                 </div>
             ))}
+
+            {/* OCR Ignore List */}
+            {ignoreList.length > 0 && (
+                <div className="mt-8">
+                    <button
+                        onClick={() => setShowIgnoreList(!showIgnoreList)}
+                        className="flex items-center gap-3 text-surface-400 hover:text-surface-200 transition-colors mb-4"
+                    >
+                        <ShieldOff className="w-5 h-5" />
+                        <span className="font-semibold">OCR Ignore-Liste</span>
+                        <span className="px-2 py-0.5 text-xs bg-surface-700 text-surface-300 rounded-full">
+                            {ignoreList.length}
+                        </span>
+                        <span className="text-xs text-surface-500">
+                            {showIgnoreList ? '▲ ausblenden' : '▼ anzeigen'}
+                        </span>
+                    </button>
+
+                    {showIgnoreList && (
+                        <div className="space-y-2 animate-in slide-in-from-top-2 duration-200">
+                            <p className="text-sm text-surface-500 mb-3">
+                                Diese Dokumente werden bei zukünftigen OCR-Läufen übersprungen, da das Original besser ist.
+                            </p>
+                            {ignoreList.map(entry => (
+                                <div
+                                    key={entry.document_id}
+                                    className="flex items-center justify-between p-3 rounded-xl bg-surface-800/40 border border-surface-700/50"
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <Ban className="w-4 h-4 text-orange-400/60" />
+                                        <div>
+                                            <span className="text-sm text-surface-200 font-medium">{entry.title}</span>
+                                            <div className="flex items-center gap-2 text-xs text-surface-500">
+                                                <span className="font-mono">#{entry.document_id}</span>
+                                                <span>•</span>
+                                                <span>{new Date(entry.timestamp).toLocaleString('de-DE')}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={() => removeFromIgnoreList(entry.document_id, entry.title)}
+                                        disabled={actionLoading === entry.document_id}
+                                        className="btn bg-surface-700 hover:bg-surface-600 text-surface-400 hover:text-white text-xs px-3 py-1.5 flex items-center gap-1.5 disabled:opacity-50"
+                                        title="Von Ignore-Liste entfernen"
+                                    >
+                                        <XCircle className="w-3.5 h-3.5" />
+                                        Entfernen
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     )
 }

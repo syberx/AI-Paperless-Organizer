@@ -295,6 +295,63 @@ async def delete_empty_tags(
     }
 
 
+class BulkDeleteRequest(BaseModel):
+    tag_ids: List[int]
+
+@router.post("/bulk-delete")
+async def bulk_delete_tags(
+    request: BulkDeleteRequest,
+    client: PaperlessClient = Depends(get_paperless_client)
+):
+    """Delete multiple tags in one request using a shared HTTP connection."""
+    try:
+        result = await client.delete_tags_bulk(request.tag_ids)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class RemoveFromAnalysesRequest(BaseModel):
+    tag_ids: List[int]
+
+@router.post("/saved-analyses/remove-tags")
+async def remove_tags_from_saved_analyses(
+    request: RemoveFromAnalysesRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """Remove deleted tag IDs from ALL saved analyses so they don't reappear."""
+    removed_ids = set(request.tag_ids)
+    updated = {}
+    
+    analysis_types = {
+        "tags_nonsense": {"id_field": "id", "key": "nonsense"},
+        "tags_correspondents": {"id_field": "tag_id", "key": "correspondent"},
+        "tags_doctypes": {"id_field": "tag_id", "key": "doctype"},
+    }
+    
+    for entity_type, config in analysis_types.items():
+        result = await db.execute(
+            select(SavedAnalysis)
+            .where(SavedAnalysis.entity_type == entity_type)
+            .order_by(SavedAnalysis.created_at.desc())
+            .limit(1)
+        )
+        saved = result.scalar_one_or_none()
+        if not saved or not saved.groups:
+            continue
+        
+        id_field = config["id_field"]
+        original_count = len(saved.groups)
+        filtered = [item for item in saved.groups if item.get(id_field) not in removed_ids]
+        
+        if len(filtered) < original_count:
+            saved.groups = filtered
+            saved.groups_count = len(filtered)
+            updated[config["key"]] = {"before": original_count, "after": len(filtered)}
+    
+    await db.commit()
+    return {"success": True, "updated": updated}
+
 @router.delete("/{tag_id}")
 async def delete_tag(
     tag_id: int,

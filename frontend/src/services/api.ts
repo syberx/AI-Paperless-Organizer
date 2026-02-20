@@ -229,6 +229,16 @@ export const deleteEmptyTags = () =>
 export const deleteTag = (tagId: number) =>
   fetchJson<{ success: boolean; message: string }>(`/tags/${tagId}`, { method: 'DELETE' })
 
+export const bulkDeleteTags = (tagIds: number[]) =>
+  fetchJson<{ deleted: number[]; deleted_count: number; errors: { tag_id: number; error: string }[] }>(
+    '/tags/bulk-delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tag_ids: tagIds }) }
+  )
+
+export const removeTagsFromSavedAnalyses = (tagIds: number[]) =>
+  fetchJson<{ success: boolean; updated: Record<string, { before: number; after: number }> }>(
+    '/tags/saved-analyses/remove-tags', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tag_ids: tagIds }) }
+  )
+
 export const analyzeNonsenseTags = () =>
   fetchJson<{ nonsense_tags: any[]; stats?: AnalysisStats; error?: string }>('/tags/analyze-nonsense', { method: 'POST' })
 
@@ -466,6 +476,7 @@ export interface OcrStats {
   chars: number
   duration: number
   server: string
+  success?: boolean
 }
 
 // OCR Settings
@@ -498,6 +509,19 @@ export const testOcrConnection = async () => {
 export const getOcrStats = async () => {
   return fetchJson<OcrStats[]>('/ocr/stats')
 }
+
+export interface OcrStatus {
+  total_documents: number
+  finished_documents: number
+  pending_documents: number
+  percentage: number
+  ocrfinish_tag_id: number | null
+}
+
+export const getOcrStatus = async () => {
+  return fetchJson<OcrStatus>('/ocr/status')
+}
+
 // Single Document OCR
 export const ocrSingleDocument = (documentId: number, force: boolean = false) =>
   fetchJson<OcrResult>(`/ocr/single/${documentId}?force=${force}`, { method: 'POST' })
@@ -531,7 +555,7 @@ export const resumeBatchOcr = () =>
 export const getWatchdogStatus = () =>
   fetchJson<WatchdogStatus>('/ocr/watchdog/status')
 
-export const setWatchdogSettings = (enabled: boolean, intervalMinutes: number = 5) =>
+export const setWatchdogSettings = (enabled: boolean, intervalMinutes: number = 1) =>
   fetchJson<{ success: boolean }>('/ocr/watchdog/settings', {
     method: 'POST',
     body: JSON.stringify({ enabled, interval_minutes: intervalMinutes })
@@ -552,8 +576,8 @@ export interface ScanResult {
   total_count: number
 }
 
-export const scanJunkDocuments = (query: string, limit: number = 50) =>
-  fetchJson<ScanResult>(`/cleanup/scan?query=${encodeURIComponent(query)}&limit=${limit}`)
+export const scanJunkDocuments = (query: string, limit: number = 50, searchContent: boolean = false) =>
+  fetchJson<ScanResult>(`/cleanup/scan?query=${encodeURIComponent(query)}&limit=${limit}&search_content=${searchContent}`)
 
 export const deleteJunkDocuments = (ids: number[]) =>
   fetchJson<{ success: boolean; deleted_count: number; errors: any[] }>('/cleanup/delete', {
@@ -587,6 +611,32 @@ export const applyReviewItem = (documentId: number) =>
 
 export const dismissReviewItem = (documentId: number) =>
   fetchJson<{ dismissed: boolean }>(`/ocr/review/dismiss/${documentId}`, { method: 'POST' })
+
+export const ignoreReviewItem = (documentId: number) =>
+  fetchJson<{ ignored: boolean; document_id: number; title: string }>(`/ocr/review/ignore/${documentId}`, { method: 'POST' })
+
+// --- OCR Ignore List API ---
+
+export interface OcrIgnoreItem {
+  document_id: number
+  title: string
+  reason: string
+  timestamp: string
+}
+
+export interface OcrIgnoreListResponse {
+  items: OcrIgnoreItem[]
+  count: number
+}
+
+export const getOcrIgnoreList = () =>
+  fetchJson<OcrIgnoreListResponse>('/ocr/ignore/list')
+
+export const addToOcrIgnoreList = (documentId: number) =>
+  fetchJson<{ added: boolean; document_id: number }>(`/ocr/ignore/add/${documentId}`, { method: 'POST' })
+
+export const removeFromOcrIgnoreList = (documentId: number) =>
+  fetchJson<{ removed: boolean; document_id: number }>(`/ocr/ignore/remove/${documentId}`, { method: 'DELETE' })
 
 // --- OCR Model Comparison API ---
 

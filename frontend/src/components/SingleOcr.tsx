@@ -7,10 +7,11 @@ import {
     XCircle,
     ArrowRightLeft,
     FileText,
-    AlertTriangle
+    AlertTriangle,
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
+import DocumentPreview from './DocumentPreview'
 
 interface SingleOcrProps {
     initialDocId?: number | null
@@ -88,6 +89,12 @@ export default function SingleOcr({ initialDocId }: SingleOcrProps = {}) {
         try {
             await api.applyOcrResult(result.document_id, result.new_content, setFinishTag)
             setApplied(true)
+            // If this document was in the review queue, remove it silently
+            try {
+                await api.dismissReviewItem(result.document_id)
+            } catch {
+                // Not in review queue — that's fine
+            }
         } catch (e: any) {
             setError(e?.message || 'Fehler beim Übertragen')
         } finally {
@@ -229,9 +236,14 @@ export default function SingleOcr({ initialDocId }: SingleOcrProps = {}) {
                             </div>
                         )}
 
-                        {/* Text Comparison */}
+                        {/* PDF Preview + Text Comparison */}
                         <div className="p-6">
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                {/* PDF Preview */}
+                                <div>
+                                    <DocumentPreview documentId={result.document_id} />
+                                </div>
+                                {/* Original OCR Text */}
                                 <div>
                                     <h4 className="text-sm font-semibold text-surface-300 mb-3 flex items-center gap-2">
                                         <span className="w-2 h-2 rounded-full bg-surface-500"></span>
@@ -244,6 +256,7 @@ export default function SingleOcr({ initialDocId }: SingleOcrProps = {}) {
                                         </pre>
                                     </div>
                                 </div>
+                                {/* New Vision OCR Text */}
                                 <div>
                                     <h4 className="text-sm font-semibold text-cyan-300 mb-3 flex items-center gap-2">
                                         <span className="w-2 h-2 rounded-full bg-cyan-500"></span>

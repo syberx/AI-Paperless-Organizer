@@ -96,6 +96,13 @@ Dokumente mit besserer OCR-Erkennung neu verarbeiten – powered by **Ollama Vis
 - **Tag-basierter Workflow**: `runocr` und `ocrfinish` Tags für flexible Steuerung
 - **Ollama-Modelle automatisch erkennen**: Dropdown in den Einstellungen statt manueller Eingabe
 
+<div align="center">
+
+![OCR Statistiken](docs/screenshots/ocr-stats.png)
+*OCR Gesamtstatus mit Fortschritt, Statistiken und letzten Aktivitäten*
+
+</div>
+
 > 💡 **Vorteil:** Deine Dokumente verlassen nie den Server – Ollama läuft lokal!
 
 ### 🏆 OCR Modell-Vergleich & KI-Benchmark

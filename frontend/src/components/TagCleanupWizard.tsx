@@ -127,6 +127,10 @@ export default function TagCleanupWizard() {
   const [savedSimilarInfo, setSavedSimilarInfo] = useState<{ exists: boolean; created_at?: string } | null>(null)
   
   
+  // Auto-refresh: track when data was last loaded from backend
+  const [lastDataLoad, setLastDataLoad] = useState<number>(0)
+  const CACHE_MAX_AGE_MS = 5 * 60 * 1000 // 5 minutes
+  
   // Confirmation modal for AI analysis
   const [confirmModal, setConfirmModal] = useState<AnalysisConfirmInfo | null>(null)
   const [confirmEstimate, setConfirmEstimate] = useState<{
@@ -150,6 +154,15 @@ export default function TagCleanupWizard() {
     loadIgnoredItemIds()
     loadSavedAnalysisInfo()
   }, [])
+  
+  // Auto-refresh data when switching steps if cache is older than 5 min
+  useEffect(() => {
+    if (lastDataLoad > 0 && Date.now() - lastDataLoad > CACHE_MAX_AGE_MS) {
+      api.refreshPaperlessCache().catch(() => {})
+      loadInitialData()
+      loadSavedAnalysisInfo()
+    }
+  }, [currentStep])
   
   // Load document previews for a tag
   const toggleDocPreview = async (tagId: number) => {
@@ -345,16 +358,11 @@ export default function TagCleanupWizard() {
       setEmptyTags(empty)
       setSelectedEmpty(new Set(empty.map((t: TagItem) => t.id)))
       
-      // Reset AI-analyzed data
-      setNonsenseTags([])
-      setCorrespondentMatches([])
-      setDocTypeMatches([])
-      setSimilarGroups([])
-      
     } catch (e) {
       console.error('Error loading data:', e)
     } finally {
       setLoading(false)
+      setLastDataLoad(Date.now())
       const elapsed = Date.now() - startTime
       setLoadTime(elapsed)
       if (elapsed < 1000) {
@@ -530,68 +538,105 @@ export default function TagCleanupWizard() {
     setError(null)
     setProgress(null)
     
-    // Helper for parallel deletion with progress
-    const deleteTagsParallel = async (tagIds: number[], batchSize = 5) => {
-      let deleted = 0
-      const total = tagIds.length
-      setProgress({ current: 0, total })
-      
-      for (let i = 0; i < tagIds.length; i += batchSize) {
-        const batch = tagIds.slice(i, i + batchSize)
-        const results = await Promise.allSettled(batch.map(id => api.deleteTag(id)))
-        deleted += results.filter(r => r.status === 'fulfilled').length
-        setProgress({ current: Math.min(i + batchSize, total), total })
-      }
-      return deleted
-    }
-    
     try {
-      let result: StepStatus['result'] = {}
+      let deletedCount = 0
+      let requestedCount = 0
+      let deletedTagIds: number[] = []
       
       switch(step) {
-        case 1: // Delete empty tags - PARALLEL
-          const emptyToDelete = emptyTags.filter(t => selectedEmpty.has(t.id))
-          const deleted1 = await deleteTagsParallel(emptyToDelete.map(t => t.id))
-          result.deleted = deleted1
-          result.total = emptyToDelete.length
+        case 1: {
+          const ids = emptyTags.filter(t => selectedEmpty.has(t.id)).map(t => t.id)
+          requestedCount = ids.length
+          setProgress({ current: 0, total: ids.length })
+          const bulkResult = await api.bulkDeleteTags(ids)
+          deletedTagIds = bulkResult.deleted
+          deletedCount = bulkResult.deleted_count
+          setProgress({ current: ids.length, total: ids.length })
           break
-          
-        case 2: // Delete nonsense tags - PARALLEL
-          const nonsenseToDelete = nonsenseTags.filter(t => selectedNonsense.has(t.id))
-          const deleted2 = await deleteTagsParallel(nonsenseToDelete.map(t => t.id))
-          result.deleted = deleted2
-          result.total = nonsenseToDelete.length
+        }
+        case 2: {
+          const ids = nonsenseTags.filter(t => selectedNonsense.has(t.id)).map(t => t.id)
+          requestedCount = ids.length
+          setProgress({ current: 0, total: ids.length })
+          const bulkResult = await api.bulkDeleteTags(ids)
+          deletedTagIds = bulkResult.deleted
+          deletedCount = bulkResult.deleted_count
+          setProgress({ current: ids.length, total: ids.length })
           break
-          
-        case 3: // Delete correspondent tags - PARALLEL
-          const corrToDelete = correspondentMatches.filter(m => selectedCorrespondentMatches.has(m.tag_id))
-          const deleted3 = await deleteTagsParallel(corrToDelete.map(m => m.tag_id))
-          result.deleted = deleted3
-          result.total = corrToDelete.length
+        }
+        case 3: {
+          const ids = correspondentMatches.filter(m => selectedCorrespondentMatches.has(m.tag_id)).map(m => m.tag_id)
+          requestedCount = ids.length
+          setProgress({ current: 0, total: ids.length })
+          const bulkResult = await api.bulkDeleteTags(ids)
+          deletedTagIds = bulkResult.deleted
+          deletedCount = bulkResult.deleted_count
+          setProgress({ current: ids.length, total: ids.length })
           break
-          
-        case 4: // Delete doctype tags - PARALLEL
-          const dtToDelete = docTypeMatches.filter(m => selectedDocTypeMatches.has(m.tag_id))
-          const deleted4 = await deleteTagsParallel(dtToDelete.map(m => m.tag_id))
-          result.deleted = deleted4
-          result.total = dtToDelete.length
+        }
+        case 4: {
+          const ids = docTypeMatches.filter(m => selectedDocTypeMatches.has(m.tag_id)).map(m => m.tag_id)
+          requestedCount = ids.length
+          setProgress({ current: 0, total: ids.length })
+          const bulkResult = await api.bulkDeleteTags(ids)
+          deletedTagIds = bulkResult.deleted
+          deletedCount = bulkResult.deleted_count
+          setProgress({ current: ids.length, total: ids.length })
           break
-          
-        case 5: // Similar tags - redirect to tag manager for merge
-          // Just mark as completed, actual merge happens in TagManager
+        }
+        case 5:
           break
       }
+      
+      // Calculate remaining items BEFORE removing from local state
+      const deletedSet = new Set(deletedTagIds)
+      let remainingCount = 0
+      switch(step) {
+        case 1: remainingCount = emptyTags.filter(t => !deletedSet.has(t.id)).length; break
+        case 2: remainingCount = nonsenseTags.filter(t => !deletedSet.has(t.id)).length; break
+        case 3: remainingCount = correspondentMatches.filter(m => !deletedSet.has(m.tag_id)).length; break
+        case 4: remainingCount = docTypeMatches.filter(m => !deletedSet.has(m.tag_id)).length; break
+      }
+      
+      // Remove deleted tags from local lists
+      if (deletedSet.size > 0) {
+        setEmptyTags(prev => prev.filter(t => !deletedSet.has(t.id)))
+        setNonsenseTags(prev => prev.filter(t => !deletedSet.has(t.id)))
+        setCorrespondentMatches(prev => prev.filter(m => !deletedSet.has(m.tag_id)))
+        setDocTypeMatches(prev => prev.filter(m => !deletedSet.has(m.tag_id)))
+        setSelectedEmpty(prev => { const n = new Set(prev); deletedTagIds.forEach(id => n.delete(id)); return n })
+        setSelectedNonsense(prev => { const n = new Set(prev); deletedTagIds.forEach(id => n.delete(id)); return n })
+        setSelectedCorrespondentMatches(prev => { const n = new Set(prev); deletedTagIds.forEach(id => n.delete(id)); return n })
+        setSelectedDocTypeMatches(prev => { const n = new Set(prev); deletedTagIds.forEach(id => n.delete(id)); return n })
+      }
+      
+      const prevResult = stepStatus[step]?.result
+      const cumulativeDeleted = (prevResult?.deleted || 0) + deletedCount
+      const isFullyDone = remainingCount === 0
       
       setStepStatus(prev => ({
         ...prev,
-        [step]: { completed: true, skipped: false, result }
+        [step]: {
+          completed: isFullyDone,
+          skipped: false,
+          analyzed: prev[step]?.analyzed || false,
+          result: { deleted: cumulativeDeleted, total: requestedCount }
+        }
       }))
       
-      // Reload data
-      await loadInitialData()
+      // Remove deleted tags from ALL saved analyses in backend
+      if (deletedTagIds.length > 0) {
+        try { await api.removeTagsFromSavedAnalyses(deletedTagIds) } catch (_) { /* ignore */ }
+      }
       
-    } catch (e) {
+      // Refresh backend cache + reload fresh tag list
+      try { await api.refreshPaperlessCache() } catch (_) { /* ignore */ }
+      await loadInitialData()
+      await loadSavedAnalysisInfo()
+      
+    } catch (e: any) {
       console.error('Error executing step:', e)
+      setError(e?.message || 'Fehler beim Ausführen')
     } finally {
       setProcessing(false)
       setProgress(null)
@@ -917,6 +962,22 @@ export default function TagCleanupWizard() {
               <p className="text-surface-300">
                 <strong className="text-blue-400">{correspondentMatches.length}</strong> Tags sind eigentlich Korrespondenten
               </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setSelectedCorrespondentMatches(new Set(
+                    correspondentMatches.filter(m => !ignoredItemIds.correspondent.includes(m.tag_id)).map(m => m.tag_id)
+                  ))}
+                  className="text-sm text-primary-400 hover:text-primary-300"
+                >
+                  Alle auswählen
+                </button>
+                <button
+                  onClick={() => setSelectedCorrespondentMatches(new Set())}
+                  className="text-sm text-surface-400 hover:text-surface-300"
+                >
+                  Keine
+                </button>
+              </div>
             </div>
             
             <div className="max-h-96 overflow-y-auto space-y-2">
@@ -1045,6 +1106,22 @@ export default function TagCleanupWizard() {
               <p className="text-surface-300">
                 <strong className="text-amber-400">{docTypeMatches.length}</strong> Tags sind eigentlich Dokumententypen
               </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setSelectedDocTypeMatches(new Set(
+                    docTypeMatches.filter(m => !ignoredItemIds.doctype.includes(m.tag_id)).map(m => m.tag_id)
+                  ))}
+                  className="text-sm text-primary-400 hover:text-primary-300"
+                >
+                  Alle auswählen
+                </button>
+                <button
+                  onClick={() => setSelectedDocTypeMatches(new Set())}
+                  className="text-sm text-surface-400 hover:text-surface-300"
+                >
+                  Keine
+                </button>
+              </div>
             </div>
             
             <div className="max-h-96 overflow-y-auto space-y-2">
@@ -1333,9 +1410,14 @@ export default function TagCleanupWizard() {
           <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-lg mb-4">
             <p className="text-emerald-400 flex items-center gap-2">
               <Check className="w-5 h-5" />
-              Schritt abgeschlossen!
-              {stepStatus[currentStep].result?.deleted !== undefined && 
-                ` ${stepStatus[currentStep].result.deleted} von ${stepStatus[currentStep].result.total || stepStatus[currentStep].result.deleted} gelöscht.`}
+              Schritt abgeschlossen! Insgesamt {stepStatus[currentStep].result?.deleted || 0} gelöscht.
+            </p>
+          </div>
+        ) : stepStatus[currentStep]?.result?.deleted ? (
+          <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg mb-4">
+            <p className="text-blue-300 flex items-center gap-2">
+              <Check className="w-5 h-5 text-emerald-400" />
+              {stepStatus[currentStep].result.deleted} Tag(s) gelöscht. Restliche Tags können weiter bearbeitet werden.
             </p>
           </div>
         ) : stepStatus[currentStep]?.skipped ? (

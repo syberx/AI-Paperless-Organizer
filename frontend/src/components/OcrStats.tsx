@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
-import { BarChart3, Clock, FileText, Layers, RefreshCw } from 'lucide-react'
+import { BarChart3, Clock, FileText, Layers, RefreshCw, CheckCircle, Loader2, AlertCircle } from 'lucide-react'
 import * as api from '../services/api'
 import clsx from 'clsx'
 
 export default function OcrStats() {
     const [stats, setStats] = useState<api.OcrStats[]>([])
+    const [ocrStatus, setOcrStatus] = useState<api.OcrStatus | null>(null)
     const [loading, setLoading] = useState(true)
 
     useEffect(() => {
@@ -14,9 +15,13 @@ export default function OcrStats() {
     const loadStats = async () => {
         setLoading(true)
         try {
-            const data = await api.getOcrStats()
-            // Sort by timestamp desc
-            setStats(data.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()))
+            // Load both stats and status
+            const [statsData, statusData] = await Promise.all([
+                api.getOcrStats(),
+                api.getOcrStatus()
+            ])
+            setStats(statsData.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()))
+            setOcrStatus(statusData)
         } catch (e) {
             console.error('Failed to load stats', e)
         } finally {
@@ -24,19 +29,25 @@ export default function OcrStats() {
         }
     }
 
-    // Calculate aggregations
-    const totalDocs = stats.length
-
-    // Safely calculate totals to avoid NaN
-    const totalPages = stats.reduce((acc, curr) => acc + (curr.pages || 0), 0)
-
+    // Calculate aggregations (only successful entries)
+    const successStats = stats.filter(s => s.success !== false)
+    const totalDocs = successStats.length
+    const totalPages = successStats.reduce((acc, curr) => acc + (curr.pages || 0), 0)
     const avgTime = totalDocs > 0
-        ? stats.reduce((acc, curr) => acc + (curr.duration || 0), 0) / totalDocs
+        ? successStats.reduce((acc, curr) => acc + (curr.duration || 0), 0) / totalDocs
+        : 0
+    const avgTimePerPage = totalPages > 0
+        ? successStats.reduce((acc, curr) => acc + (curr.duration || 0), 0) / totalPages
         : 0
 
-    const avgTimePerPage = totalPages > 0
-        ? stats.reduce((acc, curr) => acc + (curr.duration || 0), 0) / totalPages
-        : 0
+    // Calculate progress color based on percentage
+    const getProgressColor = (percentage: number) => {
+        if (percentage >= 90) return 'emerald'
+        if (percentage >= 50) return 'amber'
+        return 'red'
+    }
+
+    const progressColor = ocrStatus ? getProgressColor(ocrStatus.percentage) : 'red'
 
     return (
         <div className="space-y-6">
@@ -52,11 +63,103 @@ export default function OcrStats() {
                 </button>
             </div>
 
+            {/* OCR Status Card - NEW */}
+            {ocrStatus && (
+                <div className="card p-6 border border-surface-700/50 shadow-xl shadow-black/20 bg-surface-800/40 backdrop-blur-sm">
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="font-bold text-lg text-white flex items-center gap-2">
+                            <CheckCircle className="w-5 h-5 text-primary-400" />
+                            OCR Gesamtstatus
+                        </h3>
+                        <div className={clsx(
+                            "px-3 py-1 rounded-full text-sm font-bold",
+                            progressColor === 'emerald' && "bg-emerald-500/20 text-emerald-300",
+                            progressColor === 'amber' && "bg-amber-500/20 text-amber-300",
+                            progressColor === 'red' && "bg-red-500/20 text-red-300"
+                        )}>
+                            {ocrStatus.percentage}%
+                        </div>
+                    </div>
+
+                    {/* Progress Bar */}
+                    <div className="mb-6">
+                        <div className="h-4 bg-surface-700 rounded-full overflow-hidden">
+                            <div 
+                                className={clsx(
+                                    "h-full transition-all duration-1000 ease-out rounded-full",
+                                    progressColor === 'emerald' && "bg-gradient-to-r from-emerald-600 to-emerald-400",
+                                    progressColor === 'amber' && "bg-gradient-to-r from-amber-600 to-amber-400",
+                                    progressColor === 'red' && "bg-gradient-to-r from-red-600 to-red-400"
+                                )}
+                                style={{ width: `${ocrStatus.percentage}%` }}
+                            />
+                        </div>
+                        <div className="flex justify-between mt-2 text-xs text-surface-400">
+                            <span>0%</span>
+                            <span>50%</span>
+                            <span>100%</span>
+                        </div>
+                    </div>
+
+                    {/* Status Cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="p-4 rounded-xl bg-surface-900/50 border border-surface-700">
+                            <div className="flex items-center gap-2 mb-2">
+                                <FileText className="w-4 h-4 text-surface-400" />
+                                <span className="text-sm text-surface-400">Gesamtdokumente</span>
+                            </div>
+                            <div className="text-2xl font-bold text-white">{ocrStatus.total_documents}</div>
+                        </div>
+
+                        <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
+                            <div className="flex items-center gap-2 mb-2">
+                                <CheckCircle className="w-4 h-4 text-emerald-400" />
+                                <span className="text-sm text-emerald-300">OCR Fertig</span>
+                            </div>
+                            <div className="text-2xl font-bold text-emerald-300">{ocrStatus.finished_documents}</div>
+                            <div className="text-xs text-emerald-400/70 mt-1">
+                                {((ocrStatus.finished_documents / ocrStatus.total_documents) * 100).toFixed(1)}% abgeschlossen
+                            </div>
+                        </div>
+
+                        <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30">
+                            <div className="flex items-center gap-2 mb-2">
+                                <Loader2 className="w-4 h-4 text-amber-400" />
+                                <span className="text-sm text-amber-300">Offen / Pending</span>
+                            </div>
+                            <div className="text-2xl font-bold text-amber-300">{ocrStatus.pending_documents}</div>
+                            <div className="text-xs text-amber-400/70 mt-1">
+                                Noch {ocrStatus.pending_documents} Dokumente zu verarbeiten
+                            </div>
+                        </div>
+                    </div>
+
+                    {ocrStatus.percentage < 100 && (
+                        <div className="mt-4 p-3 bg-surface-700/30 rounded-lg flex items-center gap-3">
+                            <AlertCircle className="w-5 h-5 text-amber-400 flex-shrink-0" />
+                            <p className="text-sm text-surface-300">
+                                Es fehlen noch <strong className="text-white">{ocrStatus.pending_documents} Dokumente</strong> bis alle aktuell sind. 
+                                Starte den Batch-OCR um diese zu verarbeiten.
+                            </p>
+                        </div>
+                    )}
+
+                    {ocrStatus.percentage === 100 && (
+                        <div className="mt-4 p-3 bg-emerald-500/10 rounded-lg flex items-center gap-3">
+                            <CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+                            <p className="text-sm text-emerald-300">
+                                <strong>Super!</strong> Alle {ocrStatus.total_documents} Dokumente haben aktuelles OCR.
+                            </p>
+                        </div>
+                    )}
+                </div>
+            )}
+
             {/* KPI Cards */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <MetricCard
                     icon={<FileText className="w-5 h-5 text-blue-400" />}
-                    label="Dokumente"
+                    label="Verarbeitete Dokumente"
                     value={totalDocs}
                     color="blue"
                 />
@@ -109,12 +212,20 @@ export default function OcrStats() {
                             </thead>
                             <tbody className="divide-y divide-surface-700/30">
                                 {stats.slice(0, 10).map((stat, i) => (
-                                    <tr key={i} className="hover:bg-surface-700/20 transition-colors">
+                                    <tr key={i} className={clsx(
+                                        "transition-colors",
+                                        stat.success === false ? "bg-red-500/10 hover:bg-red-500/20" : "hover:bg-surface-700/20"
+                                    )}>
                                         <td className="px-6 py-4 text-surface-300 whitespace-nowrap">
                                             {new Date(stat.timestamp).toLocaleString()}
                                         </td>
                                         <td className="px-6 py-4 font-medium text-white">
-                                            #{stat.doc_id}
+                                            <span className="flex items-center gap-2">
+                                                #{stat.doc_id}
+                                                {stat.success === false && (
+                                                    <span className="text-xs text-red-400 bg-red-500/20 px-1.5 py-0.5 rounded">FEHLER</span>
+                                                )}
+                                            </span>
                                         </td>
                                         <td className="px-6 py-4 text-center text-surface-300">
                                             {stat.pages}

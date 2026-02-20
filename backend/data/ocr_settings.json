@@ -1,1 +1,1 @@
-{"ollama_url": "http://localhost:11434", "model": "qwen2.5vl:7b", "ollama_urls": ["http://localhost:11434", "http://192.168.168.65:11434"], "watchdog_enabled": false, "watchdog_interval": 5}
+{"ollama_url": "http://host.docker.internal:11434", "model": "qwen3-vl:8b-instruct", "ollama_urls": ["http://host.docker.internal:11434", "http://192.168.168.65:11434"], "watchdog_enabled": false, "watchdog_interval": 1, "max_image_size": 2016, "smart_skip_enabled": false}
