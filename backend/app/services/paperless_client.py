@@ -135,9 +135,30 @@ class PaperlessClient:
     async def delete_tag(self, tag_id: int) -> None:
         """Delete a tag."""
         await self._request("DELETE", f"/tags/{tag_id}/")
-        # Invalidate cache
         cache = get_cache()
         await cache.clear(f"paperless:tags:")
+    
+    async def delete_tags_bulk(self, tag_ids: List[int]) -> dict:
+        """Delete multiple tags using a single shared HTTP client for performance."""
+        if not self.base_url:
+            raise ValueError("Paperless URL not configured")
+        
+        deleted = []
+        errors = []
+        cache = get_cache()
+        
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, verify=False) as client:
+            for tag_id in tag_ids:
+                try:
+                    url = f"{self.base_url}/api/tags/{tag_id}/"
+                    response = await client.request("DELETE", url, headers=self.headers)
+                    response.raise_for_status()
+                    deleted.append(tag_id)
+                except Exception as e:
+                    errors.append({"tag_id": tag_id, "error": str(e)})
+        
+        await cache.clear(f"paperless:tags:")
+        return {"deleted": deleted, "deleted_count": len(deleted), "errors": errors}
     
     # Document Types
     async def get_document_types(self, use_cache: bool = True) -> List[Dict]:
@@ -198,6 +219,24 @@ class PaperlessClient:
         result = await self._request("GET", "/documents/", params=params)
         return result.get("results", []) if result else []
     
+    async def get_document_count(
+        self,
+        tag_id: int = None,
+        tags_id_all: List[int] = None,
+        tags_id_none: List[int] = None
+    ) -> int:
+        """Get document count without downloading all documents. Very fast."""
+        params = {"page_size": 1}
+        if tag_id:
+            params["tags__id__in"] = tag_id
+        if tags_id_all:
+            params["tags__id__all"] = ",".join(str(t) for t in tags_id_all)
+        if tags_id_none:
+            params["tags__id__none"] = ",".join(str(t) for t in tags_id_none)
+        
+        result = await self._request("GET", "/documents/", params=params)
+        return result.get("count", 0) if result else 0
+
     async def get_documents_by_correspondent(self, correspondent_id: int) -> List[Dict]:
         """Get all documents for a specific correspondent."""
         return await self.get_documents(correspondent_id=correspondent_id)
@@ -226,20 +265,30 @@ class PaperlessClient:
         remove_tags: List[int] = None,
         document_type_id: int = None
     ) -> Dict:
-        """Bulk update multiple documents."""
-        data = {
-            "documents": document_ids,
-            "method": "modify_tags" if add_tags or remove_tags else "set_correspondent"
-        }
-        
-        if correspondent_id is not None:
-            data["correspondent"] = correspondent_id
-        if document_type_id is not None:
-            data["document_type"] = document_type_id
-        if add_tags:
-            data["add_tags"] = add_tags
-        if remove_tags:
-            data["remove_tags"] = remove_tags
+        """Bulk update multiple documents via Paperless bulk_edit API."""
+        if add_tags or remove_tags:
+            data = {
+                "documents": document_ids,
+                "method": "modify_tags",
+                "parameters": {
+                    "add_tags": add_tags or [],
+                    "remove_tags": remove_tags or []
+                }
+            }
+        elif correspondent_id is not None:
+            data = {
+                "documents": document_ids,
+                "method": "set_correspondent",
+                "parameters": {"correspondent": correspondent_id}
+            }
+        elif document_type_id is not None:
+            data = {
+                "documents": document_ids,
+                "method": "set_document_type",
+                "parameters": {"document_type": document_type_id}
+            }
+        else:
+            return {}
         
         return await self._request("POST", "/documents/bulk_edit/", json=data)
     

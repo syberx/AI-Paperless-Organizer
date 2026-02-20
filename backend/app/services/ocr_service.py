@@ -35,8 +35,13 @@ batch_state = {
     "paused": False
 }
 
+# Track single OCR to prevent watchdog conflicts
+single_ocr_running = False
+
 # Review queue file
 REVIEW_QUEUE_FILE = Path("/app/data/ocr_review_queue.json")
+# OCR Ignore list: document IDs to permanently skip in future OCR runs
+OCR_IGNORE_FILE = Path("/app/data/ocr_ignore_list.json")
 
 # Quality threshold: if new text is less than this ratio of old text, flag for review
 QUALITY_THRESHOLD = 0.5
@@ -58,11 +63,32 @@ def save_review_queue(queue: List[Dict]):
     except Exception as e:
         logger.error(f"Error saving review queue: {e}")
 
+def load_ocr_ignore_list() -> List[Dict]:
+    """Load OCR ignore list from file."""
+    try:
+        if OCR_IGNORE_FILE.exists():
+            return json.loads(OCR_IGNORE_FILE.read_text())
+    except Exception:
+        pass
+    return []
+
+def save_ocr_ignore_list(ignore_list: List[Dict]):
+    """Save OCR ignore list to file."""
+    try:
+        OCR_IGNORE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        OCR_IGNORE_FILE.write_text(json.dumps(ignore_list, ensure_ascii=False, indent=2))
+    except Exception as e:
+        logger.error(f"Error saving OCR ignore list: {e}")
+
+def get_ocr_ignored_ids() -> set:
+    """Get set of document IDs that should be skipped in OCR."""
+    return {item["document_id"] for item in load_ocr_ignore_list()}
+
 # Watchdog state
 watchdog_state = {
     "enabled": False,
     "running": False,
-    "interval_minutes": 5,
+    "interval_minutes": 1,
     "last_run": None,
     "task": None  # asyncio.Task
 }
@@ -71,7 +97,7 @@ watchdog_state = {
 class OcrService:
     """Service for OCR using Ollama Vision models."""
     
-    def __init__(self, ollama_url: str = DEFAULT_OLLAMA_URL, model: str = DEFAULT_OCR_MODEL, ollama_urls: List[str] = None, max_image_size: int = 1344, smart_skip_enabled: bool = True):
+    def __init__(self, ollama_url: str = DEFAULT_OLLAMA_URL, model: str = DEFAULT_OCR_MODEL, ollama_urls: List[str] = None, max_image_size: int = 1344, smart_skip_enabled: bool = False):
         if ollama_urls and len(ollama_urls) > 0:
             self.ollama_urls = [u.rstrip("/") for u in ollama_urls if u.strip()]
         else:
@@ -218,7 +244,7 @@ class OcrService:
                 "render_dpi": 400,
                 "num_ctx": 16384,
                 "num_predict": 16384,
-                "repeat_penalty": 1.2,
+                "repeat_penalty": 1.3,
                 "temperature": 0.1,
             }
         elif param_size <= 14:
@@ -227,7 +253,7 @@ class OcrService:
                 "render_dpi": 400,
                 "num_ctx": 16384,
                 "num_predict": 16384,
-                "repeat_penalty": 1.2,
+                "repeat_penalty": 1.35,
                 "temperature": 0.1,
             }
         else:
@@ -294,6 +320,31 @@ class OcrService:
         cleaned = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
         return cleaned if cleaned else text.strip()
 
+    @staticmethod
+    def _strip_ocr_commentary(text: str) -> str:
+        """Remove trailing meta-commentary (e.g. 'Got it, let me transcribe...') from OCR output.
+        Keeps only the actual transcribed document text."""
+        if not text or len(text) < 100:
+            return text
+        lines = text.split("\n")
+        # Patterns that start model commentary/description (English + German)
+        commentary_starts = (
+            "got it", "let me ", "let's ", "first,", "first i ", "i need to ", "starting from",
+            "wait,", "let's check", "okay,", "so,", "now,", "i'll ", "i will ",
+            "transcribe this", "go through each", "making sure not to miss",
+            "die bild zeigt", "im bild steht", "zuerst muss ich"
+        )
+        for i, line in enumerate(lines):
+            stripped = line.strip().lower()
+            if not stripped:
+                continue
+            if any(stripped.startswith(p) or p in stripped[:50] for p in commentary_starts):
+                # Keep everything before this line (the actual transcription)
+                before = "\n".join(lines[:i]).strip()
+                if len(before) > 80:
+                    return before
+        return text
+
     def _build_ocr_prompt(self, page_num: int = 0, total_pages: int = 0) -> str:
         """Build model-specific OCR prompt.
         
@@ -348,14 +399,19 @@ class OcrService:
     def _clean_repetitions(text: str) -> str:
         """Detect and remove repetition loops from OCR output.
         
-        Some models (e.g. deepseek-ocr) echo instruction phrases in a loop.
-        Truncate at the first long run of the same line, then clean remaining repeats.
+        Handles two cases:
+        1. Instruction echo: model repeats the prompt/instruction 20+ times → truncate
+        2. Content loops: same line appears many times → keep up to 6, skip the rest
+        
+        Conservative thresholds to avoid destroying real table data
+        (e.g. "1.0 Stck." appearing 5x in a product list is legitimate).
         """
         lines = text.split('\n')
         if len(lines) < 5:
             return text
 
-        # Truncate when the same line repeats many times in a row (instruction echo)
+        # Phase 1: Detect extreme instruction echo (20+ identical consecutive lines)
+        # Only for true model glitches, not legitimate table entries
         run_start = 0
         last_stripped = ""
         run_count = 0
@@ -363,8 +419,9 @@ class OcrService:
             stripped = line.strip()
             if stripped and stripped == last_stripped:
                 run_count += 1
-                if run_count >= 5:
+                if run_count >= 20:
                     lines = lines[:run_start]
+                    print(f"[OCR] Instruction echo detected at line {run_start}, truncating")
                     break
             else:
                 run_start = i
@@ -374,6 +431,7 @@ class OcrService:
         if len(lines) < 10:
             return "\n".join(lines).strip()
 
+        # Phase 2: Collapse moderate repetitions (keep up to 6 identical consecutive lines)
         cleaned = []
         repeat_count = 0
         last_line = ""
@@ -382,28 +440,12 @@ class OcrService:
             stripped = line.strip()
             if stripped == last_line and stripped:
                 repeat_count += 1
-                if repeat_count >= 3:
+                if repeat_count >= 6:
                     continue
             else:
                 repeat_count = 0
             cleaned.append(line)
             last_line = stripped
-
-        # Also detect multi-line pattern repetition (e.g. 2-line blocks repeating)
-        if len(cleaned) > 20:
-            result = []
-            seen_blocks = set()
-            i = 0
-            while i < len(cleaned):
-                block = (cleaned[i].strip(), cleaned[i+1].strip() if i+1 < len(cleaned) else "")
-                block_key = f"{block[0]}||{block[1]}"
-                if block_key in seen_blocks and block[0] and block[1]:
-                    i += 2
-                    continue
-                seen_blocks.add(block_key)
-                result.append(cleaned[i])
-                i += 1
-            cleaned = result
 
         original_lines = len(lines)
         cleaned_lines = len(cleaned)
@@ -415,22 +457,54 @@ class OcrService:
     async def _ocr_single_image(self, image_bytes: bytes, page_num: int = 0, total_pages: int = 0, timeout: float = 300.0) -> str:
         """Run OCR on a single prepared image bytes block.
         
-        Uses model-specific parameters from get_model_params():
-        - num_ctx / num_predict scaled to model size (8K for 4B, 16K for 8B+)
-        - repeat_penalty tuned per model size (1.3 for small, 1.15 for medium)
-        - think: false to disable reasoning mode
-        - timeout: configurable per-request (default 300s, compare uses 90s)
+        Uses model-specific parameters from get_model_params().
+        If a repetition loop is detected, retries with anti-loop parameters.
         """
         image_b64 = base64.b64encode(image_bytes).decode("utf-8")
         prompt_text = self._build_ocr_prompt(page_num, total_pages)
-        
-        # Get model-specific optimal parameters
         model_params = self.get_model_params(self.model)
-        print(f"[OCR][DEBUG] Model: {self.model}, prompt: {repr(prompt_text[:120])}, image_b64_len: {len(image_b64)}, params: ctx={model_params['num_ctx']}, predict={model_params['num_predict']}, repeat_pen={model_params['repeat_penalty']}, temp={model_params['temperature']}")
         
-        # Only send think=False for qwen3 models (other models may not recognize it)
+        # First attempt with standard parameters
+        text = await self._run_ollama_ocr(image_b64, prompt_text, model_params, timeout)
+        
+        if not text:
+            return None
+        
+        # Detect repetition loop: if >60% of raw output was removed
+        cleaned = text["_cleaned"] if isinstance(text, dict) else text
+        loop_ratio = text.get("_loop_ratio", 0) if isinstance(text, dict) else 0
+        
+        if loop_ratio > 0.6:
+            print(f"[OCR] Loop detected ({loop_ratio:.0%} wasted). Retrying with anti-table prompt...")
+            retry_params = {**model_params}
+            retry_params["num_predict"] = min(model_params["num_predict"], 4096)
+            
+            anti_table_prompt = (
+                "Transcribe ALL text in this image completely from top to bottom. "
+                "Do NOT use table formatting, pipes |, or dashes ---. "
+                "Write each piece of information on its own line, using colons for labels. "
+                "Include every single line of text: headers, items, prices, totals, footer, company details, IBAN."
+            )
+            
+            retry_text = await self._run_ollama_ocr(image_b64, anti_table_prompt, retry_params, timeout)
+            if retry_text:
+                retry_cleaned = retry_text["_cleaned"] if isinstance(retry_text, dict) else retry_text
+                retry_ratio = retry_text.get("_loop_ratio", 0) if isinstance(retry_text, dict) else 0
+                
+                if len(retry_cleaned) > len(cleaned):
+                    print(f"[OCR] Anti-table retry improved: {len(cleaned)} -> {len(retry_cleaned)} chars (loop: {retry_ratio:.0%})")
+                    return retry_cleaned
+                else:
+                    print(f"[OCR] Retry not better ({len(retry_cleaned)} vs {len(cleaned)} chars), keeping original")
+        
+        return cleaned
+    
+    async def _run_ollama_ocr(self, image_b64: str, prompt_text: str, model_params: dict, timeout: float) -> dict | str | None:
+        """Execute a single Ollama OCR request. Returns dict with _cleaned, _raw, _loop_ratio."""
         name_lower = (self.model or "").lower()
         use_think_param = "qwen3" in name_lower
+        
+        print(f"[OCR][DEBUG] Model: {self.model}, repeat_pen={model_params['repeat_penalty']}, predict={model_params['num_predict']}")
         
         attempts = len(self.ollama_urls)
         last_error = None
@@ -438,27 +512,17 @@ class OcrService:
         for _ in range(attempts):
             url = self.get_current_url()
             try:
-                # System message to authorize full data output (prevents safety filtering of IBANs etc.)
                 system_msg = (
-                    "You are an authorized document management OCR system. "
-                    "Your task is to transcribe document images exactly as shown. "
-                    "You MUST output ALL text including personal names, dates, IBANs, bank details, "
-                    "account numbers, addresses, and monetary amounts. "
-                    "Never skip, redact, or mask any data. This is an authorized internal system."
+                    "You are an OCR module. Output ONLY the transcribed text from the image, nothing else. "
+                    "No descriptions, no commentary, no 'Let me...' or explanations. Include all text: names, dates, IBANs, numbers, checkboxes as shown. "
+                    "Raw transcription only."
                 )
 
                 request_body = {
                     "model": self.model,
                     "messages": [
-                        {
-                            "role": "system",
-                            "content": system_msg
-                        },
-                        {
-                            "role": "user",
-                            "content": prompt_text,
-                            "images": [image_b64]
-                        }
+                        {"role": "system", "content": system_msg},
+                        {"role": "user", "content": prompt_text, "images": [image_b64]}
                     ],
                     "stream": False,
                     "keep_alive": "30m",
@@ -473,10 +537,7 @@ class OcrService:
                     request_body["think"] = False
 
                 async with httpx.AsyncClient(timeout=timeout) as client:
-                    response = await client.post(
-                        f"{url}/api/chat",
-                        json=request_body
-                    )
+                    response = await client.post(f"{url}/api/chat", json=request_body)
                     
                     if response.status_code != 200:
                         error_body = response.text[:500]
@@ -486,37 +547,43 @@ class OcrService:
                     message = result.get("message", {})
                     text_content = message.get("content", "").strip()
                     
-                    # Strip any <think>...</think> reasoning blocks
                     text_content = self._strip_reasoning(text_content)
+                    text_content = self._strip_ocr_commentary(text_content)
                     
-                    # If content is empty but thinking field has text,
-                    # the model ignored think:false -- use thinking as content
                     thinking_text = message.get("thinking", "")
                     if not text_content and thinking_text:
                         print(f"[OCR] Content empty but thinking has {len(thinking_text)} chars, using as content")
                         text_content = self._strip_reasoning(thinking_text)
                     
-                    # Clean up any repetition loops (safety net for small models)
+                    raw_len = len(text_content) if text_content else 0
+                    
                     if text_content:
                         text_content = self._clean_repetitions(text_content)
                     
-                    # Token limit detection (inspired by paperless-gpt's OcrLimitHit)
+                    cleaned_len = len(text_content) if text_content else 0
+                    loop_ratio = 1 - (cleaned_len / raw_len) if raw_len > 0 else 0
+                    
+                    if raw_len != cleaned_len:
+                        print(f"[OCR] Repetition cleanup: {raw_len} -> {cleaned_len} chars ({loop_ratio:.0%} removed)")
+                    
                     eval_count = result.get("eval_count", 0)
                     if eval_count >= 8000:
-                        print(f"[OCR] WARNING: Token limit likely hit ({eval_count} tokens). Text may be truncated!")
+                        print(f"[OCR] WARNING: Token limit likely hit ({eval_count} tokens)")
                     
                     if not text_content:
-                        print(f"[OCR DEBUG] No text extracted. Keys: {list(message.keys())}, image: {len(image_bytes)} bytes")
+                        print(f"[OCR DEBUG] No text extracted. Keys: {list(message.keys())}")
                         try:
                             with open("/app/data/failed_ocr_debug.png", "wb") as f:
-                                f.write(image_bytes)
+                                import base64 as b64mod
+                                f.write(b64mod.b64decode(image_b64))
                         except Exception:
                             pass
-                    else:
-                        src = "thinking-fallback" if (not message.get("content", "").strip() and thinking_text) else "content"
-                        print(f"[OCR] Success: {len(text_content)} chars, {eval_count} tokens from {src}")
-                            
-                    return text_content
+                        return None
+                    
+                    src = "thinking-fallback" if (not message.get("content", "").strip() and thinking_text) else "content"
+                    print(f"[OCR] Success: {cleaned_len} chars, {eval_count} tokens from {src}")
+                    
+                    return {"_cleaned": text_content, "_raw_len": raw_len, "_loop_ratio": loop_ratio}
                     
             except Exception as e:
                 logger.warning(f"OCR failed at {url}: {e}")
@@ -526,8 +593,8 @@ class OcrService:
                 
         raise RuntimeError(f"All Ollama servers ({attempts}) failed. Last error: {last_error}")
 
-    def save_stats(self, doc_id: int, duration: float, pages: int, chars: int):
-        """Save OCR statistics to JSON file."""
+    def save_stats(self, doc_id: int, duration: float, pages: int, chars: int, success: bool = True):
+        """Save OCR statistics to JSON file. Only call AFTER document was actually updated."""
         import json
         from datetime import datetime
         from pathlib import Path
@@ -540,7 +607,8 @@ class OcrService:
             "pages": pages,
             "chars": chars,
             "model": self.model,
-            "server": self.get_current_url()
+            "server": self.get_current_url(),
+            "success": success
         }
         
         try:
@@ -644,17 +712,7 @@ class OcrService:
                 logger.info(f"Found native text in PDF ({len(native_text)} chars). Skipping OCR.")
                 print(f"[OCR] Native text found ({len(native_text)} chars). Skipping vision OCR.")
                 
-                # Save stats for skipped document
-                try:
-                    duration = time.time() - start_time
-                    # Use a special model name to indicate skipped OCR
-                    original_model = self.model
-                    self.model = "native_pdf (skipped)" 
-                    self.save_stats(document_id, duration, 0, len(native_text))
-                    self.model = original_model
-                except Exception as e:
-                    logger.error(f"Failed to save skipped stats: {e}")
-
+                duration = time.time() - start_time
                 return {
                     "document_id": document_id,
                     "title": title,
@@ -662,6 +720,8 @@ class OcrService:
                     "new_content": native_text,
                     "old_length": len(old_content),
                     "new_length": len(native_text),
+                    "ocr_duration": duration,
+                    "ocr_pages": 0,
                     "source": "native_pdf"
                 }
 
@@ -726,15 +786,13 @@ class OcrService:
         new_content = "\n\n".join(full_text_parts)
         
         duration = time.time() - start_time
-        try:
-            self.save_stats(document_id, duration, len(images), len(new_content))
-        except:
-            pass
         
         return {
             "document_id": document_id,
             "title": title,
             "old_content": old_content,
+            "ocr_duration": duration,
+            "ocr_pages": len(images),
             "new_content": new_content,
             "old_length": len(old_content),
             "new_length": len(new_content)
@@ -769,23 +827,40 @@ class OcrService:
         - Tag is added separately via lightweight bulk_edit API (no re-index)
         - get_document() call eliminated (was only needed to get tag list)
         """
+        start_time = time.time()
+        
         # Step 1: PATCH only content -- this triggers Paperless re-indexing
         await paperless_client.update_document(document_id, {"content": new_content})
         
-        # Step 2: Add ocrfinish tag via bulk_edit (lightweight, no content re-index)
+        # Step 2: Add ocrfinish tag via bulk_edit with retry
+        tag_success = True
         if set_finish_tag:
-            try:
-                tag = await paperless_client.get_or_create_tag(TAG_OCR_FINISH)
-                tag_id = tag.get("id")
-                if tag_id:
-                    await paperless_client.bulk_update_documents(
-                        document_ids=[document_id],
-                        add_tags=[tag_id]
-                    )
-            except Exception as e:
-                logger.warning(f"Tag update failed (non-critical): {e}")
+            tag = await paperless_client.get_or_create_tag(TAG_OCR_FINISH)
+            tag_id = tag.get("id")
+            if tag_id:
+                for attempt in range(2):
+                    try:
+                        await paperless_client.bulk_update_documents(
+                            document_ids=[document_id],
+                            add_tags=[tag_id]
+                        )
+                        break
+                    except Exception as e:
+                        if attempt == 0:
+                            logger.warning(f"Tag update for doc {document_id} failed, retrying: {e}")
+                            await asyncio.sleep(2)
+                        else:
+                            tag_success = False
+                            logger.error(f"Tag update for doc {document_id} failed after retry: {e}")
         
-        return {"success": True, "document_id": document_id}
+        # Save stats AFTER content + tag
+        duration = time.time() - start_time
+        try:
+            self.save_stats(document_id, duration, 0, len(new_content), success=tag_success)
+        except:
+            pass
+        
+        return {"success": tag_success, "document_id": document_id}
     
     async def batch_ocr(
         self,
@@ -867,6 +942,16 @@ class OcrService:
                     f"✏️ Modus: Manuell ({len(documents)} Dokumente)"
                 )
             
+            # Filter out ignored documents
+            ignored_ids = get_ocr_ignored_ids()
+            if ignored_ids:
+                before_count = len(documents)
+                documents = [d for d in documents if d.get("id") not in ignored_ids]
+                skipped = before_count - len(documents)
+                if skipped > 0:
+                    batch_state["log"].append(f"🚫 {skipped} Dokument(e) übersprungen (OCR Ignore-Liste)")
+                    print(f"[OCR] Skipped {skipped} ignored documents")
+            
             batch_state["total"] = len(documents)
             
             if not documents:
@@ -902,6 +987,8 @@ class OcrService:
                     ocr_result = await self.ocr_document(paperless_client, doc_id)
                     new_content = ocr_result.get("new_content")
                     old_content = ocr_result.get("old_content", "")
+                    ocr_duration = ocr_result.get("ocr_duration", 0)
+                    ocr_pages = ocr_result.get("ocr_pages", 1)
                     old_len = len(old_content) if old_content else 0
                     new_len = len(new_content) if new_content else 0
                     
@@ -909,33 +996,80 @@ class OcrService:
                         # Quality check: if new text is significantly shorter, flag for review
                         needs_review = False
                         if old_len > 100 and new_len < old_len * QUALITY_THRESHOLD:
-                            needs_review = True
                             ratio = round(new_len / old_len * 100) if old_len > 0 else 0
                             batch_state["log"].append(
-                                f"⚠️ {doc_title}: Qualitätsprüfung! Neuer Text nur {ratio}% des Originals "
-                                f"({new_len} vs {old_len} Zeichen) → Manuell prüfen"
+                                f"🔁 {doc_title}: Qualitätscheck fehlgeschlagen ({ratio}% des Originals) → Automatischer Retry..."
                             )
-                            # Add to review queue
-                            queue = load_review_queue()
-                            queue.append({
-                                "document_id": doc_id,
-                                "title": doc_title,
-                                "old_content": old_content,
-                                "new_content": new_content,
-                                "old_length": old_len,
-                                "new_length": new_len,
-                                "ratio": ratio,
-                                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S")
-                            })
-                            save_review_queue(queue)
+                            print(f"[OCR] Quality check failed for {doc_id} ({ratio}%), retrying OCR...")
+                            
+                            # Wait briefly before retry to let Ollama stabilize
+                            await asyncio.sleep(3)
+                            
+                            # RETRY: Run OCR again on the same document
+                            try:
+                                retry_result = await self.ocr_document(paperless_client, doc_id)
+                                retry_content = retry_result.get("new_content")
+                                retry_len = len(retry_content) if retry_content else 0
+                                
+                                if retry_content and retry_len > new_len:
+                                    new_content = retry_content
+                                    new_len = retry_len
+                                    ocr_duration += retry_result.get("ocr_duration", 0)
+                                    batch_state["log"].append(
+                                        f"🔁 {doc_title}: Retry lieferte besseres Ergebnis ({retry_len} vs {new_len - (retry_len - new_len)} Zeichen)"
+                                    )
+                                    print(f"[OCR] Retry improved: {retry_len} chars (was {new_len - (retry_len - new_len)})")
+                                elif retry_content:
+                                    if retry_len >= new_len:
+                                        new_content = retry_content
+                                        new_len = retry_len
+                                    ocr_duration += retry_result.get("ocr_duration", 0)
+                                    batch_state["log"].append(
+                                        f"🔁 {doc_title}: Retry ähnliches Ergebnis ({retry_len} Zeichen)"
+                                    )
+                                    print(f"[OCR] Retry similar: {retry_len} chars")
+                            except Exception as retry_err:
+                                batch_state["log"].append(
+                                    f"🔁 {doc_title}: Retry fehlgeschlagen - {str(retry_err)}"
+                                )
+                                print(f"[OCR] Retry failed for {doc_id}: {retry_err}")
+                            
+                            # Re-check quality after retry
+                            new_len = len(new_content) if new_content else 0
+                            if old_len > 100 and new_len < old_len * QUALITY_THRESHOLD:
+                                needs_review = True
+                                ratio = round(new_len / old_len * 100) if old_len > 0 else 0
+                                batch_state["log"].append(
+                                    f"⚠️ {doc_title}: Auch nach Retry nur {ratio}% des Originals "
+                                    f"({new_len} vs {old_len} Zeichen) → In Prüfliste"
+                                )
+                                queue = load_review_queue()
+                                queue.append({
+                                    "document_id": doc_id,
+                                    "title": doc_title,
+                                    "old_content": old_content,
+                                    "new_content": new_content,
+                                    "old_length": old_len,
+                                    "new_length": new_len,
+                                    "ratio": ratio,
+                                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                                    "retried": True
+                                })
+                                save_review_queue(queue)
+                            else:
+                                batch_state["log"].append(
+                                    f"✅ {doc_title}: Retry erfolgreich! Qualität jetzt OK ({new_len} Zeichen)"
+                                )
+                                print(f"[OCR] Retry fixed quality for {doc_id}: {new_len} chars now passes threshold")
                         
                         if not needs_review:
-                            # Step 1: PATCH only content (fast, no tag overhead)
+                            # Step 1: PATCH content to Paperless
                             await paperless_client.update_document(doc_id, {"content": new_content})
                             
-                            # Step 2: Tag changes via lightweight bulk_edit API
+                            # Step 2: Tag changes via bulk_edit (with retry)
                             add_tags = []
                             remove_tags = []
+                            tag_success = True
                             
                             if set_finish_tag and ocrfinish_tag_id:
                                 add_tags.append(ocrfinish_tag_id)
@@ -943,21 +1077,44 @@ class OcrService:
                                 remove_tags.append(runocr_tag_id)
                             
                             if add_tags or remove_tags:
-                                try:
-                                    await paperless_client.bulk_update_documents(
-                                        document_ids=[doc_id],
-                                        add_tags=add_tags if add_tags else None,
-                                        remove_tags=remove_tags if remove_tags else None
-                                    )
-                                except Exception as e:
-                                    logger.warning(f"Tag update for doc {doc_id} failed: {e}")
+                                for attempt in range(2):
+                                    try:
+                                        await paperless_client.bulk_update_documents(
+                                            document_ids=[doc_id],
+                                            add_tags=add_tags if add_tags else None,
+                                            remove_tags=remove_tags if remove_tags else None
+                                        )
+                                        tag_success = True
+                                        break
+                                    except Exception as e:
+                                        tag_success = False
+                                        if attempt == 0:
+                                            logger.warning(f"Tag update for doc {doc_id} failed, retrying: {e}")
+                                            await asyncio.sleep(2)
+                                        else:
+                                            logger.error(f"Tag update for doc {doc_id} failed after retry: {e}")
+                                            batch_state["log"].append(f"⚠️ {doc_title}: Tag-Update 2x fehlgeschlagen: {e}")
                             
-                            batch_state["log"].append(f"✅ {doc_title}: OCR erfolgreich ({new_len} Zeichen)")
+                            # Stats ONLY after content + tag were both handled
+                            try:
+                                self.save_stats(doc_id, ocr_duration, ocr_pages, new_len, success=tag_success)
+                            except:
+                                pass
+                            
+                            if not tag_success:
+                                batch_state["log"].append(f"⚠️ {doc_title}: Content OK, aber ocrfinish-Tag fehlt! ({new_len} Zeichen)")
+                            else:
+                                batch_state["log"].append(f"✅ {doc_title}: OCR erfolgreich ({new_len} Zeichen)")
                     else:
                         batch_state["log"].append(f"⚠️ {doc_title}: Kein Text erkannt")
                         batch_state["errors"].append(f"{doc_title}: Kein Text erkannt")
                     
                 except Exception as e:
+                    # Save failed stats so we can track failures
+                    try:
+                        self.save_stats(doc_id, 0, 0, 0, success=False)
+                    except:
+                        pass
                     error_msg = f"❌ {doc_title}: Fehler - {str(e)}"
                     batch_state["log"].append(error_msg)
                     batch_state["errors"].append(error_msg)
@@ -993,8 +1150,9 @@ class OcrService:
             try:
                 watchdog_state["running"] = True
                 
-                if batch_state["running"]:
-                    logger.info("Watchdog: Batch already running, skipping this cycle")
+                if batch_state["running"] or single_ocr_running:
+                    reason = "Batch" if batch_state["running"] else "Single-OCR"
+                    logger.info(f"Watchdog: {reason} already running, skipping this cycle")
                 else:
                     logger.info("Watchdog checking for new documents...")
                     print(f"[OCR] Watchdog check at {datetime.now().isoformat()}")
@@ -1015,7 +1173,7 @@ class OcrService:
                 print(f"[OCR] Watchdog error: {e}")
             
             # Wait for interval
-            interval_min = watchdog_state.get("interval_minutes", 5)
+            interval_min = watchdog_state.get("interval_minutes", 1)
             # Check every second to allow faster stopping
             for _ in range(interval_min * 60):
                 if not watchdog_state["enabled"]:

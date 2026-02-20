@@ -8,16 +8,6 @@ import logging
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Default search terms that indicate junk/legal documents
-DEFAULT_TERMS = [
-    "AGB", "Allgemeine Geschäftsbedingungen",
-    "Widerruf", "Widerrufsbelehrung", "Widerrufsrecht",
-    "Datenschutzerklärung", "Datenschutzhinweise", "Datenschutzrichtlinie",
-    "Impressum",
-    "Nutzungsbedingungen",
-    "Cookie-Richtlinie", "Cookie Policy",
-]
-
 
 class DeleteRequest(BaseModel):
     document_ids: List[int]
@@ -30,25 +20,32 @@ class ScanResult(BaseModel):
 
 @router.get("/scan", response_model=ScanResult)
 async def scan_junk_documents(
-    query: str = Query("", description="Comma-separated title search terms (empty = defaults)"),
+    query: str = Query("", description="Comma-separated search terms"),
     limit: int = Query(50, description="Max results"),
+    search_content: bool = Query(False, description="Search in document content, not just title"),
     client: PaperlessClient = Depends(get_paperless_client)
 ):
-    """Scan for junk documents by TITLE matching (not full-text content)."""
+    """Scan for junk documents by title or full-text content matching."""
     try:
-        # Parse terms: use defaults if empty, or split custom query
+        # Parse terms from query - frontend sends comma-separated terms
         if query.strip():
-            terms = [t.strip() for t in query.replace(" OR ", ",").split(",") if t.strip()]
+            terms = [t.strip() for t in query.split(",") if t.strip()]
         else:
-            terms = DEFAULT_TERMS
+            terms = []
 
-        # Fetch documents for each term by title match
+        if not terms:
+            return {"documents": [], "total_count": 0}
+
+        # Determine query format based on search_content flag
+        query_prefix = "" if search_content else "title:"
+
+        # Fetch documents for each term
         seen_ids = set()
         results = []
 
         for term in terms:
             documents = await client.get_documents(
-                query=f"title:{term}",
+                query=f"{query_prefix}{term}",
                 page_size=limit
             )
             for doc in documents:

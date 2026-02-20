@@ -67,6 +67,10 @@ Dann öffne http://localhost:3001
 - 📖 [GitHub Repository](https://github.com/syberx/AI-Paperless-Organizer)
 - 🐛 [Issues melden](https://github.com/syberx/AI-Paperless-Organizer/issues)
 
+## OCR Statistiken
+
+![OCR Stats](https://raw.githubusercontent.com/syberx/AI-Paperless-Organizer/main/docs/screenshots/ocr-stats.png)
+
 ## Tags
 
 - `backend-latest` - Backend API (FastAPI/Python)
