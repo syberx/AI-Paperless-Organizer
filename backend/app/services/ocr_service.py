@@ -12,6 +12,9 @@ from typing import Optional, Dict, List, Any
 from PIL import Image
 from pdf2image import convert_from_bytes
 
+# Raise PIL pixel limit for large PDF pages rendered at high DPI
+Image.MAX_IMAGE_PIXELS = 500_000_000  # 500 megapixels (default is ~178MP)
+
 logger = logging.getLogger(__name__)
 
 # Default OCR settings
@@ -21,6 +24,8 @@ DEFAULT_OCR_MODEL = "qwen2.5vl:7b"
 # Tag names for OCR workflow
 TAG_RUN_OCR = "runocr"
 TAG_OCR_FINISH = "ocrfinish"
+TAG_OCR_REVIEW = "ocrpruefen"
+TAG_OCR_ERROR = "ocrfehler"
 
 # Batch job state (in-memory, single instance)
 batch_state = {
@@ -42,9 +47,15 @@ single_ocr_running = False
 REVIEW_QUEUE_FILE = Path("/app/data/ocr_review_queue.json")
 # OCR Ignore list: document IDs to permanently skip in future OCR runs
 OCR_IGNORE_FILE = Path("/app/data/ocr_ignore_list.json")
+# OCR Error counter: tracks how often each document has failed
+OCR_ERROR_COUNT_FILE = Path("/app/data/ocr_error_counts.json")
+# OCR Error list: documents permanently marked as failed after MAX_ERROR_COUNT
+OCR_ERROR_FILE = Path("/app/data/ocr_error_list.json")
 
 # Quality threshold: if new text is less than this ratio of old text, flag for review
 QUALITY_THRESHOLD = 0.5
+# Max error count before a document is permanently tagged as ocrfehler
+MAX_ERROR_COUNT = 3
 
 def load_review_queue() -> List[Dict]:
     """Load review queue from file."""
@@ -83,6 +94,70 @@ def save_ocr_ignore_list(ignore_list: List[Dict]):
 def get_ocr_ignored_ids() -> set:
     """Get set of document IDs that should be skipped in OCR."""
     return {item["document_id"] for item in load_ocr_ignore_list()}
+
+# --- OCR Error Counter ---
+
+def load_ocr_error_counts() -> Dict:
+    """Load error counts per document ID."""
+    try:
+        if OCR_ERROR_COUNT_FILE.exists():
+            return json.loads(OCR_ERROR_COUNT_FILE.read_text())
+    except Exception:
+        pass
+    return {}
+
+def save_ocr_error_counts(counts: Dict):
+    """Save error counts per document ID."""
+    try:
+        OCR_ERROR_COUNT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        OCR_ERROR_COUNT_FILE.write_text(json.dumps(counts, ensure_ascii=False, indent=2))
+    except Exception as e:
+        logger.error(f"Error saving OCR error counts: {e}")
+
+def increment_ocr_error(document_id: int, title: str, error_msg: str) -> int:
+    """Increment error count for a document. Returns new count."""
+    counts = load_ocr_error_counts()
+    key = str(document_id)
+    entry = counts.get(key, {"count": 0, "title": title, "errors": []})
+    entry["count"] += 1
+    entry["title"] = title
+    entry["errors"].append({"error": error_msg[:200], "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S")})
+    # Keep only last 5 errors per doc
+    entry["errors"] = entry["errors"][-5:]
+    counts[key] = entry
+    save_ocr_error_counts(counts)
+    return entry["count"]
+
+def reset_ocr_error(document_id: int):
+    """Reset error count for a document (e.g. after successful OCR)."""
+    counts = load_ocr_error_counts()
+    key = str(document_id)
+    if key in counts:
+        del counts[key]
+        save_ocr_error_counts(counts)
+
+# --- OCR Error List (permanently failed) ---
+
+def load_ocr_error_list() -> List[Dict]:
+    """Load OCR error list from file."""
+    try:
+        if OCR_ERROR_FILE.exists():
+            return json.loads(OCR_ERROR_FILE.read_text())
+    except Exception:
+        pass
+    return []
+
+def save_ocr_error_list(error_list: List[Dict]):
+    """Save OCR error list to file."""
+    try:
+        OCR_ERROR_FILE.parent.mkdir(parents=True, exist_ok=True)
+        OCR_ERROR_FILE.write_text(json.dumps(error_list, ensure_ascii=False, indent=2))
+    except Exception as e:
+        logger.error(f"Error saving OCR error list: {e}")
+
+def get_ocr_error_ids() -> set:
+    """Get set of document IDs that are permanently marked as error."""
+    return {item["document_id"] for item in load_ocr_error_list()}
 
 # Watchdog state
 watchdog_state = {
@@ -702,6 +777,18 @@ class OcrService:
             logger.info(f"Downloaded document {document_id}: {len(file_bytes)} bytes")
             print(f"[OCR] Downloaded {len(file_bytes)} bytes")
         except Exception as e:
+            if "404" in str(e):
+                error_msg = "Originaldatei fehlt (404 Not Found)."
+                ignore_list = load_ocr_ignore_list()
+                if not any(entry["document_id"] == document_id for entry in ignore_list):
+                    ignore_list.append({
+                        "document_id": document_id,
+                        "title": title,
+                        "reason": error_msg,
+                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S")
+                    })
+                    save_ocr_ignore_list(ignore_list)
+                raise ValueError(f"{error_msg} Dokument wird künftig komplett ignoriert.")
             raise ValueError(f"Download fehlgeschlagen: {e}")
 
         # OPTIMIZATION: Check for native text first (skip OCR if present)
@@ -729,27 +816,57 @@ class OcrService:
         images = []
         model_params = self.get_model_params(self.model)
         render_dpi = model_params.get("render_dpi", 200)
-        try:
-            # Try parsing as PDF first - run in thread pool to not block loop
-            loop = asyncio.get_running_loop()
-            images = await loop.run_in_executor(
-                None,
-                lambda: convert_from_bytes(file_bytes, dpi=render_dpi)
-            )
-            msg = f"Converted PDF to {len(images)} pages at {render_dpi} DPI"
-            logger.info(msg)
-            print(f"[OCR] {msg}")
-        except Exception as e:
-            # Not a PDF or failed, try loading as single image
-            print(f"[OCR] PDF conversion failed/not a PDF: {e}")
+        
+        # Detect actual file type from magic bytes
+        is_pdf = file_bytes[:4] == b'%PDF'
+        mime_type = doc.get("mime_type", "unknown")
+        
+        if is_pdf:
+            # Try PDF conversion with retry
+            for attempt in range(2):
+                try:
+                    loop = asyncio.get_running_loop()
+                    images = await loop.run_in_executor(
+                        None,
+                        lambda: convert_from_bytes(file_bytes, dpi=render_dpi)
+                    )
+                    msg = f"Converted PDF to {len(images)} pages at {render_dpi} DPI"
+                    logger.info(msg)
+                    print(f"[OCR] {msg}")
+                    break
+                except Exception as e:
+                    error_str = str(e).lower()
+                    # Password-protected PDF: skip immediately, no retry
+                    if "password" in error_str or "encrypted" in error_str:
+                        error_msg = f"Passwortgeschützte PDF – kann ohne Passwort nicht verarbeitet werden."
+                        ignore_list = load_ocr_ignore_list()
+                        if not any(entry["document_id"] == document_id for entry in ignore_list):
+                            ignore_list.append({
+                                "document_id": document_id,
+                                "title": title,
+                                "reason": error_msg,
+                                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S")
+                            })
+                            save_ocr_ignore_list(ignore_list)
+                        raise ValueError(f"{error_msg} Dokument wird künftig übersprungen.")
+                    
+                    if attempt == 0:
+                        logger.warning(f"PDF conversion attempt 1 failed for doc {document_id}: {e}, retrying...")
+                        print(f"[OCR] PDF conversion failed (attempt 1), retrying: {e}")
+                        await asyncio.sleep(2)
+                    else:
+                        raise ValueError(f"PDF-Konvertierung fehlgeschlagen nach 2 Versuchen ({mime_type}): {e}")
+        else:
+            # Not a PDF - try as image
             try:
                 img = Image.open(io.BytesIO(file_bytes))
+                img.load()  # Force load to catch deferred errors
                 images = [img]
-                msg = "Loaded as single image"
+                msg = f"Loaded as single image ({img.format}, {img.size[0]}x{img.size[1]})"
                 logger.info(msg)
                 print(f"[OCR] {msg}")
             except Exception as e:
-                raise ValueError(f"Dateiformat nicht unterstützt oder Fehler: {e}")
+                raise ValueError(f"Dateiformat nicht unterstützt ({mime_type}, {len(file_bytes)} bytes): {e}")
 
         if not images:
             raise ValueError("Keine Seiten aus dem Dokument extrahiert")
@@ -889,6 +1006,12 @@ class OcrService:
             ocrfinish_tag = await paperless_client.get_or_create_tag(TAG_OCR_FINISH)
             ocrfinish_tag_id = ocrfinish_tag.get("id")
             
+            ocrreview_tag = await paperless_client.get_or_create_tag(TAG_OCR_REVIEW)
+            ocrreview_tag_id = ocrreview_tag.get("id")
+            
+            ocrerror_tag = await paperless_client.get_or_create_tag(TAG_OCR_ERROR)
+            ocrerror_tag_id = ocrerror_tag.get("id")
+            
             runocr_tag = None
             runocr_tag_id = None
             if mode == "tagged" or remove_runocr_tag:
@@ -907,24 +1030,29 @@ class OcrService:
 
             if mode == "all":
                 # Get all documents
+                batch_state["log"].append("⏳ Lade Dokumentenliste von Paperless (das kann dauern)...")
                 all_docs = await paperless_client.get_documents()
-                # Filter out those already having ocrfinish tag
+                # Filter out those already having ocrfinish, ocrpruefen, or ocrfehler tag
                 documents = [
                     d for d in all_docs 
                     if ocrfinish_tag_id not in d.get("tags", [])
+                    and ocrreview_tag_id not in d.get("tags", [])
+                    and ocrerror_tag_id not in d.get("tags", [])
                 ]
                 batch_state["log"].append(
-                    f"📋 Modus: Alle Dokumente ({len(documents)} ohne ocrfinish Tag)"
+                    f"📋 Modus: Alle Dokumente ({len(documents)} ohne ocrfinish/ocrpruefen/ocrfehler Tag)"
                 )
                 
             elif mode == "tagged":
                 # Get documents with runocr tag
                 if runocr_tag_id:
                     documents = await paperless_client.get_documents(tag_id=runocr_tag_id)
-                    # Also filter out those with ocrfinish tag
+                    # Also filter out those with ocrfinish, ocrpruefen, or ocrfehler tag
                     documents = [
                         d for d in documents
                         if ocrfinish_tag_id not in d.get("tags", [])
+                        and ocrreview_tag_id not in d.get("tags", [])
+                        and ocrerror_tag_id not in d.get("tags", [])
                     ]
                 batch_state["log"].append(
                     f"🏷️ Modus: Nur mit Tag 'runocr' ({len(documents)} Dokumente)"
@@ -1056,6 +1184,20 @@ class OcrService:
                                     "retried": True
                                 })
                                 save_review_queue(queue)
+                                
+                                # SET OCRPRUEFEN TAG
+                                try:
+                                    add_t = [ocrreview_tag_id] if ocrreview_tag_id else []
+                                    rem_t = [runocr_tag_id] if runocr_tag_id and remove_runocr_tag else []
+                                    if add_t or rem_t:
+                                        await paperless_client.bulk_update_documents(
+                                            document_ids=[doc_id],
+                                            add_tags=add_t if add_t else None,
+                                            remove_tags=rem_t if rem_t else None
+                                        )
+                                        batch_state["log"].append(f"🏷️ Tag 'ocrpruefen' an {doc_title} gehängt.")
+                                except Exception as tag_err:
+                                    logger.error(f"Failed to set ocrpruefen tag for {doc_id}: {tag_err}")
                             else:
                                 batch_state["log"].append(
                                     f"✅ {doc_title}: Retry erfolgreich! Qualität jetzt OK ({new_len} Zeichen)"
@@ -1063,6 +1205,9 @@ class OcrService:
                                 print(f"[OCR] Retry fixed quality for {doc_id}: {new_len} chars now passes threshold")
                         
                         if not needs_review:
+                            # Reset error counter on success (transient errors should not accumulate)
+                            reset_ocr_error(doc_id)
+                            
                             # Step 1: PATCH content to Paperless
                             await paperless_client.update_document(doc_id, {"content": new_content})
                             
@@ -1119,6 +1264,41 @@ class OcrService:
                     batch_state["log"].append(error_msg)
                     batch_state["errors"].append(error_msg)
                     logger.error(f"OCR error for document {doc_id}: {e}")
+                    
+                    # Persistent error tracking: count failures per document
+                    err_count = increment_ocr_error(doc_id, doc_title, str(e))
+                    if err_count >= MAX_ERROR_COUNT:
+                        # Tag document as permanently failed
+                        try:
+                            add_t = [ocrerror_tag_id] if ocrerror_tag_id else []
+                            rem_t = [runocr_tag_id] if runocr_tag_id and remove_runocr_tag else []
+                            if add_t or rem_t:
+                                await paperless_client.bulk_update_documents(
+                                    document_ids=[doc_id],
+                                    add_tags=add_t if add_t else None,
+                                    remove_tags=rem_t if rem_t else None
+                                )
+                            # Add to permanent error list
+                            error_list = load_ocr_error_list()
+                            if not any(entry["document_id"] == doc_id for entry in error_list):
+                                error_list.append({
+                                    "document_id": doc_id,
+                                    "title": doc_title,
+                                    "error": str(e)[:200],
+                                    "fail_count": err_count,
+                                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S")
+                                })
+                                save_ocr_error_list(error_list)
+                            batch_state["log"].append(
+                                f"🚫 {doc_title}: {err_count}x fehlgeschlagen → Tag 'ocrfehler' gesetzt, wird nicht mehr verarbeitet"
+                            )
+                            print(f"[OCR] Doc {doc_id} permanently marked as failed ({err_count} failures)")
+                        except Exception as tag_err:
+                            logger.error(f"Failed to set ocrfehler tag for {doc_id}: {tag_err}")
+                    else:
+                        batch_state["log"].append(
+                            f"⚠️ {doc_title}: Fehler {err_count}/{MAX_ERROR_COUNT} - wird beim nächsten Lauf erneut versucht"
+                        )
                 
                 batch_state["processed"] = i + 1
                 
@@ -1131,8 +1311,11 @@ class OcrService:
             )
             
         except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
             batch_state["log"].append(f"💥 Kritischer Fehler: {str(e)}")
-            logger.error(f"Batch OCR critical error: {e}")
+            batch_state["log"].append(f"Traceback: {error_details}")
+            logger.error(f"Batch OCR critical error: {e}\n{error_details}")
         finally:
             batch_state["running"] = False
             batch_state["current_document"] = None

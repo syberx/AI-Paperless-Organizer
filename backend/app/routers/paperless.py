@@ -63,9 +63,34 @@ async def get_correspondents(client: PaperlessClient = Depends(get_paperless_cli
 
 
 @router.get("/tags")
-async def get_tags(client: PaperlessClient = Depends(get_paperless_client)):
-    """Get all tags from Paperless."""
-    return await client.get_tags()
+async def get_tags(
+    client: PaperlessClient = Depends(get_paperless_client),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get all tags - in-memory cache → DB cache → Paperless (fallback only)."""
+    from app.services.cache import get_cache
+    from app.services.paperless_client import CACHE_TTL
+    cache = get_cache()
+    cache_key = f"paperless:tags:{client.base_url}"
+
+    # 1. In-memory cache (fastest, sub-millisecond)
+    cached = await cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    # 2. DB cache (fast, survives Docker restarts)
+    db_result = await db.execute(
+        select(PaperlessCache).where(PaperlessCache.cache_key == "tags")
+    )
+    db_entry = db_result.scalar_one_or_none()
+    if db_entry and db_entry.data:
+        await cache.set(cache_key, db_entry.data, CACHE_TTL)
+        return db_entry.data
+
+    # 3. Fetch from Paperless (slow path - only on very first run or after cache wipe)
+    data = await client.get_tags(use_cache=False)
+    await update_db_cache(db, "tags", data)
+    return data
 
 
 @router.get("/document-types")

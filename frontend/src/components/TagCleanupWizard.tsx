@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { 
-  Sparkles, Loader2, Tag, AlertCircle, Trash2,
+  Sparkles, Loader2, Tag, AlertCircle, Trash2, Hash,
   ChevronRight, ChevronLeft, Check, Users, FileText, Layers, RefreshCw, Brain,
-  Shield, Plus, X, Ban, Eye, ExternalLink
+  Shield, Plus, X, Ban, Eye, ExternalLink, List
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
@@ -71,10 +71,11 @@ interface StepStatus {
 
 const STEPS = [
   { id: 1, title: 'Leere Tags löschen', icon: Trash2, description: 'Tags mit 0 Dokumenten entfernen', needsAI: false },
-  { id: 2, title: 'Unsinnige Tags', icon: AlertCircle, description: 'KI identifiziert sinnlose Tags', needsAI: true },
-  { id: 3, title: 'Korrespondenten-Tags', icon: Users, description: 'KI findet Tags die Firmen/Personen sind', needsAI: true },
-  { id: 4, title: 'Dokumententyp-Tags', icon: FileText, description: 'KI findet Tags die Dokumententypen sind', needsAI: true },
-  { id: 5, title: 'Ähnliche zusammenlegen', icon: Layers, description: 'KI findet Duplikate und Varianten', needsAI: true },
+  { id: 2, title: 'Einzelgänger-Tags', icon: Hash, description: 'Tags mit nur 1 Dokument prüfen', needsAI: false },
+  { id: 3, title: 'Unsinnige Tags', icon: AlertCircle, description: 'KI identifiziert sinnlose Tags', needsAI: true },
+  { id: 4, title: 'Korrespondenten-Tags', icon: Users, description: 'KI findet Tags die Firmen/Personen sind', needsAI: true },
+  { id: 5, title: 'Dokumententyp-Tags', icon: FileText, description: 'KI findet Tags die Dokumententypen sind', needsAI: true },
+  { id: 6, title: 'Ähnliche zusammenlegen', icon: Layers, description: 'KI findet Duplikate und Varianten', needsAI: true },
 ]
 
 export default function TagCleanupWizard() {
@@ -101,6 +102,8 @@ export default function TagCleanupWizard() {
   
   // Selection states
   const [selectedEmpty, setSelectedEmpty] = useState<Set<number>>(new Set())
+  const [singleDocTags, setSingleDocTags] = useState<TagItem[]>([])
+  const [selectedSingleDoc, setSelectedSingleDoc] = useState<Set<number>>(new Set())
   const [selectedNonsense, setSelectedNonsense] = useState<Set<number>>(new Set())
   const [selectedCorrespondentMatches, setSelectedCorrespondentMatches] = useState<Set<number>>(new Set())
   const [selectedDocTypeMatches, setSelectedDocTypeMatches] = useState<Set<number>>(new Set())
@@ -113,11 +116,13 @@ export default function TagCleanupWizard() {
   
   // Ignored items (ID-based, per analysis type)
   const [ignoredItemIds, setIgnoredItemIds] = useState<{
+    empty: number[]
+    single_doc: number[]
     nonsense: number[]
     correspondent: number[]
     doctype: number[]
     similar: number[]
-  }>({ nonsense: [], correspondent: [], doctype: [], similar: [] })
+  }>({ empty: [], single_doc: [], nonsense: [], correspondent: [], doctype: [], similar: [] })
   const [ignoringItemId, setIgnoringItemId] = useState<number | null>(null)
   
   // Saved analysis info
@@ -147,6 +152,10 @@ export default function TagCleanupWizard() {
   const [previewTagId, setPreviewTagId] = useState<number | null>(null)
   const [previewDocs, setPreviewDocs] = useState<api.DocumentPreview[]>([])
   const [loadingPreview, setLoadingPreview] = useState(false)
+  
+  const [showIgnoreListModal, setShowIgnoreListModal] = useState<{ type: string; title: string } | null>(null)
+  const [ignoredItemsList, setIgnoredItemsList] = useState<api.IgnoredItem[]>([])
+  const [loadingIgnoredList, setLoadingIgnoredList] = useState(false)
 
   useEffect(() => {
     loadInitialData()
@@ -159,7 +168,7 @@ export default function TagCleanupWizard() {
   useEffect(() => {
     if (lastDataLoad > 0 && Date.now() - lastDataLoad > CACHE_MAX_AGE_MS) {
       api.refreshPaperlessCache().catch(() => {})
-      loadInitialData()
+      loadInitialData(true)
       loadSavedAnalysisInfo()
     }
   }, [currentStep])
@@ -273,32 +282,40 @@ export default function TagCleanupWizard() {
   
   const loadIgnoredItemIds = async () => {
     try {
-      const [nonsense, correspondent, doctype, similar] = await Promise.all([
+      const [empty, single_doc, nonsense, correspondent, doctype, similar] = await Promise.all([
+        api.getIgnoredIds('tag', 'empty'),
+        api.getIgnoredIds('tag', 'single_doc'),
         api.getIgnoredIds('tag', 'nonsense'),
         api.getIgnoredIds('tag', 'correspondent_match'),
         api.getIgnoredIds('tag', 'doctype_match'),
         api.getIgnoredIds('tag', 'similar')
       ])
-      setIgnoredItemIds({ nonsense, correspondent, doctype, similar })
+      setIgnoredItemIds({ empty, single_doc, nonsense, correspondent, doctype, similar })
     } catch (e) {
       console.error('Failed to load ignored item IDs:', e)
     }
   }
   
-  const handleIgnoreItem = async (itemId: number, itemName: string, analysisType: 'nonsense' | 'correspondent' | 'doctype' | 'similar') => {
+  const handleIgnoreItem = async (itemId: number, itemName: string, analysisType: 'empty' | 'single_doc' | 'nonsense' | 'correspondent' | 'doctype' | 'similar') => {
     setIgnoringItemId(itemId)
     try {
+      const apiType = analysisType === 'correspondent' ? 'correspondent_match' : analysisType === 'doctype' ? 'doctype_match' : analysisType
       await api.addIgnoredItem({
         item_id: itemId,
         item_name: itemName,
         entity_type: 'tag',
-        analysis_type: analysisType === 'correspondent' ? 'correspondent_match' : analysisType === 'doctype' ? 'doctype_match' : analysisType,
+        analysis_type: apiType,
         reason: 'Manuell ignoriert'
       })
       setIgnoredItemIds(prev => ({
         ...prev,
         [analysisType]: [...prev[analysisType], itemId]
       }))
+      if (analysisType === 'empty') {
+        setSelectedEmpty(prev => { const n = new Set(prev); n.delete(itemId); return n })
+      } else if (analysisType === 'single_doc') {
+        setSelectedSingleDoc(prev => { const n = new Set(prev); n.delete(itemId); return n })
+      }
     } catch (e) {
       console.error('Failed to ignore item:', e)
     } finally {
@@ -306,6 +323,62 @@ export default function TagCleanupWizard() {
     }
   }
   
+  const openIgnoreListModal = async (analysisType: string, title: string) => {
+    setShowIgnoreListModal({ type: analysisType, title })
+    setLoadingIgnoredList(true)
+    try {
+      const items = await api.getIgnoredItems('tag', analysisType)
+      setIgnoredItemsList(items)
+    } catch (e) {
+      console.error('Failed to load ignored items:', e)
+      setIgnoredItemsList([])
+    } finally {
+      setLoadingIgnoredList(false)
+    }
+  }
+  
+  const removeFromIgnoreItemsList = async (id: number) => {
+    try {
+      const item = ignoredItemsList.find(i => i.id === id)
+      await api.removeIgnoredItem(id)
+      setIgnoredItemsList(prev => prev.filter(i => i.id !== id))
+      if (item) {
+        const keyMap: Record<string, string> = {
+          'empty': 'empty', 'single_doc': 'single_doc', 'nonsense': 'nonsense',
+          'correspondent_match': 'correspondent', 'doctype_match': 'doctype', 'similar': 'similar'
+        }
+        const key = keyMap[item.analysis_type]
+        if (key) {
+          setIgnoredItemIds(prev => ({
+            ...prev,
+            [key]: (prev as any)[key].filter((iid: number) => iid !== item.item_id)
+          }))
+        }
+      }
+    } catch (e) {
+      console.error('Failed to remove ignored item:', e)
+    }
+  }
+  
+  const renderIgnoredNotice = (analysisType: string, title: string, count: number) => {
+    if (count === 0) return null
+    return (
+      <div className="flex items-center justify-between p-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
+        <span className="text-sm text-emerald-400 flex items-center gap-1.5">
+          <Shield className="w-4 h-4" />
+          {count} Tag(s) auf Ignorier-Liste
+        </span>
+        <button
+          onClick={() => openIgnoreListModal(analysisType, title)}
+          className="text-sm text-primary-400 hover:text-primary-300 flex items-center gap-1"
+        >
+          <List className="w-3.5 h-3.5" />
+          Liste anzeigen
+        </button>
+      </div>
+    )
+  }
+
   const addToIgnoreList = async () => {
     if (!newIgnorePattern.trim()) return
     try {
@@ -346,8 +419,8 @@ export default function TagCleanupWizard() {
     }
   }
 
-  const loadInitialData = async () => {
-    setLoading(true)
+  const loadInitialData = async (silent: boolean = false) => {
+    if (!silent) setLoading(true)
     const startTime = Date.now()
     try {
       const tagsData = await api.getTags()
@@ -356,17 +429,29 @@ export default function TagCleanupWizard() {
       // Prepare step 1: Empty tags (no AI needed)
       const empty = tagsData.filter((t: TagItem) => t.document_count === 0)
       setEmptyTags(empty)
-      setSelectedEmpty(new Set(empty.map((t: TagItem) => t.id)))
+      // Only reset selection on initial/forced load, not after deletes
+      if (!silent) {
+        setSelectedEmpty(new Set(empty.map((t: TagItem) => t.id)))
+      }
+      
+      // Prepare step 2: Single-doc tags (no AI needed)
+      const singleDoc = tagsData.filter((t: TagItem) => t.document_count === 1)
+      setSingleDocTags(singleDoc)
+      if (!silent) {
+        setSelectedSingleDoc(new Set(singleDoc.map((t: TagItem) => t.id)))
+      }
       
     } catch (e) {
       console.error('Error loading data:', e)
     } finally {
-      setLoading(false)
-      setLastDataLoad(Date.now())
-      const elapsed = Date.now() - startTime
-      setLoadTime(elapsed)
-      if (elapsed < 1000) {
-        setCachedInfo('(aus Cache)')
+      if (!silent) {
+        setLoading(false)
+        setLastDataLoad(Date.now())
+        const elapsed = Date.now() - startTime
+        setLoadTime(elapsed)
+        if (elapsed < 1000) {
+          setCachedInfo('(aus Cache)')
+        }
       }
     }
   }
@@ -374,10 +459,10 @@ export default function TagCleanupWizard() {
   // Open confirmation modal before AI analysis
   const openAnalysisConfirm = async (step: number, forceNew: boolean = false) => {
     const stepInfo: Record<number, { name: string; type: 'nonsense' | 'correspondent' | 'doctype' | 'similar' }> = {
-      2: { name: 'Unsinnige Tags', type: 'nonsense' },
-      3: { name: 'Korrespondenten-Tags', type: 'correspondent' },
-      4: { name: 'Dokumententyp-Tags', type: 'doctype' },
-      5: { name: 'Ähnliche Tags', type: 'similar' }
+      3: { name: 'Unsinnige Tags', type: 'nonsense' },
+      4: { name: 'Korrespondenten-Tags', type: 'correspondent' },
+      5: { name: 'Dokumententyp-Tags', type: 'doctype' },
+      6: { name: 'Ähnliche Tags', type: 'similar' }
     }
     
     const info = stepInfo[step]
@@ -386,10 +471,10 @@ export default function TagCleanupWizard() {
     // If loading saved (not forceNew), skip modal
     if (!forceNew) {
       const hasSaved = 
-        (step === 2 && savedNonsenseInfo?.exists) ||
-        (step === 3 && savedCorrespondentInfo?.exists) ||
-        (step === 4 && savedDoctypeInfo?.exists) ||
-        (step === 5 && savedSimilarInfo?.exists)
+        (step === 3 && savedNonsenseInfo?.exists) ||
+        (step === 4 && savedCorrespondentInfo?.exists) ||
+        (step === 5 && savedDoctypeInfo?.exists) ||
+        (step === 6 && savedSimilarInfo?.exists)
       
       if (hasSaved) {
         // Load saved directly without modal
@@ -434,7 +519,7 @@ export default function TagCleanupWizard() {
     
     try {
       switch(step) {
-        case 2: // Nonsense tags
+        case 3: // Nonsense tags
           if (!forceNew && savedNonsenseInfo?.exists) {
             const saved = await api.loadSavedNonsenseAnalysis()
             if (saved.exists && saved.nonsense_tags) {
@@ -456,7 +541,7 @@ export default function TagCleanupWizard() {
           }
           break
           
-        case 3: // Correspondent matches
+        case 4: // Correspondent matches
           if (!forceNew && savedCorrespondentInfo?.exists) {
             const saved = await api.loadSavedCorrespondentAnalysis()
             if (saved.exists && saved.correspondent_tags) {
@@ -478,7 +563,7 @@ export default function TagCleanupWizard() {
           }
           break
           
-        case 4: // Doctype matches
+        case 5: // Doctype matches
           if (!forceNew && savedDoctypeInfo?.exists) {
             const saved = await api.loadSavedDoctypeAnalysis()
             if (saved.exists && saved.doctype_tags) {
@@ -500,7 +585,7 @@ export default function TagCleanupWizard() {
           }
           break
           
-        case 5: // Similar tags
+        case 6: // Similar tags
           if (!forceNew && savedSimilarInfo?.exists) {
             const saved = await api.loadTagSavedAnalysis()
             if (saved.groups && saved.groups.length > 0) {
@@ -533,6 +618,24 @@ export default function TagCleanupWizard() {
     }
   }
 
+  // Helper: bulk delete with chunked progress updates
+  const bulkDeleteWithProgress = async (ids: number[], chunkSize = 6) => {
+    const allDeleted: number[] = []
+    let allFailed = 0
+    setProgress({ current: 0, total: ids.length })
+    for (let i = 0; i < ids.length; i += chunkSize) {
+      const chunk = ids.slice(i, i + chunkSize)
+      const result = await api.bulkDeleteTags(chunk)
+      allDeleted.push(...result.deleted)
+      allFailed += result.errors?.length ?? 0
+      setProgress({ current: i + chunk.length, total: ids.length })
+    }
+    if (allDeleted.length === 0 && allFailed > 0) {
+      throw new Error(`Kein Tag konnte gelöscht werden (${allFailed} Fehler). Bitte "Neu laden" klicken und erneut versuchen.`)
+    }
+    return { deleted: allDeleted, deleted_count: allDeleted.length }
+  }
+
   const executeStep = async (step: number) => {
     setProcessing(true)
     setError(null)
@@ -547,44 +650,44 @@ export default function TagCleanupWizard() {
         case 1: {
           const ids = emptyTags.filter(t => selectedEmpty.has(t.id)).map(t => t.id)
           requestedCount = ids.length
-          setProgress({ current: 0, total: ids.length })
-          const bulkResult = await api.bulkDeleteTags(ids)
-          deletedTagIds = bulkResult.deleted
-          deletedCount = bulkResult.deleted_count
-          setProgress({ current: ids.length, total: ids.length })
+          const r = await bulkDeleteWithProgress(ids)
+          deletedTagIds = r.deleted
+          deletedCount = r.deleted_count
           break
         }
         case 2: {
-          const ids = nonsenseTags.filter(t => selectedNonsense.has(t.id)).map(t => t.id)
+          const ids = singleDocTags.filter(t => selectedSingleDoc.has(t.id)).map(t => t.id)
           requestedCount = ids.length
-          setProgress({ current: 0, total: ids.length })
-          const bulkResult = await api.bulkDeleteTags(ids)
-          deletedTagIds = bulkResult.deleted
-          deletedCount = bulkResult.deleted_count
-          setProgress({ current: ids.length, total: ids.length })
+          const r = await bulkDeleteWithProgress(ids)
+          deletedTagIds = r.deleted
+          deletedCount = r.deleted_count
           break
         }
         case 3: {
-          const ids = correspondentMatches.filter(m => selectedCorrespondentMatches.has(m.tag_id)).map(m => m.tag_id)
+          const ids = nonsenseTags.filter(t => selectedNonsense.has(t.id)).map(t => t.id)
           requestedCount = ids.length
-          setProgress({ current: 0, total: ids.length })
-          const bulkResult = await api.bulkDeleteTags(ids)
-          deletedTagIds = bulkResult.deleted
-          deletedCount = bulkResult.deleted_count
-          setProgress({ current: ids.length, total: ids.length })
+          const r = await bulkDeleteWithProgress(ids)
+          deletedTagIds = r.deleted
+          deletedCount = r.deleted_count
           break
         }
         case 4: {
-          const ids = docTypeMatches.filter(m => selectedDocTypeMatches.has(m.tag_id)).map(m => m.tag_id)
+          const ids = correspondentMatches.filter(m => selectedCorrespondentMatches.has(m.tag_id)).map(m => m.tag_id)
           requestedCount = ids.length
-          setProgress({ current: 0, total: ids.length })
-          const bulkResult = await api.bulkDeleteTags(ids)
-          deletedTagIds = bulkResult.deleted
-          deletedCount = bulkResult.deleted_count
-          setProgress({ current: ids.length, total: ids.length })
+          const r = await bulkDeleteWithProgress(ids)
+          deletedTagIds = r.deleted
+          deletedCount = r.deleted_count
           break
         }
-        case 5:
+        case 5: {
+          const ids = docTypeMatches.filter(m => selectedDocTypeMatches.has(m.tag_id)).map(m => m.tag_id)
+          requestedCount = ids.length
+          const r = await bulkDeleteWithProgress(ids)
+          deletedTagIds = r.deleted
+          deletedCount = r.deleted_count
+          break
+        }
+        case 6:
           break
       }
       
@@ -593,18 +696,21 @@ export default function TagCleanupWizard() {
       let remainingCount = 0
       switch(step) {
         case 1: remainingCount = emptyTags.filter(t => !deletedSet.has(t.id)).length; break
-        case 2: remainingCount = nonsenseTags.filter(t => !deletedSet.has(t.id)).length; break
-        case 3: remainingCount = correspondentMatches.filter(m => !deletedSet.has(m.tag_id)).length; break
-        case 4: remainingCount = docTypeMatches.filter(m => !deletedSet.has(m.tag_id)).length; break
+        case 2: remainingCount = singleDocTags.filter(t => !deletedSet.has(t.id)).length; break
+        case 3: remainingCount = nonsenseTags.filter(t => !deletedSet.has(t.id)).length; break
+        case 4: remainingCount = correspondentMatches.filter(m => !deletedSet.has(m.tag_id)).length; break
+        case 5: remainingCount = docTypeMatches.filter(m => !deletedSet.has(m.tag_id)).length; break
       }
       
       // Remove deleted tags from local lists
       if (deletedSet.size > 0) {
         setEmptyTags(prev => prev.filter(t => !deletedSet.has(t.id)))
+        setSingleDocTags(prev => prev.filter(t => !deletedSet.has(t.id)))
         setNonsenseTags(prev => prev.filter(t => !deletedSet.has(t.id)))
         setCorrespondentMatches(prev => prev.filter(m => !deletedSet.has(m.tag_id)))
         setDocTypeMatches(prev => prev.filter(m => !deletedSet.has(m.tag_id)))
         setSelectedEmpty(prev => { const n = new Set(prev); deletedTagIds.forEach(id => n.delete(id)); return n })
+        setSelectedSingleDoc(prev => { const n = new Set(prev); deletedTagIds.forEach(id => n.delete(id)); return n })
         setSelectedNonsense(prev => { const n = new Set(prev); deletedTagIds.forEach(id => n.delete(id)); return n })
         setSelectedCorrespondentMatches(prev => { const n = new Set(prev); deletedTagIds.forEach(id => n.delete(id)); return n })
         setSelectedDocTypeMatches(prev => { const n = new Set(prev); deletedTagIds.forEach(id => n.delete(id)); return n })
@@ -624,15 +730,13 @@ export default function TagCleanupWizard() {
         }
       }))
       
-      // Remove deleted tags from ALL saved analyses in backend
+      // Remove deleted tags from ALL saved analyses in backend (fire & forget)
       if (deletedTagIds.length > 0) {
-        try { await api.removeTagsFromSavedAnalyses(deletedTagIds) } catch (_) { /* ignore */ }
+        api.removeTagsFromSavedAnalyses(deletedTagIds).catch(() => {})
       }
       
-      // Refresh backend cache + reload fresh tag list
-      try { await api.refreshPaperlessCache() } catch (_) { /* ignore */ }
-      await loadInitialData()
-      await loadSavedAnalysisInfo()
+      // Refresh backend cache in background - do NOT await, UI is already up-to-date
+      api.refreshPaperlessCache().catch(() => {})
       
     } catch (e: any) {
       console.error('Error executing step:', e)
@@ -648,7 +752,7 @@ export default function TagCleanupWizard() {
       ...prev,
       [currentStep]: { completed: false, skipped: true }
     }))
-    if (currentStep < 5) {
+    if (currentStep < 6) {
       setCurrentStep(currentStep + 1)
     }
   }
@@ -657,16 +761,19 @@ export default function TagCleanupWizard() {
     const needsAnalysis = STEPS[currentStep - 1].needsAI && !stepStatus[currentStep]?.analyzed
     
     switch(currentStep) {
-      case 1:
+      case 1: {
+        const visibleEmptyTags = emptyTags.filter(t => !ignoredItemIds.empty.includes(t.id))
         return (
           <div className="space-y-4">
+            {renderIgnoredNotice('empty', 'Leere Tags', ignoredItemIds.empty.length)}
+            
             <div className="flex items-center justify-between">
               <p className="text-surface-300">
-                <strong className="text-amber-400">{emptyTags.length}</strong> Tags haben 0 Dokumente
+                <strong className="text-amber-400">{visibleEmptyTags.length}</strong> Tags haben 0 Dokumente
               </p>
               <div className="flex gap-2">
                 <button
-                  onClick={() => setSelectedEmpty(new Set(emptyTags.map(t => t.id)))}
+                  onClick={() => setSelectedEmpty(new Set(visibleEmptyTags.map(t => t.id)))}
                   className="text-sm text-primary-400 hover:text-primary-300"
                 >
                   Alle auswählen
@@ -681,8 +788,8 @@ export default function TagCleanupWizard() {
             </div>
             
             <div className="max-h-96 overflow-y-auto space-y-1">
-              {emptyTags.map(tag => (
-                <label key={tag.id} className="flex items-center gap-3 p-2 rounded hover:bg-surface-700/50 cursor-pointer">
+              {visibleEmptyTags.map(tag => (
+                <div key={tag.id} className="flex items-center gap-3 p-2 rounded hover:bg-surface-700/50">
                   <input
                     type="checkbox"
                     checked={selectedEmpty.has(tag.id)}
@@ -692,20 +799,125 @@ export default function TagCleanupWizard() {
                       else newSet.delete(tag.id)
                       setSelectedEmpty(newSet)
                     }}
-                    className="w-4 h-4"
+                    className="w-4 h-4 cursor-pointer"
                   />
                   <Tag className="w-4 h-4 text-surface-500" />
-                  <span className="text-surface-200">{tag.name}</span>
-                </label>
+                  <span className="text-surface-200 flex-1">{tag.name}</span>
+                  <button
+                    onClick={() => handleIgnoreItem(tag.id, tag.name, 'empty')}
+                    disabled={ignoringItemId === tag.id}
+                    className="p-1.5 rounded text-surface-500 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                    title="Auf Ignorier-Liste setzen"
+                  >
+                    {ignoringItemId === tag.id ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Ban className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
               ))}
-              {emptyTags.length === 0 && (
+              {visibleEmptyTags.length === 0 && (
                 <p className="text-center text-surface-400 py-8">Keine leeren Tags gefunden! ✓</p>
               )}
             </div>
           </div>
         )
+      }
+      
+      case 2: {
+        const visibleSingleDocTags = singleDocTags.filter(t => !ignoredItemIds.single_doc.includes(t.id))
+        return (
+          <div className="space-y-4">
+            <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+              <p className="text-blue-300 text-sm">
+                Tags die nur an einem einzigen Dokument hängen sind oft auto-generierte Keywords 
+                (z.B. "Ameisenköder", "AdBlue", "Aromazucker") ohne organisatorischen Wert.
+                Prüfe die Vorschau, bevor du löschst.
+              </p>
+            </div>
+            
+            {renderIgnoredNotice('single_doc', 'Einzelgänger-Tags', ignoredItemIds.single_doc.length)}
+            
+            <div className="flex items-center justify-between">
+              <p className="text-surface-300">
+                <strong className="text-amber-400">{visibleSingleDocTags.length}</strong> Tags mit nur 1 Dokument
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setSelectedSingleDoc(new Set(visibleSingleDocTags.map(t => t.id)))}
+                  className="text-sm text-primary-400 hover:text-primary-300"
+                >
+                  Alle auswählen
+                </button>
+                <button
+                  onClick={() => setSelectedSingleDoc(new Set())}
+                  className="text-sm text-surface-400 hover:text-surface-300"
+                >
+                  Keine
+                </button>
+              </div>
+            </div>
+            
+            <div className="max-h-[500px] overflow-y-auto space-y-2">
+              {visibleSingleDocTags.map(tag => (
+                <div key={tag.id} className="p-3 rounded bg-surface-700/30 hover:bg-surface-700/50">
+                  <div className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedSingleDoc.has(tag.id)}
+                      onChange={(e) => {
+                        const newSet = new Set(selectedSingleDoc)
+                        if (e.target.checked) newSet.add(tag.id)
+                        else newSet.delete(tag.id)
+                        setSelectedSingleDoc(newSet)
+                      }}
+                      className="w-4 h-4 mt-1 cursor-pointer"
+                    />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Tag className="w-4 h-4 text-purple-400" />
+                        <span className="text-surface-200 font-medium">{tag.name}</span>
+                        <span className="text-surface-500 text-sm">(1 Dok.)</span>
+                        <button
+                          onClick={() => toggleDocPreview(tag.id)}
+                          className={clsx(
+                            "text-xs px-2 py-0.5 rounded flex items-center gap-1 transition-colors",
+                            previewTagId === tag.id 
+                              ? "bg-primary-500/20 text-primary-300" 
+                              : "bg-surface-600/50 text-surface-400 hover:text-primary-300"
+                          )}
+                        >
+                          <Eye className="w-3 h-3" />
+                          Vorschau
+                        </button>
+                      </div>
+                      {renderDocPreview(tag.id, 1)}
+                    </div>
+                    <button
+                      onClick={() => handleIgnoreItem(tag.id, tag.name, 'single_doc')}
+                      disabled={ignoringItemId === tag.id}
+                      className="p-1.5 rounded text-surface-500 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                      title="Auf Ignorier-Liste setzen"
+                    >
+                      {ignoringItemId === tag.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Ban className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {visibleSingleDocTags.length === 0 && (
+                <p className="text-center text-surface-400 py-8">Keine Einzelgänger-Tags gefunden! ✓</p>
+              )}
+            </div>
+          </div>
+        )
+      }
         
-      case 2:
+      case 3:
         if (needsAnalysis) {
           return (
             <div className="space-y-6">
@@ -760,7 +972,7 @@ export default function TagCleanupWizard() {
                   {savedNonsenseInfo?.exists ? (
                     <>
                       <button
-                        onClick={() => openAnalysisConfirm(2, false)}
+                        onClick={() => openAnalysisConfirm(3, false)}
                         disabled={analyzing}
                         className="btn btn-primary flex items-center gap-2"
                       >
@@ -777,7 +989,7 @@ export default function TagCleanupWizard() {
                         )}
                       </button>
                       <button
-                        onClick={() => openAnalysisConfirm(2, true)}
+                        onClick={() => openAnalysisConfirm(3, true)}
                         disabled={analyzing}
                         className="btn btn-secondary flex items-center gap-2"
                       >
@@ -787,7 +999,7 @@ export default function TagCleanupWizard() {
                     </>
                   ) : (
                     <button
-                      onClick={() => openAnalysisConfirm(2, true)}
+                      onClick={() => openAnalysisConfirm(3, true)}
                       disabled={analyzing}
                       className="btn btn-primary flex items-center gap-2"
                     >
@@ -905,7 +1117,7 @@ export default function TagCleanupWizard() {
           </div>
         )
         
-      case 3:
+      case 4:
         if (needsAnalysis) {
           return (
             <div className="text-center py-12">
@@ -924,7 +1136,7 @@ export default function TagCleanupWizard() {
                 {savedCorrespondentInfo?.exists ? (
                   <>
                     <button
-                      onClick={() => openAnalysisConfirm(3, false)}
+                      onClick={() => openAnalysisConfirm(4, false)}
                       disabled={analyzing}
                       className="btn btn-primary flex items-center gap-2"
                     >
@@ -932,7 +1144,7 @@ export default function TagCleanupWizard() {
                       {analyzing ? 'Lade...' : 'Gespeicherte laden'}
                     </button>
                     <button
-                      onClick={() => openAnalysisConfirm(3, true)}
+                      onClick={() => openAnalysisConfirm(4, true)}
                       disabled={analyzing}
                       className="btn btn-secondary flex items-center gap-2"
                     >
@@ -942,7 +1154,7 @@ export default function TagCleanupWizard() {
                   </>
                 ) : (
                   <button
-                    onClick={() => openAnalysisConfirm(3, true)}
+                    onClick={() => openAnalysisConfirm(4, true)}
                     disabled={analyzing}
                     className="btn btn-primary flex items-center gap-2"
                   >
@@ -1049,7 +1261,7 @@ export default function TagCleanupWizard() {
           </div>
         )
         
-      case 4:
+      case 5:
         if (needsAnalysis) {
           return (
             <div className="text-center py-12">
@@ -1068,7 +1280,7 @@ export default function TagCleanupWizard() {
                 {savedDoctypeInfo?.exists ? (
                   <>
                     <button
-                      onClick={() => openAnalysisConfirm(4, false)}
+                      onClick={() => openAnalysisConfirm(5, false)}
                       disabled={analyzing}
                       className="btn btn-primary flex items-center gap-2"
                     >
@@ -1076,7 +1288,7 @@ export default function TagCleanupWizard() {
                       {analyzing ? 'Lade...' : 'Gespeicherte laden'}
                     </button>
                     <button
-                      onClick={() => openAnalysisConfirm(4, true)}
+                      onClick={() => openAnalysisConfirm(5, true)}
                       disabled={analyzing}
                       className="btn btn-secondary flex items-center gap-2"
                     >
@@ -1086,7 +1298,7 @@ export default function TagCleanupWizard() {
                   </>
                 ) : (
                   <button
-                    onClick={() => openAnalysisConfirm(4, true)}
+                    onClick={() => openAnalysisConfirm(5, true)}
                     disabled={analyzing}
                     className="btn btn-primary flex items-center gap-2"
                   >
@@ -1193,7 +1405,7 @@ export default function TagCleanupWizard() {
           </div>
         )
         
-      case 5:
+      case 6:
         if (needsAnalysis) {
           return (
             <div className="text-center py-12">
@@ -1212,7 +1424,7 @@ export default function TagCleanupWizard() {
                 {savedSimilarInfo?.exists ? (
                   <>
                     <button
-                      onClick={() => openAnalysisConfirm(5, false)}
+                      onClick={() => openAnalysisConfirm(6, false)}
                       disabled={analyzing}
                       className="btn btn-primary flex items-center gap-2"
                     >
@@ -1220,7 +1432,7 @@ export default function TagCleanupWizard() {
                       {analyzing ? 'Lade...' : 'Gespeicherte laden'}
                     </button>
                     <button
-                      onClick={() => openAnalysisConfirm(5, true)}
+                      onClick={() => openAnalysisConfirm(6, true)}
                       disabled={analyzing}
                       className="btn btn-secondary flex items-center gap-2"
                     >
@@ -1230,7 +1442,7 @@ export default function TagCleanupWizard() {
                   </>
                 ) : (
                   <button
-                    onClick={() => openAnalysisConfirm(5, true)}
+                    onClick={() => openAnalysisConfirm(6, true)}
                     disabled={analyzing}
                     className="btn btn-primary flex items-center gap-2"
                   >
@@ -1276,10 +1488,11 @@ export default function TagCleanupWizard() {
     
     switch(currentStep) {
       case 1: return `${selectedEmpty.size} Tags löschen`
-      case 2: return `${selectedNonsense.size} Tags löschen`
-      case 3: return `${selectedCorrespondentMatches.size} Tags entfernen`
-      case 4: return `${selectedDocTypeMatches.size} Tags entfernen`
-      case 5: return 'Fertig'
+      case 2: return `${selectedSingleDoc.size} Tags löschen`
+      case 3: return `${selectedNonsense.size} Tags löschen`
+      case 4: return `${selectedCorrespondentMatches.size} Tags entfernen`
+      case 5: return `${selectedDocTypeMatches.size} Tags entfernen`
+      case 6: return 'Fertig'
       default: return 'Ausführen'
     }
   }
@@ -1290,10 +1503,11 @@ export default function TagCleanupWizard() {
     
     switch(currentStep) {
       case 1: return selectedEmpty.size > 0
-      case 2: return selectedNonsense.size > 0
-      case 3: return selectedCorrespondentMatches.size > 0
-      case 4: return selectedDocTypeMatches.size > 0
-      case 5: return true
+      case 2: return selectedSingleDoc.size > 0
+      case 3: return selectedNonsense.size > 0
+      case 4: return selectedCorrespondentMatches.size > 0
+      case 5: return selectedDocTypeMatches.size > 0
+      case 6: return true
       default: return false
     }
   }
@@ -1471,7 +1685,7 @@ export default function TagCleanupWizard() {
                 </>
               )}
             </button>
-            {currentStep < 5 && (
+            {currentStep < 6 && (
               <button
                 onClick={() => setCurrentStep(currentStep + 1)}
                 className="btn btn-secondary flex items-center gap-2"
@@ -1559,6 +1773,72 @@ export default function TagCleanupWizard() {
             <div className="flex justify-end mt-4 pt-4 border-t border-surface-700">
               <button
                 onClick={() => setShowIgnoreModal(false)}
+                className="btn btn-primary"
+              >
+                Fertig
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Ignore Items List Modal */}
+      {showIgnoreListModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-surface-800 rounded-xl p-6 w-full max-w-lg mx-4 border border-surface-700">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-surface-100 flex items-center gap-2">
+                <Shield className="w-5 h-5 text-emerald-400" />
+                Ignorier-Liste: {showIgnoreListModal.title}
+              </h3>
+              <button
+                onClick={() => setShowIgnoreListModal(null)}
+                className="text-surface-400 hover:text-surface-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <p className="text-sm text-surface-400 mb-4">
+              Diese Tags werden in diesem Schritt nicht mehr angezeigt. 
+              Entferne einen Tag, um ihn wieder sichtbar zu machen.
+            </p>
+            
+            {loadingIgnoredList ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin text-primary-400" />
+              </div>
+            ) : (
+              <div className="max-h-64 overflow-y-auto space-y-2">
+                {ignoredItemsList.map(item => (
+                  <div key={item.id} className="flex items-center justify-between p-3 bg-surface-700/50 rounded-lg">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <Tag className="w-4 h-4 text-surface-500 flex-shrink-0" />
+                      <div className="min-w-0">
+                        <span className="text-surface-200 font-medium block truncate">{item.item_name}</span>
+                        <span className="text-xs text-surface-500">
+                          Ignoriert am {new Date(item.created_at).toLocaleDateString('de-DE')}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => removeFromIgnoreItemsList(item.id)}
+                      className="text-red-400 hover:text-red-300 p-1.5 hover:bg-red-500/10 rounded flex-shrink-0 ml-2"
+                      title="Von Ignorier-Liste entfernen"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+                {ignoredItemsList.length === 0 && (
+                  <p className="text-center text-surface-500 py-6">Keine ignorierten Tags</p>
+                )}
+              </div>
+            )}
+            
+            <div className="flex justify-end mt-4 pt-4 border-t border-surface-700">
+              <button
+                onClick={() => setShowIgnoreListModal(null)}
                 className="btn btn-primary"
               >
                 Fertig

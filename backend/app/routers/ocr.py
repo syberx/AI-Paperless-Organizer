@@ -14,7 +14,7 @@ from typing import Optional, List
 import httpx
 
 from app.services.paperless_client import PaperlessClient, get_paperless_client
-from app.services.ocr_service import OcrService, batch_state, watchdog_state, single_ocr_running, load_review_queue, save_review_queue, load_ocr_ignore_list, save_ocr_ignore_list, DEFAULT_OLLAMA_URL, DEFAULT_OCR_MODEL
+from app.services.ocr_service import OcrService, batch_state, watchdog_state, single_ocr_running, load_review_queue, save_review_queue, load_ocr_ignore_list, save_ocr_ignore_list, load_ocr_error_list, save_ocr_error_list, load_ocr_error_counts, save_ocr_error_counts, DEFAULT_OLLAMA_URL, DEFAULT_OCR_MODEL
 import app.services.ocr_service as ocr_service_module
 from app.services.llm_provider import LLMProviderService, get_llm_service
 
@@ -532,6 +532,58 @@ async def remove_from_ocr_ignore_list(document_id: int):
         raise HTTPException(status_code=404, detail="Dokument nicht in der Ignore-Liste")
     save_ocr_ignore_list(new_list)
     return {"removed": True, "document_id": document_id}
+
+
+# --- OCR Error List ---
+
+@router.get("/errors/list")
+async def get_ocr_errors():
+    """Get all documents on the OCR error list (permanently failed)."""
+    error_list = load_ocr_error_list()
+    error_counts = load_ocr_error_counts()
+    return {"items": error_list, "count": len(error_list), "pending_errors": error_counts}
+
+
+@router.delete("/errors/remove/{document_id}")
+async def remove_from_ocr_error_list(
+    document_id: int,
+    client: PaperlessClient = Depends(get_paperless_client)
+):
+    """Remove a document from the error list and remove its ocrfehler tag so it can be retried."""
+    # Remove from error list
+    error_list = load_ocr_error_list()
+    new_list = [entry for entry in error_list if entry["document_id"] != document_id]
+    save_ocr_error_list(new_list)
+    
+    # Reset error counter
+    counts = load_ocr_error_counts()
+    key = str(document_id)
+    if key in counts:
+        del counts[key]
+        save_ocr_error_counts(counts)
+    
+    # Remove ocrfehler tag from Paperless
+    try:
+        from app.services.ocr_service import TAG_OCR_ERROR
+        tag = await client.get_or_create_tag(TAG_OCR_ERROR)
+        tag_id = tag.get("id")
+        if tag_id:
+            await client.bulk_update_documents(
+                document_ids=[document_id],
+                remove_tags=[tag_id]
+            )
+    except Exception as e:
+        logger.warning(f"Could not remove ocrfehler tag from {document_id}: {e}")
+    
+    return {"removed": True, "document_id": document_id}
+
+
+@router.post("/errors/clear")
+async def clear_ocr_error_list():
+    """Clear the entire error list and error counts."""
+    save_ocr_error_list([])
+    save_ocr_error_counts({})
+    return {"cleared": True}
 
 
 # --- Document Preview Proxy ---

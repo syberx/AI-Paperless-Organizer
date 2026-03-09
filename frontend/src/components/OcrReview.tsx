@@ -11,6 +11,7 @@ import {
     RotateCcw,
     Ban,
     ShieldOff,
+    AlertTriangle,
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
@@ -34,23 +35,35 @@ interface IgnoreItem {
     timestamp: string
 }
 
-interface OcrReviewProps {
-    onRecheckDocument?: (docId: number) => void
+interface ErrorItem {
+    document_id: number
+    title: string
+    error: string
+    fail_count: number
+    timestamp: string
 }
 
-export default function OcrReview({ onRecheckDocument }: OcrReviewProps = {}) {
+interface OcrReviewProps {
+    onRecheckDocument?: (docId: number) => void
+    hideSubLists?: boolean
+}
+
+export default function OcrReview({ onRecheckDocument, hideSubLists }: OcrReviewProps = {}) {
     const [items, setItems] = useState<ReviewItem[]>([])
     const [ignoreList, setIgnoreList] = useState<IgnoreItem[]>([])
+    const [errorList, setErrorList] = useState<ErrorItem[]>([])
     const [loading, setLoading] = useState(true)
     const [expandedId, setExpandedId] = useState<number | null>(null)
     const [actionLoading, setActionLoading] = useState<number | null>(null)
     const [error, setError] = useState('')
     const [success, setSuccess] = useState('')
     const [showIgnoreList, setShowIgnoreList] = useState(false)
+    const [showErrorList, setShowErrorList] = useState(false)
 
     useEffect(() => {
         loadQueue()
         loadIgnoreList()
+        loadErrorList()
     }, [])
 
     const loadQueue = async () => {
@@ -69,6 +82,15 @@ export default function OcrReview({ onRecheckDocument }: OcrReviewProps = {}) {
         try {
             const data = await api.getOcrIgnoreList()
             setIgnoreList(data.items || [])
+        } catch {
+            // silent
+        }
+    }
+
+    const loadErrorList = async () => {
+        try {
+            const data = await api.getOcrErrorList()
+            setErrorList(data.items || [])
         } catch {
             // silent
         }
@@ -135,6 +157,21 @@ export default function OcrReview({ onRecheckDocument }: OcrReviewProps = {}) {
         }
     }
 
+    const removeFromErrorList = async (docId: number, title: string) => {
+        setActionLoading(docId)
+        setError('')
+        try {
+            await api.removeFromOcrErrorList(docId)
+            setErrorList(prev => prev.filter(i => i.document_id !== docId))
+            setSuccess(`"${title}" – Von Fehlerliste entfernt. Tag 'ocrfehler' wurde entfernt, Dokument wird beim nächsten Batch erneut versucht.`)
+            setTimeout(() => setSuccess(''), 5000)
+        } catch (e: any) {
+            setError(e?.message || 'Fehler beim Entfernen')
+        } finally {
+            setActionLoading(null)
+        }
+    }
+
     return (
         <div className="space-y-8 pb-12">
             {/* Header */}
@@ -156,7 +193,7 @@ export default function OcrReview({ onRecheckDocument }: OcrReviewProps = {}) {
                     </p>
                 </div>
                 <button
-                    onClick={loadQueue}
+                    onClick={() => { loadQueue(); loadIgnoreList(); loadErrorList(); }}
                     className="btn bg-surface-700 hover:bg-surface-600 text-surface-200 border-surface-600 flex items-center gap-2"
                 >
                     <RefreshCw className="w-4 h-4" />
@@ -319,8 +356,71 @@ export default function OcrReview({ onRecheckDocument }: OcrReviewProps = {}) {
                 </div>
             ))}
 
+            {/* OCR Error List */}
+            {!hideSubLists && errorList.length > 0 && (
+                <div className="mt-8">
+                    <button
+                        onClick={() => setShowErrorList(!showErrorList)}
+                        className="flex items-center gap-3 text-surface-400 hover:text-surface-200 transition-colors mb-4"
+                    >
+                        <AlertTriangle className="w-5 h-5 text-red-400" />
+                        <span className="font-semibold">OCR Fehlerliste</span>
+                        <span className="px-2 py-0.5 text-xs bg-red-500/20 text-red-300 rounded-full border border-red-500/30">
+                            {errorList.length}
+                        </span>
+                        <span className="text-xs text-surface-500">
+                            {showErrorList ? '▲ ausblenden' : '▼ anzeigen'}
+                        </span>
+                    </button>
+
+                    {showErrorList && (
+                        <div className="space-y-2 animate-in slide-in-from-top-2 duration-200">
+                            <p className="text-sm text-surface-500 mb-3">
+                                Diese Dokumente sind nach 3+ Fehlversuchen dauerhaft als fehlerhaft markiert (Tag: <code className="text-red-300">ocrfehler</code>).
+                                Entfernen setzt den Zähler zurück und erlaubt einen erneuten Versuch.
+                            </p>
+                            {errorList.map(entry => (
+                                <div
+                                    key={entry.document_id}
+                                    className="flex items-center justify-between p-3 rounded-xl bg-surface-800/40 border border-red-500/20"
+                                >
+                                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                                        <AlertTriangle className="w-4 h-4 text-red-400/60 shrink-0" />
+                                        <div className="min-w-0">
+                                            <span className="text-sm text-surface-200 font-medium block truncate">{entry.title}</span>
+                                            <div className="flex items-center gap-2 text-xs text-surface-500">
+                                                <span className="font-mono">#{entry.document_id}</span>
+                                                <span>•</span>
+                                                <span>{entry.fail_count}x fehlgeschlagen</span>
+                                                <span>•</span>
+                                                <span>{new Date(entry.timestamp).toLocaleString('de-DE')}</span>
+                                            </div>
+                                            <p className="text-xs text-red-300/70 mt-1 truncate" title={entry.error}>
+                                                {entry.error}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={() => removeFromErrorList(entry.document_id, entry.title)}
+                                        disabled={actionLoading === entry.document_id}
+                                        className="btn bg-surface-700 hover:bg-surface-600 text-surface-400 hover:text-white text-xs px-3 py-1.5 flex items-center gap-1.5 disabled:opacity-50 shrink-0 ml-3"
+                                        title="Von Fehlerliste entfernen und erneut versuchen"
+                                    >
+                                        {actionLoading === entry.document_id
+                                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                            : <RotateCcw className="w-3.5 h-3.5" />
+                                        }
+                                        Retry
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
+
             {/* OCR Ignore List */}
-            {ignoreList.length > 0 && (
+            {!hideSubLists && ignoreList.length > 0 && (
                 <div className="mt-8">
                     <button
                         onClick={() => setShowIgnoreList(!showIgnoreList)}
