@@ -2,28 +2,46 @@
 
 const API_BASE = '/api'
 
-async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${url}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
-  })
+async function fetchJson<T>(url: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
+  const { timeoutMs, ...fetchOptions } = options || {}
 
-  if (!response.ok) {
-    // Try to extract detailed error message from response body
-    let detail = ''
-    try {
-      const errorBody = await response.json()
-      detail = errorBody?.detail || ''
-    } catch {
-      // Response body not JSON, ignore
-    }
-    throw new Error(detail || `API Error: ${response.status} ${response.statusText}`)
+  // Create an AbortController for timeout support
+  const controller = new AbortController()
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
+  if (timeoutMs) {
+    timeoutId = setTimeout(() => controller.abort(), timeoutMs)
   }
 
-  return response.json()
+  try {
+    const response = await fetch(`${API_BASE}${url}`, {
+      ...fetchOptions,
+      signal: fetchOptions?.signal ?? controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...fetchOptions?.headers,
+      },
+    })
+
+    if (!response.ok) {
+      let detail = ''
+      try {
+        const errorBody = await response.json()
+        detail = errorBody?.detail || ''
+      } catch {
+        // ignore
+      }
+      throw new Error(detail || `API Error: ${response.status} ${response.statusText}`)
+    }
+
+    return response.json()
+  } catch (e: any) {
+    if (e.name === 'AbortError') {
+      throw new Error('Zeitüberschreitung: Der Server hat nicht rechtzeitig geantwortet.')
+    }
+    throw e
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId)
+  }
 }
 
 // Health Check
@@ -231,7 +249,8 @@ export const deleteTag = (tagId: number) =>
 
 export const bulkDeleteTags = (tagIds: number[]) =>
   fetchJson<{ deleted: number[]; deleted_count: number; errors: { tag_id: number; error: string }[] }>(
-    '/tags/bulk-delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tag_ids: tagIds }) }
+    '/tags/bulk-delete',
+    { method: 'POST', body: JSON.stringify({ tag_ids: tagIds }), timeoutMs: 300000 }
   )
 
 export const removeTagsFromSavedAnalyses = (tagIds: number[]) =>
@@ -638,7 +657,31 @@ export const addToOcrIgnoreList = (documentId: number) =>
 export const removeFromOcrIgnoreList = (documentId: number) =>
   fetchJson<{ removed: boolean; document_id: number }>(`/ocr/ignore/remove/${documentId}`, { method: 'DELETE' })
 
-// --- OCR Model Comparison API ---
+// --- OCR Error List API ---
+
+export interface OcrErrorItem {
+  document_id: number
+  title: string
+  error: string
+  fail_count: number
+  timestamp: string
+}
+
+export interface OcrErrorListResponse {
+  items: OcrErrorItem[]
+  count: number
+  pending_errors: Record<string, { count: number; title: string; errors: { error: string; timestamp: string }[] }>
+}
+
+export const getOcrErrorList = () =>
+  fetchJson<OcrErrorListResponse>('/ocr/errors/list')
+
+export const removeFromOcrErrorList = (documentId: number) =>
+  fetchJson<{ removed: boolean; document_id: number }>(`/ocr/errors/remove/${documentId}`, { method: 'DELETE' })
+
+export const clearOcrErrorList = () =>
+  fetchJson<{ cleared: boolean }>('/ocr/errors/clear', { method: 'POST' })
+
 
 export interface OcrModelCompareResult {
   model: string

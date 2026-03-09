@@ -10,7 +10,12 @@ import {
     Pause,
     FileSearch,
     AlertCircle,
-    FlaskConical
+    FlaskConical,
+    ShieldOff,
+    AlertTriangle,
+    RotateCcw,
+    XCircle,
+    Ban,
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
@@ -21,7 +26,7 @@ import OcrReview from './OcrReview'
 import OcrCompare from './OcrCompare'
 
 type BatchMode = 'all' | 'tagged' | 'manual'
-type Tab = 'processing' | 'single' | 'review' | 'compare' | 'stats' | 'settings'
+type Tab = 'processing' | 'single' | 'review' | 'compare' | 'stats' | 'settings' | 'ignore' | 'errors'
 
 export default function OcrManager() {
     const [activeTab, setActiveTab] = useState<Tab>('processing')
@@ -42,20 +47,25 @@ export default function OcrManager() {
     const [batchPaused, setBatchPaused] = useState(false)
     const [startingBatch, setStartingBatch] = useState(false)
 
-    // Watchdog state
     const [watchdogStatus, setWatchdogStatus] = useState<api.WatchdogStatus | null>(null)
     const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null)
+    const logContainerRef = useRef<HTMLDivElement>(null)
     const logEndRef = useRef<HTMLDivElement>(null)
     const [reviewCount, setReviewCount] = useState(0)
+    const [errorCount, setErrorCount] = useState(0)
+    const [ignoreCount, setIgnoreCount] = useState(0)
 
     // Check status on mount and set up background polling
     useEffect(() => {
         checkStatus()
-        // Poll review count
-        api.getReviewQueue().then(r => setReviewCount(r.count)).catch(() => { })
-        const rPoll = setInterval(() => {
+        // Poll review/error/ignore counts
+        const refreshCounts = () => {
             api.getReviewQueue().then(r => setReviewCount(r.count)).catch(() => { })
-        }, 15000)
+            api.getOcrErrorList().then(r => setErrorCount(r.count)).catch(() => { })
+            api.getOcrIgnoreList().then(r => setIgnoreCount(r.count)).catch(() => { })
+        }
+        refreshCounts()
+        const rPoll = setInterval(refreshCounts, 15000)
 
         // Always poll for watchdog and batch status every 5 seconds if not running
         const bgPoll = setInterval(() => {
@@ -67,11 +77,19 @@ export default function OcrManager() {
             clearInterval(rPoll)
             clearInterval(bgPoll)
         }
-    }, [batchRunning]) // batchRunning is a dependency for the bgPoll condition
+    }, [batchRunning])
 
-    // Auto-scroll log
+    // Auto-scroll log (only if already at the bottom)
     useEffect(() => {
-        logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+        const container = logContainerRef.current
+        if (!container || !logEndRef.current) return
+
+        // Check if we are within roughly 50px of the bottom BEFORE the new logs render
+        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50
+
+        if (isNearBottom) {
+            container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' })
+        }
     }, [batchStatus?.log])
 
     const checkStatus = async () => {
@@ -107,11 +125,10 @@ export default function OcrManager() {
                     setBatchRunning(false)
                     setBatchPaused(false)
                     if (pollInterval.current) clearInterval(pollInterval.current)
-                    // Re-fetch watchdog once batch stops
                     api.getWatchdogStatus().then(setWatchdogStatus)
                 }
             } catch { }
-        }, 1000) // Fast polling when running
+        }, 1000)
     }
 
     const startBatch = async () => {
@@ -159,6 +176,33 @@ export default function OcrManager() {
         ? Math.round((batchStatus.processed / batchStatus.total) * 100)
         : 0
 
+    // Tab definitions
+    const tabs: { id: Tab; label: string; icon: React.ReactNode; color: string; badge?: number }[] = [
+        { id: 'processing', label: 'Verarbeitung', icon: <LayoutDashboard className="w-4 h-4" />, color: 'primary' },
+        { id: 'single', label: 'Einzel-OCR', icon: <FileSearch className="w-4 h-4" />, color: 'cyan' },
+        { id: 'compare', label: 'Vergleich', icon: <FlaskConical className="w-4 h-4" />, color: 'violet' },
+        { id: 'review', label: 'Prüfen', icon: <AlertCircle className="w-4 h-4" />, color: 'amber', badge: reviewCount },
+        { id: 'errors', label: 'Fehler', icon: <AlertTriangle className="w-4 h-4" />, color: 'red', badge: errorCount },
+        { id: 'ignore', label: 'Ignoriert', icon: <ShieldOff className="w-4 h-4" />, color: 'orange', badge: ignoreCount },
+        { id: 'stats', label: 'Statistiken', icon: <BarChart3 className="w-4 h-4" />, color: 'primary' },
+        { id: 'settings', label: 'Einstellungen', icon: <Settings className="w-4 h-4" />, color: 'primary' },
+    ]
+
+    const colorMap: Record<string, string> = {
+        primary: 'bg-primary-600 shadow-primary-900/20',
+        cyan: 'bg-cyan-600 shadow-cyan-900/20',
+        violet: 'bg-violet-600 shadow-violet-900/20',
+        amber: 'bg-amber-600 shadow-amber-900/20',
+        red: 'bg-red-600 shadow-red-900/20',
+        orange: 'bg-orange-600 shadow-orange-900/20',
+    }
+
+    const badgeColorMap: Record<string, string> = {
+        amber: 'bg-amber-500/30 text-amber-200',
+        red: 'bg-red-500/30 text-red-200',
+        orange: 'bg-orange-500/30 text-orange-200',
+    }
+
     return (
         <div className="space-y-8 pb-12">
             {/* Header */}
@@ -172,7 +216,7 @@ export default function OcrManager() {
                             OCR Texterkennung <span className="text-primary-400">Pro</span>
                         </h2>
                         <p className="text-surface-400 mt-2 text-lg">
-                            KI-gestützte Dokumentenanalyse mit Ollama Vision & Multi-Server Failover
+                            KI-gestützte Dokumentenanalyse mit Ollama Vision &amp; Multi-Server Failover
                         </p>
                     </div>
 
@@ -188,91 +232,46 @@ export default function OcrManager() {
                 </div>
             </div>
 
-            {/* Navigation Tabs */}
-            <div className="flex p-1 space-x-1 bg-surface-800/40 rounded-xl backdrop-blur-md border border-surface-700/50 w-full max-w-3xl">
-                <button
-                    onClick={() => setActiveTab('processing')}
-                    className={clsx(
-                        'flex-1 py-3 px-4 rounded-lg text-sm font-medium transition-all duration-200 flex items-center justify-center gap-2',
-                        activeTab === 'processing'
-                            ? 'bg-primary-600 text-white shadow-lg shadow-primary-900/20 ring-1 ring-white/10'
-                            : 'text-surface-400 hover:text-white hover:bg-surface-700/50'
-                    )}
-                >
-                    <LayoutDashboard className="w-4 h-4" />
-                    Verarbeitung
-                </button>
-                <button
-                    onClick={() => setActiveTab('stats')}
-                    className={clsx(
-                        'flex-1 py-3 px-4 rounded-lg text-sm font-medium transition-all duration-200 flex items-center justify-center gap-2',
-                        activeTab === 'stats'
-                            ? 'bg-primary-600 text-white shadow-lg shadow-primary-900/20 ring-1 ring-white/10'
-                            : 'text-surface-400 hover:text-white hover:bg-surface-700/50'
-                    )}
-                >
-                    <BarChart3 className="w-4 h-4" />
-                    Statistiken
-                </button>
-                <button
-                    onClick={() => setActiveTab('settings')}
-                    className={clsx(
-                        'flex-1 py-3 px-4 rounded-lg text-sm font-medium transition-all duration-200 flex items-center justify-center gap-2',
-                        activeTab === 'settings'
-                            ? 'bg-primary-600 text-white shadow-lg shadow-primary-900/20 ring-1 ring-white/10'
-                            : 'text-surface-400 hover:text-white hover:bg-surface-700/50'
-                    )}
-                >
-                    <Settings className="w-4 h-4" />
-                    Einstellungen
-                </button>
-                <button
-                    onClick={() => { setRecheckDocId(null); setActiveTab('single') }}
-                    className={clsx(
-                        'flex-1 py-3 px-4 rounded-lg text-sm font-medium transition-all duration-200 flex items-center justify-center gap-2',
-                        activeTab === 'single'
-                            ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-900/20 ring-1 ring-white/10'
-                            : 'text-surface-400 hover:text-white hover:bg-surface-700/50'
-                    )}
-                >
-                    <FileSearch className="w-4 h-4" />
-                    Einzel-OCR
-                </button>
-                <button
-                    onClick={() => setActiveTab('compare')}
-                    className={clsx(
-                        'flex-1 py-3 px-4 rounded-lg text-sm font-medium transition-all duration-200 flex items-center justify-center gap-2',
-                        activeTab === 'compare'
-                            ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/20 ring-1 ring-white/10'
-                            : 'text-surface-400 hover:text-white hover:bg-surface-700/50'
-                    )}
-                >
-                    <FlaskConical className="w-4 h-4" />
-                    Vergleich
-                </button>
-                <button
-                    onClick={() => setActiveTab('review')}
-                    className={clsx(
-                        'flex-1 py-3 px-4 rounded-lg text-sm font-medium transition-all duration-200 flex items-center justify-center gap-2',
-                        activeTab === 'review'
-                            ? 'bg-amber-600 text-white shadow-lg shadow-amber-900/20 ring-1 ring-white/10'
-                            : 'text-surface-400 hover:text-white hover:bg-surface-700/50'
-                    )}
-                >
-                    <AlertCircle className="w-4 h-4" />
-                    Prüfen
-                    {reviewCount > 0 && (
-                        <span className="px-1.5 py-0.5 text-xs font-bold bg-amber-500/30 text-amber-200 rounded-full">
-                            {reviewCount}
-                        </span>
-                    )}
-                </button>
+            {/* Navigation Tabs — 2 rows of 4 */}
+            <div className="space-y-1">
+                {[tabs.slice(0, 4), tabs.slice(4)].map((row, rowIdx) => (
+                    <div key={rowIdx} className="flex p-1 space-x-1 bg-surface-800/40 rounded-xl backdrop-blur-md border border-surface-700/50">
+                        {row.map(tab => (
+                            <button
+                                key={tab.id}
+                                onClick={() => {
+                                    if (tab.id === 'single') setRecheckDocId(null)
+                                    setActiveTab(tab.id)
+                                }}
+                                className={clsx(
+                                    'flex-1 py-2.5 px-3 rounded-lg text-sm font-medium transition-all duration-200 flex items-center justify-center gap-2',
+                                    activeTab === tab.id
+                                        ? `${colorMap[tab.color]} text-white shadow-lg ring-1 ring-white/10`
+                                        : 'text-surface-400 hover:text-white hover:bg-surface-700/50'
+                                )}
+                            >
+                                {tab.icon}
+                                <span className="hidden sm:inline">{tab.label}</span>
+                                <span className="sm:hidden">{tab.label.split(' ')[0]}</span>
+                                {tab.badge !== undefined && tab.badge > 0 && (
+                                    <span className={clsx(
+                                        'px-1.5 py-0.5 text-xs font-bold rounded-full',
+                                        activeTab === tab.id
+                                            ? 'bg-white/20 text-white'
+                                            : (badgeColorMap[tab.color] || 'bg-surface-600 text-surface-300')
+                                    )}>
+                                        {tab.badge}
+                                    </span>
+                                )}
+                            </button>
+                        ))}
+                    </div>
+                ))}
             </div>
 
             {/* Tab: Processing */}
             {activeTab === 'processing' && (
                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                    {/* ========== BATCH OCR SECTION ========== */}
                     <div className="card p-0 overflow-hidden border border-surface-700/50 shadow-xl shadow-black/20 bg-surface-800/40 backdrop-blur-sm">
                         <div className="p-6 border-b border-surface-700/50 bg-surface-800/50">
                             <div className="flex items-center gap-3">
@@ -388,7 +387,7 @@ export default function OcrManager() {
                             </div>
 
                             {/* Status & Logs */}
-                            {batchStatus && (batchRunning || batchStatus.total > 0) && (
+                            {batchStatus && (batchRunning || batchStatus.total > 0 || (batchStatus.log && batchStatus.log.length > 0)) && (
                                 <div className="mt-6 pt-6 border-t border-surface-700/50 space-y-4 animate-in fade-in duration-500">
                                     <div>
                                         <div className="flex justify-between text-xs text-surface-400 mb-2 font-medium uppercase tracking-wider">
@@ -409,23 +408,26 @@ export default function OcrManager() {
                                                 )}
                                             </div>
                                         </div>
-                                    </div>
-
-                                    <div className="rounded-xl bg-black/40 border border-surface-700/50 p-4 font-mono text-xs h-64 overflow-y-auto custom-scrollbar shadow-inner">
-                                        {batchStatus.log.map((entry, i) => (
-                                            <div key={i} className={clsx(
-                                                'py-1 border-l-2 pl-2 mb-1',
-                                                entry.includes('pausiert') ? 'border-amber-500 text-amber-400' :
-                                                    entry.startsWith('✅') ? 'border-emerald-500 text-emerald-400' :
-                                                        entry.startsWith('❌') ? 'border-red-500 text-red-400' :
-                                                            entry.startsWith('⚠️') ? 'border-amber-500 text-amber-400' :
-                                                                entry.startsWith('🔄') ? 'border-blue-500 text-blue-400' :
-                                                                    'border-surface-700 text-surface-400'
-                                            )}>
-                                                {entry}
-                                            </div>
-                                        ))}
-                                        <div ref={logEndRef} />
+                                        <div
+                                            ref={logContainerRef}
+                                            className="rounded-xl bg-black/40 border border-surface-700/50 p-4 font-mono text-xs h-64 overflow-y-auto custom-scrollbar shadow-inner"
+                                        >
+                                            {batchStatus.log.map((entry, i) => (
+                                                <div key={i} className={clsx(
+                                                    'py-1 border-l-2 pl-2 mb-1',
+                                                    entry.includes('pausiert') ? 'border-amber-500 text-amber-400' :
+                                                        entry.startsWith('✅') ? 'border-emerald-500 text-emerald-400' :
+                                                            entry.startsWith('❌') ? 'border-red-500 text-red-400' :
+                                                                entry.startsWith('⚠️') ? 'border-amber-500 text-amber-400' :
+                                                                    entry.startsWith('🚫') ? 'border-red-600 text-red-300' :
+                                                                        entry.startsWith('🔄') ? 'border-blue-500 text-blue-400' :
+                                                                            'border-surface-700 text-surface-400'
+                                                )}>
+                                                    {entry}
+                                                </div>
+                                            ))}
+                                            <div ref={logEndRef} />
+                                        </div>
                                     </div>
                                 </div>
                             )}
@@ -465,14 +467,292 @@ export default function OcrManager() {
             {/* Tab: Prüfen */}
             {activeTab === 'review' && (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                    <OcrReview onRecheckDocument={handleRecheckDocument} />
+                    <OcrReviewTab onRecheckDocument={handleRecheckDocument} />
+                </div>
+            )}
+
+            {/* Tab: Fehler */}
+            {activeTab === 'errors' && (
+                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                    <OcrErrorTab onCountChange={setErrorCount} />
+                </div>
+            )}
+
+            {/* Tab: Ignoriert */}
+            {activeTab === 'ignore' && (
+                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                    <OcrIgnoreTab onCountChange={setIgnoreCount} />
+                </div>
+            )}
+        </div>
+    )
+}
+// ---- Prüfen Tab (Review queue only, no inline lists below) ----
+function OcrReviewTab({ onRecheckDocument }: { onRecheckDocument?: (id: number) => void }) {
+    return <OcrReview onRecheckDocument={onRecheckDocument} hideSubLists />
+}
+
+// ---- Fehler Tab ----
+function OcrErrorTab({ onCountChange }: { onCountChange: (n: number) => void }) {
+    const [items, setItems] = useState<api.OcrErrorItem[]>([])
+    const [loading, setLoading] = useState(true)
+    const [actionLoading, setActionLoading] = useState<number | null>(null)
+    const [success, setSuccess] = useState('')
+    const [error, setError] = useState('')
+
+    useEffect(() => { load() }, [])
+
+    const load = async () => {
+        setLoading(true)
+        try {
+            const data = await api.getOcrErrorList()
+            setItems(data.items || [])
+            onCountChange(data.count)
+        } catch (e: any) {
+            setError(e?.message || 'Ladefehler')
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    const retry = async (docId: number, title: string) => {
+        setActionLoading(docId)
+        try {
+            await api.removeFromOcrErrorList(docId)
+            setItems(prev => prev.filter(i => i.document_id !== docId))
+            onCountChange(items.length - 1)
+            setSuccess(`"${title}" – Fehlerzähler zurückgesetzt, wird beim nächsten Batch erneut versucht.`)
+            setTimeout(() => setSuccess(''), 5000)
+        } catch (e: any) {
+            setError(e?.message || 'Fehler')
+        } finally {
+            setActionLoading(null)
+        }
+    }
+
+    const clearAll = async () => {
+        if (!confirm(`Alle ${items.length} Einträge von der Fehlerliste entfernen?`)) return
+        try {
+            await api.clearOcrErrorList()
+            setItems([])
+            onCountChange(0)
+            setSuccess('Fehlerliste geleert.')
+            setTimeout(() => setSuccess(''), 4000)
+        } catch (e: any) {
+            setError(e?.message || 'Fehler')
+        }
+    }
+
+    return (
+        <div className="space-y-6">
+            {/* Header */}
+            <div className="flex items-center justify-between">
+                <div>
+                    <h2 className="font-display text-3xl font-bold text-white flex items-center gap-3">
+                        <div className="p-2 bg-gradient-to-br from-red-500 to-red-700 rounded-xl shadow-lg shadow-red-500/20">
+                            <AlertTriangle className="w-8 h-8 text-white" />
+                        </div>
+                        OCR <span className="text-red-400">Fehlerliste</span>
+                        {items.length > 0 && (
+                            <span className="ml-2 px-3 py-1 text-sm bg-red-500/20 text-red-300 rounded-full border border-red-500/30">
+                                {items.length}
+                            </span>
+                        )}
+                    </h2>
+                    <p className="text-surface-400 mt-2">
+                        Dokumente die nach 3 Fehlversuchen dauerhaft markiert wurden (Tag: <code className="text-red-300 text-sm">ocrfehler</code>)
+                    </p>
+                </div>
+                <div className="flex gap-2">
+                    <button onClick={load} className="btn bg-surface-700 hover:bg-surface-600 text-surface-200 flex items-center gap-2">
+                        <RotateCcw className="w-4 h-4" /> Aktualisieren
+                    </button>
+                    {items.length > 0 && (
+                        <button onClick={clearAll} className="btn bg-red-600/20 hover:bg-red-600/40 text-red-300 border border-red-500/30 flex items-center gap-2">
+                            <XCircle className="w-4 h-4" /> Alle löschen
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            {success && (
+                <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-200 text-sm">{success}</div>
+            )}
+            {error && (
+                <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-200 text-sm">{error}</div>
+            )}
+
+            {loading ? (
+                <div className="card p-12 text-center border border-surface-700/50 bg-surface-800/40">
+                    <Loader2 className="w-10 h-10 animate-spin text-red-400 mx-auto mb-3" />
+                    <p className="text-surface-400">Lade Fehlerliste...</p>
+                </div>
+            ) : items.length === 0 ? (
+                <div className="card p-12 text-center border border-surface-700/50 bg-surface-800/40">
+                    <AlertTriangle className="w-14 h-14 text-surface-600 mx-auto mb-4" />
+                    <p className="text-xl font-bold text-white">Keine Fehler 🎉</p>
+                    <p className="text-surface-400 mt-2">Alle Dokumente konnten verarbeitet werden.</p>
+                </div>
+            ) : (
+                <div className="space-y-2">
+                    <p className="text-sm text-surface-500 mb-3">
+                        "Retry" entfernt das Dokument von der Fehlerliste und löscht den <code className="text-red-300">ocrfehler</code> Tag —
+                        beim nächsten Batch wird ein neuer Versuch gestartet.
+                    </p>
+                    {items.map(entry => (
+                        <div key={entry.document_id} className="flex items-center justify-between p-4 rounded-xl bg-surface-800/40 border border-red-500/20 gap-4">
+                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                                <div className="p-2 bg-red-500/10 rounded-lg shrink-0">
+                                    <AlertTriangle className="w-5 h-5 text-red-400" />
+                                </div>
+                                <div className="min-w-0">
+                                    <p className="text-sm font-medium text-surface-100 truncate">{entry.title}</p>
+                                    <div className="flex items-center gap-3 text-xs text-surface-500 mt-0.5">
+                                        <span className="font-mono">#{entry.document_id}</span>
+                                        <span className="text-red-400 font-semibold">{entry.fail_count}× fehlgeschlagen</span>
+                                        <span>{new Date(entry.timestamp).toLocaleString('de-DE')}</span>
+                                    </div>
+                                    <p className="text-xs text-red-300/70 mt-1 truncate" title={entry.error}>{entry.error}</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => retry(entry.document_id, entry.title)}
+                                disabled={actionLoading === entry.document_id}
+                                className="btn bg-surface-700 hover:bg-primary-600 text-surface-400 hover:text-white text-xs px-4 py-2 flex items-center gap-2 disabled:opacity-50 shrink-0"
+                            >
+                                {actionLoading === entry.document_id
+                                    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    : <RotateCcw className="w-3.5 h-3.5" />
+                                }
+                                Retry
+                            </button>
+                        </div>
+                    ))}
                 </div>
             )}
         </div>
     )
 }
 
+// ---- Ignore Tab ----
+function OcrIgnoreTab({ onCountChange }: { onCountChange: (n: number) => void }) {
+    const [items, setItems] = useState<api.OcrIgnoreItem[]>([])
+    const [loading, setLoading] = useState(true)
+    const [actionLoading, setActionLoading] = useState<number | null>(null)
+    const [success, setSuccess] = useState('')
+    const [error, setError] = useState('')
 
+    useEffect(() => { load() }, [])
+
+    const load = async () => {
+        setLoading(true)
+        try {
+            const data = await api.getOcrIgnoreList()
+            setItems(data.items || [])
+            onCountChange(data.count)
+        } catch (e: any) {
+            setError(e?.message || 'Ladefehler')
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    const remove = async (docId: number, title: string) => {
+        setActionLoading(docId)
+        try {
+            await api.removeFromOcrIgnoreList(docId)
+            setItems(prev => prev.filter(i => i.document_id !== docId))
+            onCountChange(items.length - 1)
+            setSuccess(`"${title}" – Von Ignore-Liste entfernt. Wird beim nächsten Batch wieder verarbeitet.`)
+            setTimeout(() => setSuccess(''), 5000)
+        } catch (e: any) {
+            setError(e?.message || 'Fehler')
+        } finally {
+            setActionLoading(null)
+        }
+    }
+
+    return (
+        <div className="space-y-6">
+            {/* Header */}
+            <div className="flex items-center justify-between">
+                <div>
+                    <h2 className="font-display text-3xl font-bold text-white flex items-center gap-3">
+                        <div className="p-2 bg-gradient-to-br from-orange-500 to-orange-700 rounded-xl shadow-lg shadow-orange-500/20">
+                            <ShieldOff className="w-8 h-8 text-white" />
+                        </div>
+                        OCR <span className="text-orange-400">Ignoriert</span>
+                        {items.length > 0 && (
+                            <span className="ml-2 px-3 py-1 text-sm bg-orange-500/20 text-orange-300 rounded-full border border-orange-500/30">
+                                {items.length}
+                            </span>
+                        )}
+                    </h2>
+                    <p className="text-surface-400 mt-2">
+                        Dokumente die dauerhaft vom OCR-Batch ausgeschlossen sind (passwortgeschützt, 404, oder manuell ignoriert)
+                    </p>
+                </div>
+                <button onClick={load} className="btn bg-surface-700 hover:bg-surface-600 text-surface-200 flex items-center gap-2">
+                    <RotateCcw className="w-4 h-4" /> Aktualisieren
+                </button>
+            </div>
+
+            {success && (
+                <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-200 text-sm">{success}</div>
+            )}
+            {error && (
+                <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-200 text-sm">{error}</div>
+            )}
+
+            {loading ? (
+                <div className="card p-12 text-center border border-surface-700/50 bg-surface-800/40">
+                    <Loader2 className="w-10 h-10 animate-spin text-orange-400 mx-auto mb-3" />
+                    <p className="text-surface-400">Lade Ignore-Liste...</p>
+                </div>
+            ) : items.length === 0 ? (
+                <div className="card p-12 text-center border border-surface-700/50 bg-surface-800/40">
+                    <ShieldOff className="w-14 h-14 text-surface-600 mx-auto mb-4" />
+                    <p className="text-xl font-bold text-white">Keine ignorierten Dokumente</p>
+                    <p className="text-surface-400 mt-2">Alle Dokumente werden normal verarbeitet.</p>
+                </div>
+            ) : (
+                <div className="space-y-2">
+                    <p className="text-sm text-surface-500 mb-3">
+                        "Entfernen" nimmt das Dokument von der Ignore-Liste — beim nächsten Batch wird es wieder versucht.
+                    </p>
+                    {items.map(entry => (
+                        <div key={entry.document_id} className="flex items-center justify-between p-4 rounded-xl bg-surface-800/40 border border-orange-500/20 gap-4">
+                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                                <div className="p-2 bg-orange-500/10 rounded-lg shrink-0">
+                                    <Ban className="w-5 h-5 text-orange-400" />
+                                </div>
+                                <div className="min-w-0">
+                                    <p className="text-sm font-medium text-surface-100 truncate">{entry.title}</p>
+                                    <div className="flex items-center gap-3 text-xs text-surface-500 mt-0.5">
+                                        <span className="font-mono">#{entry.document_id}</span>
+                                        <span className="text-orange-400/80">{entry.reason}</span>
+                                        <span>{new Date(entry.timestamp).toLocaleString('de-DE')}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => remove(entry.document_id, entry.title)}
+                                disabled={actionLoading === entry.document_id}
+                                className="btn bg-surface-700 hover:bg-surface-600 text-surface-400 hover:text-white text-xs px-4 py-2 flex items-center gap-2 disabled:opacity-50 shrink-0"
+                            >
+                                {actionLoading === entry.document_id
+                                    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    : <XCircle className="w-3.5 h-3.5" />
+                                }
+                                Entfernen
+                            </button>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    )
+}
 
 function LayersIcon(props: any) {
     return (

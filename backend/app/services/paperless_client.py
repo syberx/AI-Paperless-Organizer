@@ -1,7 +1,11 @@
 """Paperless-ngx API Client."""
 
 import httpx
+import asyncio
+import logging
 from typing import Optional, List, Dict, Any
+
+logger = logging.getLogger(__name__)
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -9,8 +13,8 @@ from app.database import get_db
 from app.models import PaperlessSettings
 from app.services.cache import get_cache
 
-# Cache TTL in seconds (10 minutes for lists, they change rarely)
-CACHE_TTL = 600
+# Cache TTL in seconds (30 minutes - tags/correspondents change rarely)
+CACHE_TTL = 1800
 
 
 class PaperlessClient:
@@ -139,26 +143,64 @@ class PaperlessClient:
         await cache.clear(f"paperless:tags:")
     
     async def delete_tags_bulk(self, tag_ids: List[int]) -> dict:
-        """Delete multiple tags using a single shared HTTP client for performance."""
+        """Delete multiple tags in parallel batches for maximum performance."""
         if not self.base_url:
             raise ValueError("Paperless URL not configured")
         
         deleted = []
         errors = []
         cache = get_cache()
+        CONCURRENT = 3   # low concurrency - Paperless DB can't handle more without timeouts
+        TIMEOUT = 60.0   # 60s per request - tag deletion updates documents and can be slow
         
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, verify=False) as client:
-            for tag_id in tag_ids:
-                try:
-                    url = f"{self.base_url}/api/tags/{tag_id}/"
-                    response = await client.request("DELETE", url, headers=self.headers)
-                    response.raise_for_status()
-                    deleted.append(tag_id)
-                except Exception as e:
-                    errors.append({"tag_id": tag_id, "error": str(e)})
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=10.0, read=TIMEOUT, write=10.0, pool=5.0),
+            follow_redirects=True, verify=False
+        ) as client:
+            async def delete_one(tag_id: int):
+                for attempt in range(2):  # 1 retry on timeout
+                    try:
+                        url = f"{self.base_url}/api/tags/{tag_id}/"
+                        response = await client.request("DELETE", url, headers=self.headers)
+                        if response.status_code in (404, 204, 200, 201):
+                            return tag_id, None
+                        response.raise_for_status()
+                        return tag_id, None
+                    except httpx.TimeoutException:
+                        if attempt == 0:
+                            await asyncio.sleep(1)
+                            continue
+                        logger.warning(f"Tag {tag_id}: timeout after retry")
+                        return None, {"tag_id": tag_id, "error": "timeout"}
+                    except Exception as e:
+                        logger.warning(f"Tag {tag_id}: {type(e).__name__}: {e}")
+                        return None, {"tag_id": tag_id, "error": str(e) or type(e).__name__}
+                return None, {"tag_id": tag_id, "error": "unknown"}
+            
+            for i in range(0, len(tag_ids), CONCURRENT):
+                batch = tag_ids[i:i + CONCURRENT]
+                results = await asyncio.gather(*[delete_one(tid) for tid in batch])
+                for tag_id, error in results:
+                    if tag_id is not None:
+                        deleted.append(tag_id)
+                    elif error:
+                        errors.append(error)
         
-        await cache.clear(f"paperless:tags:")
-        return {"deleted": deleted, "deleted_count": len(deleted), "errors": errors}
+        if errors:
+            logger.info(f"Bulk delete: {len(deleted)} OK, {len(errors)} failed")
+        
+        # Smart cache update: remove deleted IDs instead of clearing the whole cache
+        # This avoids a slow re-fetch from Paperless on the next request
+        cache_key = f"paperless:tags:{self.base_url}"
+        existing = await cache.get(cache_key)
+        if existing:
+            deleted_set = set(deleted)
+            updated = [t for t in existing if t.get("id") not in deleted_set]
+            await cache.set(cache_key, updated, CACHE_TTL)
+        else:
+            await cache.clear(f"paperless:tags:")
+        
+        return {"deleted": deleted, "deleted_count": len(deleted), "errors": errors, "base_url": self.base_url}
     
     # Document Types
     async def get_document_types(self, use_cache: bool = True) -> List[Dict]:
@@ -202,9 +244,9 @@ class PaperlessClient:
         tag_id: int = None,
         document_type_id: int = None,
         query: str = None,
-        page_size: int = 10000
+        page_size: int = 1000 # Safer page size to avoid 120s timeout
     ) -> List[Dict]:
-        """Get documents with optional filters."""
+        """Get documents with optional filters and auto-pagination."""
         params = {"page_size": page_size}
         
         if correspondent_id:
@@ -216,8 +258,24 @@ class PaperlessClient:
         if query:
             params["query"] = query
         
-        result = await self._request("GET", "/documents/", params=params)
-        return result.get("results", []) if result else []
+        all_results = []
+        endpoint = "/documents/"
+        
+        while endpoint:
+            result = await self._request("GET", endpoint, params=params)
+            if not result:
+                break
+                
+            all_results.extend(result.get("results", []))
+            next_url = result.get("next")
+            
+            if next_url and "/api" in next_url:
+                endpoint = next_url.split("/api", 1)[1]
+                params = None # The next_url includes all pagination parameters
+            else:
+                endpoint = None
+                
+        return all_results
     
     async def get_document_count(
         self,

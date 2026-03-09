@@ -5,7 +5,7 @@ import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from app.database import get_db
-from app.models import SavedAnalysis
+from app.models import SavedAnalysis, PaperlessCache
 from app.services.paperless_client import PaperlessClient, get_paperless_client
 from app.services.similarity import SimilarityService, get_similarity_service
 from app.services.merge import MergeService, get_merge_service
@@ -301,11 +301,25 @@ class BulkDeleteRequest(BaseModel):
 @router.post("/bulk-delete")
 async def bulk_delete_tags(
     request: BulkDeleteRequest,
-    client: PaperlessClient = Depends(get_paperless_client)
+    client: PaperlessClient = Depends(get_paperless_client),
+    db: AsyncSession = Depends(get_db)
 ):
-    """Delete multiple tags in one request using a shared HTTP connection."""
+    """Delete multiple tags in parallel and keep DB cache in sync."""
     try:
         result = await client.delete_tags_bulk(request.tag_ids)
+        
+        # Update DB cache: remove deleted tag IDs so next request is instant
+        deleted_set = set(result.get("deleted", []))
+        if deleted_set:
+            db_result = await db.execute(
+                select(PaperlessCache).where(PaperlessCache.cache_key == "tags")
+            )
+            db_entry = db_result.scalar_one_or_none()
+            if db_entry and db_entry.data:
+                db_entry.data = [t for t in db_entry.data if t.get("id") not in deleted_set]
+                db_entry.count = len(db_entry.data)
+                await db.commit()
+        
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
