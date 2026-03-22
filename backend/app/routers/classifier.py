@@ -954,10 +954,13 @@ async def _auto_classify_loop():
     """Background loop that classifies unprocessed documents."""
     import time
     from app.database import async_session
+    from app.services.ollama_lock import acquire as ollama_acquire, release as ollama_release, is_locked as ollama_is_locked, current_holder as ollama_holder
 
     while _auto_classify_state["enabled"]:
         _auto_classify_state["last_run"] = time.strftime("%Y-%m-%dT%H:%M:%S")
         _auto_classify_state["running"] = True
+        uses_ollama = False
+        lock_acquired = False
 
         try:
             async with async_session() as db_sess:
@@ -978,6 +981,20 @@ async def _auto_classify_loop():
                 )
                 service = DocumentClassifierService(db_sess, client)
                 config = await service.get_config()
+
+                uses_ollama = config.active_provider == "ollama"
+                if uses_ollama:
+                    if ollama_is_locked():
+                        logger.info(f"Auto-classify: Ollama belegt durch {ollama_holder()}, warte...")
+                        _auto_classify_state["running"] = False
+                        await asyncio.sleep(10)
+                        continue
+                    lock_acquired = await ollama_acquire("classifier", timeout=300)
+                    if not lock_acquired:
+                        logger.warning("Auto-classify: Konnte Ollama-Lock nicht erhalten, warte...")
+                        _auto_classify_state["running"] = False
+                        await asyncio.sleep(30)
+                        continue
                 mode = getattr(config, "auto_classify_mode", "review") or "review"
                 interval = getattr(config, "auto_classify_interval", 5) or 5
 
@@ -1043,6 +1060,9 @@ async def _auto_classify_loop():
 
         except Exception as e:
             logger.error(f"Auto-classify loop error: {e}")
+        finally:
+            if uses_ollama and lock_acquired:
+                ollama_release("classifier")
 
         _auto_classify_state["running"] = False
         _auto_classify_state["current_doc"] = None
@@ -1113,6 +1133,7 @@ async def stop_auto_classify(db: AsyncSession = Depends(get_db)):
 @router.get("/auto-classify/status")
 async def get_auto_classify_status():
     """Get current status of the auto-classification job."""
+    from app.services.ollama_lock import is_locked as ollama_is_locked, current_holder as ollama_holder
     return {
         "enabled": _auto_classify_state["enabled"],
         "running": _auto_classify_state["running"],
@@ -1121,6 +1142,7 @@ async def get_auto_classify_status():
         "reviewed": _auto_classify_state["reviewed"],
         "current_doc": _auto_classify_state["current_doc"],
         "last_run": _auto_classify_state["last_run"],
+        "waiting_for": ollama_holder() if ollama_is_locked() and not _auto_classify_state["running"] else None,
     }
 
 

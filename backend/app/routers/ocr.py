@@ -401,6 +401,9 @@ async def get_batch_status():
             "pages": pp.get("pages", []),
         }
 
+    from app.services.ollama_lock import is_locked as ollama_is_locked, current_holder as ollama_holder
+    waiting = ollama_holder() if ollama_is_locked() and not batch_state["running"] else None
+
     return {
         "running": batch_state["running"],
         "total": batch_state["total"],
@@ -411,6 +414,7 @@ async def get_batch_status():
         "log": batch_state["log"][-50:],
         "mode": batch_state["mode"],
         "paused": batch_state.get("paused", False),
+        "waiting_for": waiting,
     }
 
 

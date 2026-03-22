@@ -1187,8 +1187,19 @@ class OcrService:
             "log": [],
             "mode": mode
         })
-        
+
+        from app.services.ollama_lock import acquire as ollama_acquire, release as ollama_release, is_locked as ollama_is_locked, current_holder as ollama_holder
+        lock_acquired = False
         try:
+            if ollama_is_locked():
+                holder = ollama_holder()
+                batch_state["log"].append(f"⏳ Warte auf {holder} (Ollama belegt)...")
+                logger.info(f"[OCR-Batch] Ollama belegt durch {holder}, warte...")
+            lock_acquired = await ollama_acquire("ocr-batch", timeout=600)
+            if not lock_acquired:
+                batch_state["log"].append("❌ Ollama-Lock nicht erhalten nach 10 Min – Abbruch.")
+                batch_state["running"] = False
+                return
             # Get the tags we need
             ocrfinish_tag = await paperless_client.get_or_create_tag(TAG_OCR_FINISH)
             ocrfinish_tag_id = ocrfinish_tag.get("id")
@@ -1528,6 +1539,8 @@ class OcrService:
             batch_state["log"].append(f"Traceback: {error_details}")
             logger.error(f"Batch OCR critical error: {e}\n{error_details}")
         finally:
+            if lock_acquired:
+                ollama_release("ocr-batch")
             batch_state["running"] = False
             batch_state["current_document"] = None
 
@@ -1563,9 +1576,10 @@ class OcrService:
             try:
                 watchdog_state["running"] = True
 
-                if batch_state["running"] or single_ocr_running:
-                    reason = "Batch" if batch_state["running"] else "Single-OCR"
-                    logger.info(f"Watchdog: {reason} already running, skipping this cycle")
+                from app.services.ollama_lock import is_locked as ollama_is_locked, current_holder as ollama_holder
+                if batch_state["running"] or single_ocr_running or ollama_is_locked():
+                    reason = "Batch" if batch_state["running"] else "Single-OCR" if single_ocr_running else f"Ollama belegt ({ollama_holder()})"
+                    logger.info(f"Watchdog: {reason} aktiv, ueberspringe diesen Zyklus")
                 else:
                     logger.info("Watchdog checking for new documents...")
                     print(f"[OCR] Watchdog check at {datetime.now().isoformat()}")
