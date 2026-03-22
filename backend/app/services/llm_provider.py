@@ -558,9 +558,9 @@ class LLMProviderService:
 async def get_llm_service(db: AsyncSession = Depends(get_db)) -> LLMProviderService:
     """Dependency to get LLM service with active provider."""
     result = await db.execute(
-        select(LLMProvider).where(LLMProvider.is_active == True)
+        select(LLMProvider).where(LLMProvider.is_active == True).limit(1)
     )
-    provider = result.scalar_one_or_none()
-    
+    provider = result.scalars().first()
+
     return LLMProviderService(provider)
 

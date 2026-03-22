@@ -959,8 +959,6 @@ async def _auto_classify_loop():
     while _auto_classify_state["enabled"]:
         _auto_classify_state["last_run"] = time.strftime("%Y-%m-%dT%H:%M:%S")
         _auto_classify_state["running"] = True
-        uses_ollama = False
-        lock_acquired = False
 
         try:
             async with async_session() as db_sess:
@@ -983,18 +981,6 @@ async def _auto_classify_loop():
                 config = await service.get_config()
 
                 uses_ollama = config.active_provider == "ollama"
-                if uses_ollama:
-                    if ollama_is_locked():
-                        logger.info(f"Auto-classify: Ollama belegt durch {ollama_holder()}, warte...")
-                        _auto_classify_state["running"] = False
-                        await asyncio.sleep(10)
-                        continue
-                    lock_acquired = await ollama_acquire("classifier", timeout=300)
-                    if not lock_acquired:
-                        logger.warning("Auto-classify: Konnte Ollama-Lock nicht erhalten, warte...")
-                        _auto_classify_state["running"] = False
-                        await asyncio.sleep(30)
-                        continue
                 mode = getattr(config, "auto_classify_mode", "review") or "review"
                 interval = getattr(config, "auto_classify_interval", 5) or 5
 
@@ -1028,6 +1014,22 @@ async def _auto_classify_loop():
                         if doc_id in classified_ids:
                             continue
 
+                        # Per-document Ollama lock: acquire before, release after
+                        if uses_ollama:
+                            if ollama_is_locked():
+                                holder = ollama_holder()
+                                logger.info(f"Auto-classify doc {doc_id}: Ollama belegt durch {holder}, warte...")
+                                _auto_classify_state["current_doc"] = None
+                                while ollama_is_locked() and _auto_classify_state["enabled"]:
+                                    await asyncio.sleep(5)
+                                if not _auto_classify_state["enabled"]:
+                                    break
+                            got_lock = await ollama_acquire("classifier", timeout=300)
+                            if not got_lock:
+                                logger.warning(f"Auto-classify doc {doc_id}: Lock-Timeout, ueberspringe")
+                                await asyncio.sleep(10)
+                                continue
+
                         found_any = True
                         _auto_classify_state["current_doc"] = doc_id
 
@@ -1048,6 +1050,9 @@ async def _auto_classify_loop():
                             _auto_classify_state["errors"] += 1
                             classified_ids.add(doc_id)
                             logger.error(f"Auto-classify doc {doc_id} failed: {e}")
+                        finally:
+                            if uses_ollama:
+                                ollama_release("classifier")
 
                         await asyncio.sleep(2)
 
@@ -1060,9 +1065,6 @@ async def _auto_classify_loop():
 
         except Exception as e:
             logger.error(f"Auto-classify loop error: {e}")
-        finally:
-            if uses_ollama and lock_acquired:
-                ollama_release("classifier")
 
         _auto_classify_state["running"] = False
         _auto_classify_state["current_doc"] = None
