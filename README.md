@@ -2,7 +2,7 @@
 
 # 🤖 AI Paperless Organizer
 
-**KI-gestützte Metadaten-Bereinigung, OCR & automatische Dokumenten-Klassifizierung für Paperless-ngx**
+**Der intelligenteste Weg, Paperless-ngx zu organisieren – KI-Klassifizierung, Metadaten-Bereinigung & OCR in einem Tool**
 
 [![GitHub](https://img.shields.io/badge/GitHub-syberx%2FAI--Paperless--Organizer-blue?logo=github)](https://github.com/syberx/AI-Paperless-Organizer)
 [![Docker Hub](https://img.shields.io/badge/Docker%20Hub-webdienste%2Fai--paperless--organizer-blue?logo=docker)](https://hub.docker.com/r/webdienste/ai-paperless-organizer)
@@ -15,6 +15,29 @@
 
 ---
 
+## 🚀 Warum AI Paperless Organizer?
+
+Tools wie **Paperless-GPT** und **Paperless-AI** klassifizieren Dokumente beim Import – aber sie lösen nicht das eigentliche Problem: **Was ist mit den Tausenden Dokumenten die bereits in deinem System schlummern?** Und was wenn die automatische Klassifizierung Fehler gemacht hat?
+
+**AI Paperless Organizer** setzt dort an, wo andere aufhören:
+
+| | Paperless-GPT / Paperless-AI | **AI Paperless Organizer** |
+|--|------------------------------|---------------------------|
+| Neue Dokumente klassifizieren | ✅ Automatisch beim Import | ✅ Manuell mit voller Kontrolle |
+| **Bestehende Dokumente nachklassifizieren** | ❌ | ✅ **Jedes Dokument einzeln oder im Batch** |
+| **Klassifizierung prüfen & korrigieren** | ❌ Läuft blind durch | ✅ **Jeder Vorschlag editierbar vor dem Speichern** |
+| **Bestehende Tags/Korrespondenten nutzen** | ⚠️ Erfindet oft neue | ✅ **Sucht aktiv in deinen Paperless-Daten** |
+| **Speicherpfad-Zuordnung nach Personen** | ❌ | ✅ **Konfigurierbare Profile (privat/geschäftlich)** |
+| **Custom Fields extrahieren** | ❌ | ✅ **IBAN, Rechnungsnr., Betrag, etc.** |
+| **Metadaten-Chaos bereinigen** | ❌ | ✅ **Duplikate finden & zusammenführen** |
+| **OCR verbessern** | ❌ | ✅ **Ollama Vision, Batch, Watchdog** |
+| **Modelle vergleichen (lokal vs. Cloud)** | ❌ | ✅ **Benchmark: bis zu 4 Provider gleichzeitig** |
+| **100% lokal möglich** | ⚠️ Teilweise | ✅ **Vollständig mit Ollama** |
+
+> 💡 **Kurz gesagt:** Paperless-GPT/AI läuft im Hintergrund beim Import. AI Paperless Organizer gibt dir die **volle Kontrolle** – über neue UND bestehende Dokumente, mit transparenten Vorschlägen die du vor dem Speichern anpassen kannst.
+
+---
+
 ## 😫 Das Problem
 
 Kennst du das? Deine **Paperless-ngx** Installation ist über die Zeit gewachsen und jetzt hast du:
@@ -24,11 +47,9 @@ Kennst du das? Deine **Paperless-ngx** Installation ist über die Zeit gewachsen
 - **Chaos bei Dokumententypen**: "Rechnung", "Invoice", "Rechnungen", "rechnung"...
 - **Tausende unklassifizierte Dokumente**: Fehlende Titel, Tags, Korrespondenten, falsche Speicherpfade
 
-Tools wie **Paperless-AI**, **Paperless-GPT** oder einfach jahrelange Nutzung hinterlassen ein Metadaten-Chaos, das manuell kaum zu bereinigen ist.
+**AI Paperless Organizer** löst das alles – in einem Tool, mit voller Kontrolle.
 
 ## ✨ Die Lösung
-
-**AI Paperless Organizer** kombiniert KI-gestützte Metadaten-Bereinigung mit vollautomatischer Dokumenten-Klassifizierung:
 
 <div align="center">
 
@@ -43,10 +64,10 @@ Tools wie **Paperless-AI**, **Paperless-GPT** oder einfach jahrelange Nutzung hi
 
 | Feature | Beschreibung |
 |---------|-------------|
-| 🧠 **KI-Metadaten-Bereinigung** | Findet & führt doppelte Korrespondenten, Tags, Dokumententypen zusammen |
-| ✨ **Dokument-Klassifizierer** | Analysiert Dokumentinhalt und setzt Titel, Tags, Korrespondent, Typ, Speicherpfad |
+| ✨ **KI-Dokumenten-Klassifizierer** | Liest Dokumentinhalt, setzt Titel, Tags, Korrespondent, Typ, Speicherpfad, Custom Fields |
+| 🧠 **Metadaten-Bereinigung** | Findet & führt doppelte Korrespondenten, Tags, Dokumententypen zusammen |
 | 📷 **OCR mit Ollama Vision** | Bessere Texterkennung für Scans mit lokalen KI-Modellen |
-| 🏆 **OCR Modell-Benchmark** | Vergleicht bis zu 5 Modelle auf demselben Dokument mit KI-Bewertung |
+| 🏆 **Modell-Benchmark** | Vergleicht lokal vs. Cloud – bis zu 4 Provider gleichzeitig |
 | 🧹 **Tag Cleanup Wizard** | 5-stufiger Assistent zur systematischen Tag-Bereinigung |
 | 🗑️ **Dokumente Aufräumen** | Findet und entfernt Junk-Dokumente (AGB, Impressum, etc.) |
 | 💾 **Analyse-Cache** | KI-Analysen speichern und kostenlos wieder laden |
@@ -54,7 +75,7 @@ Tools wie **Paperless-AI**, **Paperless-GPT** oder einfach jahrelange Nutzung hi
 
 ---
 
-## ✨ NEU: KI-Dokumenten-Klassifizierer
+## ✨ KI-Dokumenten-Klassifizierer
 
 Der Klassifizierer liest den **Inhalt** deiner Dokumente und befüllt automatisch alle Metadaten-Felder:
 
@@ -142,21 +163,28 @@ Behalte den Überblick über alle klassifizierten Dokumente:
 - Statistiken: Dokumente/Tag, Feldabdeckung, häufigste Korrespondenten
 - Tag-Analyse: Welche Tags werden am häufigsten vergeben?
 
-### Provider-Benchmark
+### Lokal vs. Cloud – Benchmark direkt im Tool
+
+Weißt du nicht welches Modell für deine Dokumente am besten passt? Der integrierte Benchmark beantwortet das:
 
 <div align="center">
 
 ![Klassifizierer Benchmark](docs/screenshots/classifier-benchmark.png)
-*Verschiedene LLM-Provider direkt vergleichen*
+*Lokal vs. Cloud: Verschiedene LLM-Provider auf demselben Dokument vergleichen*
 
 </div>
 
-Teste verschiedene Modelle auf demselben Dokument:
-- Bis zu 4 Provider/Modelle gleichzeitig (z.B. GPT-4o-mini vs. GPT-4o vs. Ollama)
-- Direkter Vergleich der Klassifizierungsergebnisse
-- Kosten- und Qualitäts-Abwägung auf einen Blick
+- **Bis zu 4 Provider gleichzeitig** auf demselben Dokument testen
+- **Lokal vs. Cloud direkt vergleichen**: z.B. `Ollama llama3.1` vs. `GPT-4o-mini` vs. `GPT-4o`
+- **Ergebnisse nebeneinander**: Wer erkennt Titel, Tags, Korrespondent besser?
+- **Kostenabschätzung**: Günstig genug für täglichen Einsatz oder doch lieber lokal?
+- **Qualitäts-Check auf einen Blick**: Halluziniert ein Modell? Erfindet es Tags die nicht existieren?
 
-> ⚠️ **Datenschutz-Hinweis:** Der Klassifizierer sendet den **OCR-Text** deiner Dokumente an das konfigurierte LLM zur Analyse. Bei Cloud-Modellen (OpenAI, etc.) verlassen die Dokumentinhalte deinen Server. Für maximalen Datenschutz: **Ollama** mit lokalen Modellen verwenden!
+**Typische Erkenntnis aus dem Benchmark:**
+> `GPT-4o-mini` liefert für 95% der Dokumente identische Qualität wie `GPT-4o` – zum Bruchteil des Preises.
+> `Ollama` mit `llama3.1:8b` reicht für einfache Dokumente und sendet **keine Daten ins Internet**.
+
+> ⚠️ **Datenschutz-Hinweis:** Der Klassifizierer sendet den **OCR-Text** deiner Dokumente an das konfigurierte LLM zur Analyse. Bei Cloud-Modellen (OpenAI, etc.) verlassen die Dokumentinhalte deinen Server. Für maximalen Datenschutz: **Ollama** mit lokalen Modellen verwenden – dann bleibt alles auf deinem Server!
 
 ---
 

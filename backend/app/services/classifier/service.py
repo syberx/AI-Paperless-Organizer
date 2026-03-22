@@ -578,6 +578,12 @@ class DocumentClassifierService:
             all_tags = await self.paperless.get_tags(use_cache=True)
             existing_tag_names = {t["name"].lower() for t in all_tags}
 
+            all_doc_types = await self.paperless.get_document_types(use_cache=True)
+            all_doc_type_names = {dt["name"].lower() for dt in all_doc_types}
+
+            all_correspondents = await self.paperless.get_correspondents(use_cache=True)
+            all_corr_names = {c["name"].lower() for c in all_correspondents}
+
             # Build ignore matchers: exact strings + wildcard patterns
             ignore_exact = set()
             ignore_patterns = []
@@ -596,16 +602,14 @@ class DocumentClassifierService:
             filtered_tags = []
             for tag in result.tags:
                 tag_lower = tag.lower()
-                # Exact match with document type (not substring!)
-                if result.document_type and tag_lower == result.document_type.lower():
-                    logger.info(f"Tag '{tag}' removed: exact match with document type")
+                if tag_lower in all_doc_type_names:
+                    logger.info(f"Tag '{tag}' removed: matches a document type name")
+                    continue
+                if tag_lower in all_corr_names:
+                    logger.info(f"Tag '{tag}' removed: matches a correspondent name")
                     continue
                 if _is_ignored(tag):
                     logger.info(f"Tag '{tag}' removed: matches ignore pattern")
-                    continue
-                # Only remove if tag IS the correspondent name (exact), not a substring
-                if result.correspondent and tag_lower == result.correspondent.lower():
-                    logger.info(f"Tag '{tag}' removed: exact match with correspondent")
                     continue
                 filtered_tags.append(tag)
 
