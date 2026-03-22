@@ -1,432 +1,479 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { 
-  Users, Tags, FileText, ArrowRight, Sparkles, AlertCircle, CheckCircle2,
-  TrendingUp, Clock, Zap, Trophy, Activity
+import {
+  Users, Tags, FileText, ArrowRight, Zap, Activity, ScanText, Brain, Wrench,
+  ChevronRight, Eye, BarChart3, ShieldOff, Layers, TrendingUp
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
 
-interface Stats {
-  correspondents: number
-  tags: number
-  documentTypes: number
-}
-
-interface CleanupStats {
-  correspondents: { merged: number; deleted: number }
-  tags: { merged: number; deleted: number }
-  document_types: { merged: number; deleted: number }
-  total_items_cleaned: number
-  total_documents_affected: number
-  total_operations: number
-}
-
-export default function Dashboard() {
-  const [stats, setStats] = useState<Stats>({ correspondents: 0, tags: 0, documentTypes: 0 })
-  const [cleanupStats, setCleanupStats] = useState<CleanupStats | null>(null)
-  const [timeSaved, setTimeSaved] = useState(0)
-  const [statsLoading, setStatsLoading] = useState(true)
-  const [paperlessConnected, setPaperlessConnected] = useState<boolean | null>(null)
-  const [llmProvider, setLlmProvider] = useState<string | null>(null)
-  const [recentOps, setRecentOps] = useState<any[]>([])
-
+// ── Animated counter ──────────────────────────────────────────────────────────
+function AnimatedNumber({ value, duration = 900 }: { value: number; duration?: number }) {
+  const [display, setDisplay] = useState(0)
+  const raf = useRef<number>()
   useEffect(() => {
-    loadData()
-  }, [])
+    const from = 0
+    const start = performance.now()
+    const animate = (now: number) => {
+      const t = Math.min((now - start) / duration, 1)
+      const ease = 1 - Math.pow(1 - t, 3)
+      setDisplay(Math.round(from + (value - from) * ease))
+      if (t < 1) raf.current = requestAnimationFrame(animate)
+    }
+    raf.current = requestAnimationFrame(animate)
+    return () => { if (raf.current) cancelAnimationFrame(raf.current) }
+  }, [value])
+  return <>{display.toLocaleString('de-DE')}</>
+}
 
-  const loadData = async () => {
-    setStatsLoading(true)
-    
-    // Fire all requests at once - don't wait for each other
-    const paperlessPromise = api.getPaperlessStatus().catch(() => ({ connected: false }))
-    const llmPromise = api.getActiveLLMProvider().catch(() => ({ configured: false }))
-    const statsPromise = api.getStatisticsSummary().catch(() => null)
-    const recentPromise = api.getRecentOperations(5).catch(() => [])
-    
-    // Update UI as soon as each result comes in
-    paperlessPromise.then(status => setPaperlessConnected(status.connected))
-    llmPromise.then(status => setLlmProvider(status.configured && 'display_name' in status ? status.display_name || null : null))
-    recentPromise.then(ops => setRecentOps(ops))
-    
-    // Stats takes longest - update when ready
-    statsPromise.then(async statsData => {
-      if (statsData) {
-        setStats({
-          correspondents: statsData.current_counts.correspondents,
-          tags: statsData.current_counts.tags,
-          documentTypes: statsData.current_counts.document_types
-        })
-        setCleanupStats(statsData.cleanup_stats)
-        setTimeSaved(statsData.savings.estimated_time_saved_minutes)
-      }
-      setStatsLoading(false)
-    }).catch(() => setStatsLoading(false))
-    
-    // Wait for critical data (status indicators)
-    await Promise.all([paperlessPromise, llmPromise])
+// ── SVG Donut Chart ───────────────────────────────────────────────────────────
+interface DonutSeg { value: number; color: string; label: string; glow?: string }
+
+function DonutChart({ segments, total, centerTop, centerBot }:
+  { segments: DonutSeg[]; total: number; centerTop: string; centerBot: string }) {
+  const r = 74; const cx = 100; const cy = 100
+  const circ = 2 * Math.PI * r
+  const gap = circ * 0.008
+
+  // Build arcs
+  const arcs: { len: number; offset: number; seg: DonutSeg }[] = []
+  let cursor = -circ * 0.25
+  for (const seg of segments) {
+    const len = total > 0 ? Math.max((seg.value / total) * circ - gap, 0) : 0
+    arcs.push({ len, offset: cursor, seg })
+    cursor += len + gap
   }
 
-  const statCards = [
-    { 
-      step: 1,
-      name: 'Korrespondenten', 
-      count: stats.correspondents, 
-      cleaned: cleanupStats ? cleanupStats.correspondents.merged + cleanupStats.correspondents.deleted : 0,
-      icon: Users, 
-      href: '/correspondents',
-      color: 'from-blue-500 to-cyan-500',
-      bgColor: 'bg-blue-500/10',
-      borderColor: 'border-blue-500/30'
-    },
-    { 
-      step: 2,
-      name: 'Dokumententypen', 
-      count: stats.documentTypes, 
-      cleaned: cleanupStats ? cleanupStats.document_types.merged + cleanupStats.document_types.deleted : 0,
-      icon: FileText, 
-      href: '/document-types',
-      color: 'from-amber-500 to-orange-500',
-      bgColor: 'bg-amber-500/10',
-      borderColor: 'border-amber-500/30'
-    },
-    { 
-      step: 3,
-      name: 'Tags', 
-      count: stats.tags, 
-      cleaned: cleanupStats ? cleanupStats.tags.merged + cleanupStats.tags.deleted : 0,
-      icon: Tags, 
-      href: '/tags',
-      color: 'from-purple-500 to-pink-500',
-      bgColor: 'bg-purple-500/10',
-      borderColor: 'border-purple-500/30'
-    },
-  ]
+  return (
+    <div className="relative select-none">
+      <svg width={200} height={200} viewBox="0 0 200 200">
+        {/* Track */}
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke="#1e293b" strokeWidth={24} />
+        {arcs.map((arc, i) => arc.len > 0 && (
+          <circle
+            key={i} cx={cx} cy={cy} r={r} fill="none"
+            stroke={arc.seg.color} strokeWidth={22}
+            strokeDasharray={`${arc.len} ${circ}`}
+            strokeDashoffset={-arc.offset}
+            strokeLinecap="butt"
+            style={{ filter: arc.seg.glow ? `drop-shadow(0 0 5px ${arc.seg.glow})` : undefined, transition: 'stroke-dasharray 1.2s cubic-bezier(.4,0,.2,1)' }}
+          />
+        ))}
+        {/* Center */}
+        <text x={cx} y={cy - 9} textAnchor="middle" fill="white"
+          fontSize="22" fontWeight="700" fontFamily="ui-monospace,monospace">{centerTop}</text>
+        <text x={cx} y={cy + 12} textAnchor="middle" fill="#64748b"
+          fontSize="10" fontFamily="inherit">{centerBot}</text>
+      </svg>
+    </div>
+  )
+}
 
+// ── Progress Bar ──────────────────────────────────────────────────────────────
+function Bar({ pct, color, glow }: { pct: number; color: string; glow: string }) {
+  return (
+    <div className="h-1.5 bg-surface-700/60 rounded-full overflow-hidden">
+      <div className="h-full rounded-full transition-all duration-1000"
+        style={{ width: `${Math.min(pct, 100)}%`, background: color, boxShadow: `0 0 6px ${glow}` }} />
+    </div>
+  )
+}
+
+// ── Main ─────────────────────────────────────────────────────────────────────
+export default function Dashboard() {
+  const [classStats, setClassStats] = useState<api.ClassifierStats | null>(null)
+  const [ocrStatus, setOcrStatus] = useState<{ total_documents: number; finished_documents: number; pending_documents: number; percentage: number } | null>(null)
+  const [cleanupStats, setCleanupStats] = useState<any>(null)
+  const [ocrBatch, setOcrBatch] = useState<any>(null)
+  const [ocrReview, setOcrReview] = useState(0)
+  const [ocrErrors, setOcrErrors] = useState(0)
+  const [ocrIgnored, setOcrIgnored] = useState(0)
+  const [timeSaved, setTimeSaved] = useState(0)
+  const [counts, setCounts] = useState({ correspondents: 0, tags: 0, documentTypes: 0 })
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => { load() }, [])
+
+  const load = async () => {
+    setLoading(true)
+    const [statsRes, batchRes, reviewRes, ignoreRes, errorsRes, ocrRes] = await Promise.allSettled([
+      api.getStatisticsSummary(),
+      api.getBatchOcrStatus(),
+      api.getReviewQueue(),
+      api.getOcrIgnoreList(),
+      api.getOcrErrorList(),
+      api.getOcrStatus(),
+    ])
+    if (statsRes.status === 'fulfilled' && statsRes.value) {
+      const s = statsRes.value as any
+      setCounts({ correspondents: s.current_counts?.correspondents || 0, tags: s.current_counts?.tags || 0, documentTypes: s.current_counts?.document_types || 0 })
+      setCleanupStats(s.cleanup_stats)
+      setTimeSaved(s.savings?.estimated_time_saved_minutes || 0)
+    }
+    if (batchRes.status === 'fulfilled') setOcrBatch(batchRes.value)
+    if (reviewRes.status === 'fulfilled') setOcrReview((reviewRes.value as any).count || 0)
+    if (ignoreRes.status === 'fulfilled') setOcrIgnored((ignoreRes.value as any).count || 0)
+    if (errorsRes.status === 'fulfilled') setOcrErrors(((errorsRes.value as any).items || []).length)
+    if (ocrRes.status === 'fulfilled') setOcrStatus(ocrRes.value as any)
+    try { setClassStats(await api.getClassifierStats()) } catch {}
+    setLoading(false)
+  }
+
+  // ── Derived values ──────────────────────────────────────────────────────────
+  const totalDocs = ocrStatus?.total_documents || classStats?.total_documents_paperless || 0
+  const ocrDone = ocrStatus?.finished_documents || 0
+  const ocrPending = ocrStatus?.pending_documents || 0
+  const ocrPct = ocrStatus?.percentage || 0
+  const applied = classStats?.unique_applied || 0
+  const analyzed = Math.max(0, (classStats?.unique_classified || 0) - applied)
+  // Docs with ocrfinish that are not yet classified at all
+  const ocrDoneUnclassified = Math.max(0, ocrDone - applied - analyzed)
+  const classifiedPct = totalDocs > 0 ? ((applied / totalDocs) * 100).toFixed(1) : '0'
   const totalCleaned = cleanupStats?.total_items_cleaned || 0
 
+  // Donut: shows full archive breakdown
+  const donutSegs: DonutSeg[] = [
+    { value: applied, color: '#10b981', glow: '#10b98177', label: 'KI-Klassifiziert' },
+    { value: analyzed, color: '#f59e0b', glow: '#f59e0b66', label: 'Analysiert (offen)' },
+    { value: ocrDoneUnclassified, color: '#0ea5e9', glow: '#0ea5e955', label: 'OCR fertig' },
+    { value: ocrReview, color: '#f97316', glow: '#f9731666', label: 'OCR Prüfen' },
+    { value: ocrErrors, color: '#ef4444', glow: '#ef444466', label: 'OCR Fehler' },
+    { value: Math.max(0, ocrPending - ocrIgnored - ocrReview - ocrErrors), color: '#334155', label: 'Noch kein OCR' },
+    { value: ocrIgnored, color: '#475569', label: 'Ignoriert' },
+  ].filter(s => s.value > 0)
+
+  const lastBatchLog = (ocrBatch?.log || []).filter((l: string) => !l.startsWith('⏳') && !l.startsWith('🔎')).slice(-2)
+
   return (
-    <div className="space-y-8">
-      {/* Welcome Section */}
-      <div className="card p-8">
-        <div className="flex items-start justify-between">
-          <div>
-            <h2 className="font-display text-2xl font-bold text-surface-100 mb-2">
-              Willkommen beim AI Paperless Organizer
-            </h2>
-            <p className="text-surface-400 max-w-2xl">
-              Bereinige und konsolidiere deine Korrespondenten, Tags und Dokumententypen 
-              mit Hilfe von KI-gestützter Ähnlichkeitserkennung.
-            </p>
-          </div>
-          <div className="hidden md:block">
-            <Sparkles className="w-12 h-12 text-primary-500 opacity-50" />
-          </div>
-        </div>
-      </div>
+    <div className="space-y-5 pb-8">
 
-      {/* Connection Status */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className={clsx(
-          'card p-6 border-l-4',
-          paperlessConnected 
-            ? 'border-l-emerald-500' 
-            : 'border-l-red-500'
-        )}>
-          <div className="flex items-center gap-4">
-            {paperlessConnected ? (
-              <CheckCircle2 className="w-8 h-8 text-emerald-400" />
-            ) : (
-              <AlertCircle className="w-8 h-8 text-red-400" />
-            )}
-            <div>
-              <h3 className="font-semibold text-surface-100">Paperless-ngx</h3>
-              <p className="text-sm text-surface-400">
-                {paperlessConnected 
-                  ? 'Verbindung hergestellt' 
-                  : 'Nicht verbunden - bitte in Einstellungen konfigurieren'}
-              </p>
-            </div>
-          </div>
-        </div>
+      {/* ── Gesamtübersicht: Donut + 4 Kacheln ─────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
 
-        <div className={clsx(
-          'card p-6 border-l-4',
-          llmProvider 
-            ? 'border-l-emerald-500' 
-            : 'border-l-amber-500'
-        )}>
-          <div className="flex items-center gap-4">
-            {llmProvider ? (
-              <CheckCircle2 className="w-8 h-8 text-emerald-400" />
-            ) : (
-              <AlertCircle className="w-8 h-8 text-amber-400" />
-            )}
-            <div>
-              <h3 className="font-semibold text-surface-100">LLM Provider</h3>
-              <p className="text-sm text-surface-400">
-                {llmProvider 
-                  ? `Aktiv: ${llmProvider}` 
-                  : 'Nicht konfiguriert - bitte in Einstellungen aktivieren'}
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Stats Grid with Cleanup Progress */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {statCards.map((card, index) => {
-          const Icon = card.icon
-          return (
-            <Link
-              key={card.name}
-              to={card.href}
-              className={clsx(
-                'card p-6 group hover:scale-[1.02] transition-all duration-300',
-                card.bgColor, card.borderColor, 'border'
-              )}
-              style={{ animationDelay: `${index * 100}ms` }}
-            >
-              <div className="flex items-center justify-between mb-4">
-                <div className={clsx(
-                  'w-12 h-12 rounded-xl flex items-center justify-center',
-                  'bg-gradient-to-br', card.color,
-                  statsLoading && 'animate-pulse'
-                )}>
-                  <Icon className="w-6 h-6 text-white" />
-                </div>
-                <ArrowRight className="w-5 h-5 text-surface-500 group-hover:text-surface-300 
-                                      group-hover:translate-x-1 transition-all" />
-              </div>
-              <div>
-                <p className="text-surface-400 text-sm mb-1">{card.name}</p>
-                {statsLoading ? (
-                  <div className="space-y-2">
-                    <div className="h-9 w-20 bg-surface-700 rounded animate-pulse" />
-                    <div className="h-4 w-16 bg-surface-700/50 rounded animate-pulse" />
-                  </div>
-                ) : (
-                  <>
-                    <p className="font-display text-3xl font-bold text-surface-100">
-                      {card.count}
-                    </p>
-                    {card.cleaned > 0 && (
-                      <p className="text-emerald-400 text-sm mt-2 flex items-center gap-1">
-                        <TrendingUp className="w-4 h-4" />
-                        {card.cleaned} bereinigt
-                      </p>
-                    )}
-                  </>
-                )}
-              </div>
-            </Link>
-          )
-        })}
-      </div>
-
-      {/* Cleanup Summary Cards */}
-      {cleanupStats && totalCleaned > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="card p-4 bg-gradient-to-br from-blue-500/10 to-transparent border border-blue-500/20">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
-                <Users className="w-5 h-5 text-blue-400" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-surface-100">
-                  {cleanupStats.correspondents.merged}
-                </p>
-                <p className="text-xs text-surface-400">Korr. zusammengeführt</p>
-              </div>
-            </div>
-          </div>
-          
-          <div className="card p-4 bg-gradient-to-br from-purple-500/10 to-transparent border border-purple-500/20">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center">
-                <Tags className="w-5 h-5 text-purple-400" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-surface-100">
-                  {cleanupStats.tags.merged + cleanupStats.tags.deleted}
-                </p>
-                <p className="text-xs text-surface-400">Tags bereinigt</p>
-              </div>
-            </div>
-          </div>
-          
-          <div className="card p-4 bg-gradient-to-br from-amber-500/10 to-transparent border border-amber-500/20">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-amber-500/20 flex items-center justify-center">
-                <FileText className="w-5 h-5 text-amber-400" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-surface-100">
-                  {cleanupStats.document_types.merged}
-                </p>
-                <p className="text-xs text-surface-400">Typen zusammengeführt</p>
-              </div>
-            </div>
-          </div>
-          
-          <div className="card p-4 bg-gradient-to-br from-emerald-500/10 to-transparent border border-emerald-500/20">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center">
-                <Clock className="w-5 h-5 text-emerald-400" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-surface-100">
-                  {timeSaved}m
-                </p>
-                <p className="text-xs text-surface-400">Zeit gespart</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Recent Activity */}
-      {recentOps.length > 0 && (
-        <div className="card p-6">
-          <h3 className="font-display font-semibold text-lg text-surface-100 mb-4 flex items-center gap-2">
-            <Activity className="w-5 h-5 text-primary-400" />
-            Letzte Aktivitäten
+        {/* Donut Card */}
+        <div className="lg:col-span-2 card p-6 flex flex-col items-center bg-surface-800/60 border border-surface-700/50">
+          <h3 className="font-display font-semibold text-surface-100 flex items-center gap-2 self-start mb-4 text-base">
+            <BarChart3 className="w-4 h-4 text-primary-400" />
+            Archiv-Übersicht
           </h3>
-          <div className="space-y-3">
-            {recentOps.map((op, i) => (
-              <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-surface-700/30">
-                <div className="flex items-center gap-3">
-                  {op.entity_type === 'correspondents' && <Users className="w-4 h-4 text-blue-400" />}
-                  {op.entity_type === 'tags' && <Tags className="w-4 h-4 text-purple-400" />}
-                  {op.entity_type === 'document_types' && <FileText className="w-4 h-4 text-amber-400" />}
-                  <span className="text-surface-200">
-                    {op.items_affected} {op.entity_type === 'correspondents' ? 'Korrespondenten' : 
-                      op.entity_type === 'tags' ? 'Tags' : 'Dokumententypen'} {op.operation === 'merged' ? 'zusammengeführt' : 'gelöscht'}
-                  </span>
+          {loading ? (
+            <div className="w-48 h-48 rounded-full border-[24px] border-surface-700 animate-pulse my-2" />
+          ) : (
+            <DonutChart
+              segments={donutSegs}
+              total={totalDocs}
+              centerTop={`${ocrPct}%`}
+              centerBot="OCR-Quote"
+            />
+          )}
+          {/* Legend */}
+          <div className="w-full space-y-1.5 mt-2">
+            {[
+              { color: '#10b981', label: 'KI-Klassifiziert', value: applied, pct: totalDocs > 0 ? (applied / totalDocs * 100).toFixed(1) : '0' },
+              { color: '#f59e0b', label: 'Analysiert (offen)', value: analyzed, pct: totalDocs > 0 ? (analyzed / totalDocs * 100).toFixed(1) : '0' },
+              { color: '#0ea5e9', label: 'OCR fertig', value: ocrDoneUnclassified, pct: totalDocs > 0 ? (ocrDoneUnclassified / totalDocs * 100).toFixed(1) : '0' },
+              { color: '#f97316', label: 'OCR Prüfen', value: ocrReview, pct: totalDocs > 0 ? (ocrReview / totalDocs * 100).toFixed(1) : '0' },
+              { color: '#475569', label: 'Ignoriert / kein OCR', value: ocrPending, pct: totalDocs > 0 ? (ocrPending / totalDocs * 100).toFixed(1) : '0' },
+            ].map(seg => (
+              <div key={seg.label} className="flex items-center gap-2 text-xs">
+                <div className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: seg.color }} />
+                <span className="text-surface-400 flex-1 truncate">{seg.label}</span>
+                <span className="font-mono text-surface-500 text-[11px]">{seg.pct}%</span>
+                <span className="font-mono text-surface-300 w-12 text-right">{seg.value.toLocaleString('de-DE')}</span>
+              </div>
+            ))}
+            <div className="pt-1.5 border-t border-surface-700/40 flex justify-between text-xs">
+              <span className="text-surface-500">Gesamt</span>
+              <span className="font-mono font-bold text-surface-200">{totalDocs.toLocaleString('de-DE')}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* 4 Kacheln */}
+        <div className="lg:col-span-3 grid grid-cols-2 gap-4">
+          {[
+            {
+              label: 'Gesamt Dokumente', value: totalDocs, sub: `${counts.correspondents} Korr. · ${counts.tags} Tags`,
+              icon: Layers, grad: 'from-slate-500 to-slate-600', glow: '#64748b',
+            },
+            {
+              label: 'KI-Klassifiziert', value: applied, sub: `${classifiedPct}% des Archivs klassifiziert`,
+              icon: Brain, grad: 'from-violet-500 to-purple-600', glow: '#7c3aed',
+            },
+            {
+              label: 'OCR abgeschlossen', value: ocrDone, sub: `${ocrPct}% · ${ocrPending} ausstehend`,
+              icon: ScanText, grad: 'from-cyan-500 to-blue-600', glow: '#0891b2',
+            },
+            {
+              label: 'Bereinigt', value: totalCleaned, sub: `${timeSaved} Min. gespart`,
+              icon: Wrench, grad: 'from-amber-500 to-orange-600', glow: '#d97706',
+            },
+          ].map((c) => {
+            const Icon = c.icon
+            return (
+              <div key={c.label} className="card p-5 border border-surface-700/50 bg-surface-800/50">
+                <div className={clsx('p-2.5 rounded-xl bg-gradient-to-br w-fit mb-3', c.grad)}
+                  style={{ boxShadow: `0 4px 16px ${c.glow}40` }}>
+                  <Icon className="w-5 h-5 text-white" />
                 </div>
-                <span className="text-xs text-surface-500">
-                  {op.created_at ? new Date(op.created_at).toLocaleDateString('de-DE') : ''}
-                </span>
+                <div className="font-display text-3xl font-bold text-white mb-0.5">
+                  {loading ? <div className="h-8 w-20 bg-surface-700 rounded animate-pulse" /> : <AnimatedNumber value={c.value} />}
+                </div>
+                <div className="text-xs font-medium text-surface-400">{c.label}</div>
+                <div className="text-xs text-surface-600 mt-0.5 truncate">{c.sub}</div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* ── 3 Modul-Karten ─────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+        {/* OCR */}
+        <Link to="/ocr" className="group card p-5 border border-cyan-500/20 bg-gradient-to-b from-cyan-500/5 to-transparent hover:border-cyan-500/40 transition-all hover:scale-[1.01]">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-lg bg-cyan-500/15 border border-cyan-500/20">
+                <ScanText className="w-5 h-5 text-cyan-400" />
+              </div>
+              <span className="font-display font-semibold text-surface-100">OCR Engine</span>
+            </div>
+            <ArrowRight className="w-4 h-4 text-surface-600 group-hover:text-cyan-400 group-hover:translate-x-1 transition-all" />
+          </div>
+
+          {/* Big percentage */}
+          <div className="flex items-end gap-2 mb-3">
+            <span className="font-display text-4xl font-bold text-cyan-300">{ocrPct}%</span>
+            <span className="text-surface-400 text-sm mb-1">abgeschlossen</span>
+          </div>
+          <Bar pct={ocrPct} color="#22d3ee" glow="#22d3ee66" />
+
+          <div className="grid grid-cols-3 gap-2 mt-4 text-center">
+            {[
+              { val: ocrDone, label: 'Fertig', color: 'text-cyan-300' },
+              { val: ocrReview, label: 'Prüfen', color: ocrReview > 0 ? 'text-orange-400' : 'text-surface-500' },
+              { val: ocrIgnored, label: 'Ignoriert', color: 'text-surface-500' },
+            ].map(i => (
+              <div key={i.label} className="p-2 rounded-lg bg-surface-700/30">
+                <div className={clsx('text-lg font-bold', i.color)}>{i.val.toLocaleString('de-DE')}</div>
+                <div className="text-xs text-surface-500">{i.label}</div>
               </div>
             ))}
           </div>
+
+          {lastBatchLog.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-surface-700/40 space-y-0.5">
+              {lastBatchLog.map((l: string, i: number) => (
+                <p key={i} className="text-xs text-surface-500 truncate">{l}</p>
+              ))}
+            </div>
+          )}
+        </Link>
+
+        {/* Klassifizierer */}
+        <Link to="/classifier" className="group card p-5 border border-violet-500/20 bg-gradient-to-b from-violet-500/5 to-transparent hover:border-violet-500/40 transition-all hover:scale-[1.01]">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-lg bg-violet-500/15 border border-violet-500/20">
+                <Brain className="w-5 h-5 text-violet-400" />
+              </div>
+              <span className="font-display font-semibold text-surface-100">KI-Klassifizierer</span>
+            </div>
+            <ArrowRight className="w-4 h-4 text-surface-600 group-hover:text-violet-400 group-hover:translate-x-1 transition-all" />
+          </div>
+
+          <div className="flex items-end gap-2 mb-3">
+            <span className="font-display text-4xl font-bold text-violet-300">{classifiedPct}%</span>
+            <span className="text-surface-400 text-sm mb-1">klassifiziert</span>
+          </div>
+          <Bar pct={parseFloat(classifiedPct)} color="#7c3aed" glow="#7c3aed66" />
+
+          <div className="grid grid-cols-3 gap-2 mt-4 text-center">
+            {[
+              { val: applied, label: 'Angewendet', color: 'text-emerald-400' },
+              { val: analyzed, label: 'Offen', color: analyzed > 0 ? 'text-amber-400' : 'text-surface-500' },
+              { val: classStats?.total_runs || 0, label: 'Analysen', color: 'text-violet-300' },
+            ].map(i => (
+              <div key={i.label} className="p-2 rounded-lg bg-surface-700/30">
+                <div className={clsx('text-lg font-bold', i.color)}>{i.val.toLocaleString('de-DE')}</div>
+                <div className="text-xs text-surface-500">{i.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {classStats && (
+            <div className="mt-3 pt-3 border-t border-surface-700/40 flex justify-between text-xs text-surface-500">
+              <span>⌀ {classStats.avg_duration_seconds.toFixed(1)}s</span>
+              <span>{classStats.total_cost_usd > 0 ? `$${classStats.total_cost_usd.toFixed(3)} USD` : '100% lokal'}</span>
+              <span>{((classStats.total_tokens_in + classStats.total_tokens_out) / 1000).toFixed(0)}k Tokens</span>
+            </div>
+          )}
+        </Link>
+
+        {/* Aufräumen */}
+        <Link to="/correspondents" className="group card p-5 border border-amber-500/20 bg-gradient-to-b from-amber-500/5 to-transparent hover:border-amber-500/40 transition-all hover:scale-[1.01]">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-lg bg-amber-500/15 border border-amber-500/20">
+                <Wrench className="w-5 h-5 text-amber-400" />
+              </div>
+              <span className="font-display font-semibold text-surface-100">Aufräumen</span>
+            </div>
+            <ArrowRight className="w-4 h-4 text-surface-600 group-hover:text-amber-400 group-hover:translate-x-1 transition-all" />
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 mb-4 text-center">
+            {[
+              { val: counts.correspondents, label: 'Korr.', cleaned: cleanupStats?.correspondents?.merged + cleanupStats?.correspondents?.deleted || 0, color: 'text-blue-400' },
+              { val: counts.tags, label: 'Tags', cleaned: cleanupStats?.tags?.merged + cleanupStats?.tags?.deleted || 0, color: 'text-purple-400' },
+              { val: counts.documentTypes, label: 'Typen', cleaned: cleanupStats?.document_types?.merged || 0, color: 'text-amber-400' },
+            ].map(i => (
+              <div key={i.label} className="p-2 rounded-lg bg-surface-700/30">
+                <div className={clsx('text-xl font-bold', i.color)}>{i.val}</div>
+                <div className="text-xs text-surface-500">{i.label}</div>
+                {i.cleaned > 0 && <div className="text-xs text-emerald-400">−{i.cleaned}</div>}
+              </div>
+            ))}
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex justify-between text-sm">
+              <span className="text-surface-400">Bereinigt gesamt</span>
+              <span className="font-bold text-emerald-400">{totalCleaned}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-surface-400">Dokumente aktualisiert</span>
+              <span className="font-bold text-surface-200">{cleanupStats?.total_documents_affected || 0}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-surface-400">Zeit gespart</span>
+              <span className="font-bold text-surface-200">{timeSaved} min</span>
+            </div>
+          </div>
+        </Link>
+      </div>
+
+      {/* ── Modell-Performance + Letzte Klassifizierungen ───────────────────── */}
+      {classStats && (classStats.by_provider?.length > 0 || classStats.recent?.length > 0) && (
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+
+          {/* Provider Breakdown */}
+          <div className="lg:col-span-2 card p-6 border border-surface-700/50">
+            <h3 className="font-display font-semibold text-surface-100 mb-4 flex items-center gap-2 text-sm">
+              <Zap className="w-4 h-4 text-amber-400" />
+              Modell-Einsatz
+            </h3>
+            <div className="space-y-4">
+              {classStats.by_provider?.map((p: any) => {
+                const pct = (p.count / classStats.total_runs) * 100
+                const isCloud = p.provider === 'openai' || p.provider === 'anthropic' || p.provider === 'mistral'
+                return (
+                  <div key={`${p.provider}-${p.model}`}>
+                    <div className="flex justify-between items-baseline mb-1.5">
+                      <span className="text-sm text-surface-200 truncate max-w-[150px]" title={p.model}>{p.model}</span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className={clsx('text-xs px-1.5 py-0.5 rounded border',
+                          isCloud ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-violet-500/10 border-violet-500/20 text-violet-400')}>
+                          {isCloud ? 'Cloud' : 'Lokal'}
+                        </span>
+                        <span className="text-xs text-surface-500">{p.count}×</span>
+                      </div>
+                    </div>
+                    <Bar
+                      pct={pct}
+                      color={isCloud ? '#10b981' : '#7c3aed'}
+                      glow={isCloud ? '#10b98155' : '#7c3aed55'}
+                    />
+                    <div className="flex justify-between text-xs text-surface-600 mt-1">
+                      <span>⌀ {p.avg_duration?.toFixed(0)}s</span>
+                      {p.cost > 0 ? <span>${p.cost.toFixed(4)}</span> : <span className="text-violet-400/60">kostenlos</span>}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            <div className="mt-4 pt-3 border-t border-surface-700/40 grid grid-cols-2 gap-3">
+              <div>
+                <div className="text-xl font-bold text-surface-100">{classStats.avg_duration_seconds.toFixed(1)}s</div>
+                <div className="text-xs text-surface-500">Ø Analysezeit</div>
+              </div>
+              <div>
+                <div className="text-xl font-bold text-surface-100">
+                  {((classStats.total_tokens_in + classStats.total_tokens_out) / 1000).toFixed(0)}k
+                </div>
+                <div className="text-xs text-surface-500">Tokens gesamt</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Recent */}
+          <div className="lg:col-span-3 card p-6 border border-surface-700/50">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-display font-semibold text-surface-100 flex items-center gap-2 text-sm">
+                <Activity className="w-4 h-4 text-violet-400" />
+                Letzte Klassifizierungen
+              </h3>
+              <Link to="/classifier" className="text-xs text-surface-500 hover:text-primary-400 flex items-center gap-1 transition-colors">
+                Alle <ChevronRight className="w-3 h-3" />
+              </Link>
+            </div>
+            <div className="space-y-1.5">
+              {(classStats.recent || []).slice(0, 7).map((item: any, i: number) => (
+                <div key={i} className="flex items-center gap-3 p-2.5 rounded-lg bg-surface-700/20 hover:bg-surface-700/40 transition-colors">
+                  <div className={clsx('w-1.5 h-1.5 rounded-full shrink-0',
+                    item.status === 'applied' ? 'bg-emerald-400' : 'bg-amber-400'
+                  )} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-surface-200 truncate">{item.document_title}</p>
+                    <p className="text-xs text-surface-500">
+                      {item.model} · {item.duration_seconds?.toFixed(1)}s
+                    </p>
+                  </div>
+                  <span className={clsx('text-xs px-1.5 py-0.5 rounded border shrink-0',
+                    item.status === 'applied'
+                      ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                      : 'bg-amber-500/10 border-amber-500/20 text-amber-400'
+                  )}>
+                    {item.status === 'applied' ? '✓' : '○'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Workflow & Quick Actions Combined */}
-      <div className="card p-6 border border-primary-500/30 bg-gradient-to-br from-primary-500/5 to-transparent">
-        <h3 className="font-display font-semibold text-lg text-surface-100 mb-6 flex items-center gap-2">
-          <Zap className="w-5 h-5 text-primary-400" />
-          Empfohlener Workflow
+      {/* ── Schnellzugriff ─────────────────────────────────────────────────── */}
+      <div>
+        <h3 className="font-display text-xs font-semibold text-surface-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+          <TrendingUp className="w-3.5 h-3.5" />
+          Schnellzugriff
         </h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Link 
-            to="/correspondents"
-            className="p-5 rounded-xl bg-surface-800/50 hover:bg-surface-700 
-                     border border-blue-500/30 hover:border-blue-500/60
-                     transition-all duration-200 group"
-          >
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold shrink-0">
-                1
-              </div>
-              <Users className="w-6 h-6 text-blue-400" />
-            </div>
-            <h4 className="font-medium text-surface-100 mb-1">
-              Korrespondenten
-            </h4>
-            <p className="text-sm text-surface-400">
-              Starte hier! Firmen/Personen sind die wichtigste Basis für alle Dokumente.
-            </p>
-          </Link>
-
-          <Link 
-            to="/document-types"
-            className="p-5 rounded-xl bg-surface-800/50 hover:bg-surface-700 
-                     border border-amber-500/30 hover:border-amber-500/60
-                     transition-all duration-200 group"
-          >
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold shrink-0">
-                2
-              </div>
-              <FileText className="w-6 h-6 text-amber-400" />
-            </div>
-            <h4 className="font-medium text-surface-100 mb-1">
-              Dokumententypen
-            </h4>
-            <p className="text-sm text-surface-400">
-              Bereinige Typen wie Rechnung, Vertrag, etc. bevor du zu Tags gehst.
-            </p>
-          </Link>
-
-          <Link 
-            to="/tags/wizard"
-            className="p-5 rounded-xl bg-surface-800/50 hover:bg-surface-700 
-                     border border-purple-500/30 hover:border-purple-500/60
-                     transition-all duration-200 group"
-          >
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-full bg-purple-500/20 text-purple-400 flex items-center justify-center font-bold shrink-0">
-                3
-              </div>
-              <Tags className="w-6 h-6 text-purple-400" />
-            </div>
-            <h4 className="font-medium text-surface-100 mb-1">
-              Tag Cleanup Wizard
-            </h4>
-            <p className="text-sm text-surface-400">
-              5-Stufen KI-Bereinigung: Leere → Unsinnige → Korr. → Typen → Ähnliche
-            </p>
-          </Link>
-        </div>
-      </div>
-
-      {/* Statistics Banner */}
-      <div className={clsx(
-        "relative overflow-hidden rounded-2xl p-8",
-        totalCleaned > 0 
-          ? "bg-gradient-to-br from-emerald-600 via-emerald-500 to-teal-500" 
-          : "bg-gradient-to-br from-surface-700 via-surface-600 to-surface-700 border border-surface-600"
-      )}>
-        <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -translate-y-32 translate-x-32" />
-        <div className="absolute bottom-0 left-0 w-32 h-32 bg-white/10 rounded-full translate-y-16 -translate-x-16" />
-        
-        <div className="relative z-10">
-          <div className="flex items-center gap-3 mb-4">
-            <Trophy className={clsx("w-8 h-8", totalCleaned > 0 ? "text-yellow-300" : "text-surface-400")} />
-            <h2 className={clsx("font-display text-2xl font-bold", totalCleaned > 0 ? "text-white" : "text-surface-200")}>
-              {totalCleaned > 0 ? 'Deine Erfolge' : 'Statistiken'}
-            </h2>
-          </div>
-          
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-            <div className="text-center">
-              <div className={clsx("text-4xl md:text-5xl font-display font-bold mb-1", totalCleaned > 0 ? "text-white" : "text-surface-100")}>
-                {totalCleaned}
-              </div>
-              <div className={clsx("text-sm", totalCleaned > 0 ? "text-emerald-100" : "text-surface-400")}>Einträge bereinigt</div>
-            </div>
-            <div className="text-center">
-              <div className={clsx("text-4xl md:text-5xl font-display font-bold mb-1", totalCleaned > 0 ? "text-white" : "text-surface-100")}>
-                {cleanupStats?.total_documents_affected || 0}
-              </div>
-              <div className={clsx("text-sm", totalCleaned > 0 ? "text-emerald-100" : "text-surface-400")}>Dokumente aktualisiert</div>
-            </div>
-            <div className="text-center">
-              <div className={clsx("text-4xl md:text-5xl font-display font-bold mb-1", totalCleaned > 0 ? "text-white" : "text-surface-100")}>
-                {timeSaved}
-              </div>
-              <div className={clsx("text-sm", totalCleaned > 0 ? "text-emerald-100" : "text-surface-400")}>Minuten gespart</div>
-            </div>
-            <div className="text-center">
-              <div className={clsx("text-4xl md:text-5xl font-display font-bold mb-1", totalCleaned > 0 ? "text-white" : "text-surface-100")}>
-                {cleanupStats?.total_operations || 0}
-              </div>
-              <div className={clsx("text-sm", totalCleaned > 0 ? "text-emerald-100" : "text-surface-400")}>Operationen</div>
-            </div>
-          </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { href: '/classifier', icon: Brain, label: 'Klassifizierer', sub: `${(classStats?.total_documents_paperless || 0) - applied} offen`, color: 'border-violet-500/25 hover:border-violet-500/50', ic: 'text-violet-400', bg: 'bg-violet-500/5' },
+            { href: '/ocr', icon: ScanText, label: 'OCR Manager', sub: ocrPending > ocrIgnored ? `${ocrPending - ocrIgnored} ausstehend` : 'Alles fertig ✓', color: 'border-cyan-500/25 hover:border-cyan-500/50', ic: 'text-cyan-400', bg: 'bg-cyan-500/5' },
+            { href: '/correspondents', icon: Users, label: 'Korrespondenten', sub: `${counts.correspondents} aktiv`, color: 'border-blue-500/25 hover:border-blue-500/50', ic: 'text-blue-400', bg: 'bg-blue-500/5' },
+            { href: '/tags/wizard', icon: Tags, label: 'Tag Wizard', sub: `${counts.tags} Tags`, color: 'border-purple-500/25 hover:border-purple-500/50', ic: 'text-purple-400', bg: 'bg-purple-500/5' },
+            { href: '/ocr?tab=review', icon: Eye, label: 'OCR Prüfen', sub: ocrReview > 0 ? `${ocrReview} ausstehend` : 'Alles erledigt ✓', color: 'border-orange-500/25 hover:border-orange-500/50', ic: 'text-orange-400', bg: 'bg-orange-500/5' },
+            { href: '/ocr?tab=ignore', icon: ShieldOff, label: 'Ignore-Liste', sub: `${ocrIgnored} Einträge`, color: 'border-surface-600/40 hover:border-surface-500/60', ic: 'text-surface-400', bg: '' },
+            { href: '/document-types', icon: FileText, label: 'Dokumententypen', sub: `${counts.documentTypes} Typen`, color: 'border-amber-500/25 hover:border-amber-500/50', ic: 'text-amber-400', bg: 'bg-amber-500/5' },
+            { href: '/settings', icon: Activity, label: 'Einstellungen', sub: 'KI, Paperless & Prompts', color: 'border-surface-600/40 hover:border-surface-500/60', ic: 'text-surface-400', bg: '' },
+          ].map(item => {
+            const Icon = item.icon
+            return (
+              <Link key={item.href} to={item.href}
+                className={clsx('card p-4 border transition-all duration-200 hover:scale-[1.02] group', item.color, item.bg)}>
+                <div className="flex items-start justify-between mb-2">
+                  <Icon className={clsx('w-4.5 h-4.5', item.ic)} />
+                  <ChevronRight className="w-3.5 h-3.5 text-surface-600 group-hover:text-surface-400 group-hover:translate-x-0.5 transition-all" />
+                </div>
+                <div className="text-sm font-medium text-surface-200">{item.label}</div>
+                <div className="text-xs text-surface-500 mt-0.5 truncate">{item.sub}</div>
+              </Link>
+            )
+          })}
         </div>
       </div>
     </div>

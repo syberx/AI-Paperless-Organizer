@@ -2,7 +2,7 @@
 
 const API_BASE = '/api'
 
-async function fetchJson<T>(url: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
+export async function fetchJson<T>(url: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
   const { timeoutMs, ...fetchOptions } = options || {}
 
   // Create an AbortController for timeout support
@@ -472,7 +472,8 @@ export interface BatchOcrStatus {
   total: number
   processed: number
   failed: number
-  current_document?: string
+  current_document?: { id: number; title: string } | string | null
+  current_page_progress?: OcrPageProgress | null
   errors: string[]
   log: string[]
   start_time?: string
@@ -544,6 +545,21 @@ export const getOcrStatus = async () => {
 // Single Document OCR
 export const ocrSingleDocument = (documentId: number, force: boolean = false) =>
   fetchJson<OcrResult>(`/ocr/single/${documentId}?force=${force}`, { method: 'POST' })
+
+export interface OcrPageProgress {
+  active: boolean
+  document_id: number
+  status?: string
+  total_pages?: number
+  done?: number
+  errors?: number
+  current_page?: number
+  elapsed_seconds?: number
+  pages?: { page: number; status: string; chars: number; error?: string }[]
+}
+
+export const getOcrProgress = (documentId: number) =>
+  fetchJson<OcrPageProgress>(`/ocr/progress/${documentId}`)
 
 export const applyOcrResult = (documentId: number, content: string, setFinishTag: boolean = true) =>
   fetchJson<{ success: boolean }>(`/ocr/apply/${documentId}`, {
@@ -633,6 +649,12 @@ export const dismissReviewItem = (documentId: number) =>
 
 export const ignoreReviewItem = (documentId: number) =>
   fetchJson<{ ignored: boolean; document_id: number; title: string }>(`/ocr/review/ignore/${documentId}`, { method: 'POST' })
+
+export const resetAllReviewItems = () =>
+  fetchJson<{ reset: number; errors: string[] }>('/ocr/review/reset-all', { method: 'POST' })
+
+export const keepAllOriginals = () =>
+  fetchJson<{ kept: number; errors: string[] }>('/ocr/review/keep-all-originals', { method: 'POST' })
 
 // --- OCR Ignore List API ---
 
@@ -804,3 +826,352 @@ export const evaluateOcrResults = (documentTitle: string, results: OcrModelCompa
       evaluation_model: evaluationModel || null
     })
   })
+
+
+// ==========================================
+// KI-Klassifizierer
+// ==========================================
+
+export interface ClassifierConfig {
+  active_provider: string
+  openai_model: string
+  mistral_api_key: string
+  mistral_model: string
+  ollama_host: string
+  ollama_model: string
+  enable_title: boolean
+  enable_tags: boolean
+  enable_correspondent: boolean
+  enable_document_type: boolean
+  enable_storage_path: boolean
+  enable_created_date: boolean
+  enable_custom_fields: boolean
+  tag_behavior: string
+  tags_min: number
+  tags_max: number
+  tags_keep_existing: boolean
+  tags_ignore: string[]
+  tags_protected: string[]
+  dates_ignore: string[]
+  storage_path_behavior: string
+  storage_path_override_names: string[]
+  correspondent_behavior: string
+  prompt_title: string
+  prompt_tags: string
+  prompt_correspondent: string
+  prompt_document_type: string
+  prompt_date: string
+  review_mode: string
+  batch_size: number
+  system_prompt: string
+  excluded_tag_ids: number[]
+  excluded_correspondent_ids: number[]
+  excluded_document_type_ids: number[]
+  correspondent_trim_prompt: boolean
+  correspondent_strip_legal: boolean
+  correspondent_ignore: string[]
+  auto_classify_enabled: boolean
+  auto_classify_interval: number
+  auto_classify_mode: string
+}
+
+export interface PaperlessTag {
+  id: number
+  name: string
+  slug?: string
+  colour?: number
+  is_inbox_tag?: boolean
+}
+
+export interface PaperlessCorrespondent {
+  id: number
+  name: string
+  slug?: string
+}
+
+export interface PaperlessDocumentType {
+  id: number
+  name: string
+  slug?: string
+}
+
+export interface StoragePathProfile {
+  id?: number
+  paperless_path_id: number
+  paperless_path_name: string
+  paperless_path_path: string
+  enabled: boolean
+  person_name: string
+  path_type: string
+  context_prompt: string
+}
+
+export interface CustomFieldMapping {
+  id?: number
+  paperless_field_id: number
+  paperless_field_name: string
+  paperless_field_type: string
+  enabled: boolean
+  extraction_prompt: string
+  example_values: string
+  validation_regex: string
+  ignore_values: string
+}
+
+export interface ClassificationResult {
+  title: string | null
+  tags: string[]
+  tags_new: string[]
+  existing_tags: string[]
+  existing_correspondent: string | null
+  existing_document_type: string | null
+  existing_storage_path_id: number | null
+  existing_storage_path_name: string | null
+  correspondent: string | null
+  correspondent_is_new: boolean
+  document_type: string | null
+  storage_path_id: number | null
+  storage_path_name: string | null
+  storage_path_reason: string | null
+  created_date: string | null
+  custom_fields: Record<string, any>
+  tokens_input: number
+  tokens_output: number
+  cost_usd: number
+  duration_seconds: number
+  tool_calls_count: number
+  error: string | null
+  debug_info?: Record<string, any>
+  summary?: string | null
+}
+
+export interface ClassificationHistoryEntry {
+  id: number
+  document_id: number
+  document_title: string
+  provider: string
+  model: string
+  tokens_input: number
+  tokens_output: number
+  cost_usd: number
+  duration_seconds: number
+  tool_calls_count: number
+  status: string
+  error_message: string
+  created_at: string
+  result_json: ClassificationResult | null
+}
+
+export interface TagStat {
+  name: string
+  count: number
+  applied_count: number
+  new_count: number
+}
+
+export interface TagStats {
+  top_tags: TagStat[]
+  total_unique_tags: number
+  total_tag_assignments: number
+  total_new_tags_created: number
+}
+
+export interface PromptDefaults {
+  title: string
+  tags: string
+  correspondent: string
+  document_type: string
+  date: string
+}
+
+export const getClassifierPromptDefaults = () =>
+  fetchJson<PromptDefaults>('/classifier/prompt-defaults')
+
+export const getClassifierConfig = () =>
+  fetchJson<ClassifierConfig>('/classifier/config')
+
+export const updateClassifierConfig = (data: Partial<ClassifierConfig>) =>
+  fetchJson<{ status: string }>('/classifier/config', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+
+export interface OllamaModel {
+  name: string
+  size_gb: number
+  parameter_size: string
+  family: string
+  is_thinking: boolean
+  recommendation: string | null
+  category: 'standard' | 'thinking'
+  speed: string | null
+  quality: string | null
+}
+
+export interface OllamaModelSuggestion {
+  name: string
+  recommendation: string
+  category: string
+  speed: string | null
+  quality: string | null
+  install_command: string
+}
+
+export interface OllamaModelsResponse {
+  connected: boolean
+  ollama_host: string
+  installed: OllamaModel[]
+  suggestions: OllamaModelSuggestion[]
+  top_recommendation: string | null
+}
+
+export interface OllamaTestResponse {
+  connected: boolean
+  model_available: boolean
+  model: string
+  message: string
+  installed_models?: string[]
+  install_hint?: string
+}
+
+export const getClassifierTags = () =>
+  fetchJson<PaperlessTag[]>('/classifier/tags')
+
+export const getClassifierCorrespondents = () =>
+  fetchJson<PaperlessCorrespondent[]>('/classifier/correspondents')
+
+export const getClassifierDocumentTypes = () =>
+  fetchJson<PaperlessDocumentType[]>('/classifier/document-types')
+
+export const getClassifierOllamaModels = () =>
+  fetchJson<OllamaModelsResponse>('/classifier/ollama/models')
+
+export const testClassifierOllama = (model?: string, host?: string) => {
+  const params = new URLSearchParams()
+  if (model) params.set('model', model)
+  if (host) params.set('host', host)
+  const query = params.toString() ? `?${params.toString()}` : ''
+  return fetchJson<OllamaTestResponse>(`/classifier/ollama/test${query}`, { method: 'POST' })
+}
+
+export const getStoragePathsFromPaperless = () =>
+  fetchJson<any[]>('/classifier/storage-paths')
+
+export const getStoragePathProfiles = () =>
+  fetchJson<StoragePathProfile[]>('/classifier/storage-path-profiles')
+
+export const saveStoragePathProfiles = (profiles: StoragePathProfile[]) =>
+  fetchJson<{ status: string; saved_count: number }>('/classifier/storage-path-profiles', {
+    method: 'PUT',
+    body: JSON.stringify(profiles),
+  })
+
+export const getCustomFieldsFromPaperless = () =>
+  fetchJson<any[]>('/classifier/custom-fields')
+
+export const getCustomFieldMappings = () =>
+  fetchJson<CustomFieldMapping[]>('/classifier/custom-field-mappings')
+
+export const saveCustomFieldMappings = (mappings: CustomFieldMapping[]) =>
+  fetchJson<{ status: string; saved_count: number }>('/classifier/custom-field-mappings', {
+    method: 'PUT',
+    body: JSON.stringify(mappings),
+  })
+
+export const classifyDocument = (documentId: number) =>
+  fetchJson<ClassificationResult>(`/classifier/analyze?document_id=${documentId}`, {
+    method: 'POST',
+    timeoutMs: 600000,
+  })
+
+export interface BenchmarkSlotResult {
+  provider: string
+  model: string
+  result: ClassificationResult
+}
+
+export interface BenchmarkResponse {
+  document_id: number
+  document_title: string
+  results: BenchmarkSlotResult[]
+  error?: string
+}
+
+export interface BenchmarkSlot {
+  provider: string
+  model: string
+}
+
+export interface BenchmarkRequest {
+  document_id: number
+  slots: BenchmarkSlot[]
+}
+
+export const benchmarkDocument = (req: BenchmarkRequest) =>
+  fetchJson<BenchmarkResponse>('/classifier/benchmark', {
+    method: 'POST',
+    body: JSON.stringify(req),
+    timeoutMs: 600000,
+  })
+
+export const getClassifierDocumentThumbUrl = (documentId: number) =>
+  `${API_BASE}/classifier/document/${documentId}/thumb`
+
+export const getClassifierDocumentPreviewUrl = (documentId: number) =>
+  `${API_BASE}/classifier/document/${documentId}/preview`
+
+export const applyClassification = (documentId: number, classification: Record<string, any>) =>
+  fetchJson<{ applied: boolean; updated_fields?: string[] }>('/classifier/apply', {
+    method: 'POST',
+    body: JSON.stringify({ document_id: documentId, classification }),
+  })
+
+export const getClassificationHistory = (limit: number = 50) =>
+  fetchJson<ClassificationHistoryEntry[]>(`/classifier/history?limit=${limit}`)
+
+export interface ClassifierStats {
+  total_documents_paperless: number
+  unique_classified: number
+  unique_applied: number
+  remaining: number
+  total_runs: number
+  total_applied: number
+  total_errors: number
+  total_tokens_in: number
+  total_tokens_out: number
+  total_cost_usd: number
+  avg_duration_seconds: number
+  by_provider: Array<{
+    provider: string
+    model: string
+    count: number
+    cost: number
+    avg_duration: number
+  }>
+  recent: Array<{
+    document_id: number
+    document_title: string
+    provider: string
+    model: string
+    status: string
+    cost_usd: number
+    duration_seconds: number
+    created_at: string | null
+  }>
+}
+
+export const getClassifierStats = () =>
+  fetchJson<ClassifierStats>('/classifier/stats')
+
+export const getTagStats = () =>
+  fetchJson<TagStats>('/classifier/tag-stats')
+
+export const getNextUnclassified = (afterId: number = 0) =>
+  fetchJson<{ found: boolean; document_id: number | null; title: string }>(
+    `/classifier/next-unclassified?after_id=${afterId}`
+  )
+
+export const refreshClassifierCache = () =>
+  fetchJson<{ refreshed: boolean; tags: number; correspondents: number; document_types: number; storage_paths: number }>(
+    '/classifier/refresh-cache', { method: 'POST' }
+  )

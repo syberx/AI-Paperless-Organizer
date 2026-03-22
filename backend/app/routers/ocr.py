@@ -13,8 +13,10 @@ from typing import Optional, List
 
 import httpx
 
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.database import get_db
 from app.services.paperless_client import PaperlessClient, get_paperless_client
-from app.services.ocr_service import OcrService, batch_state, watchdog_state, single_ocr_running, load_review_queue, save_review_queue, load_ocr_ignore_list, save_ocr_ignore_list, load_ocr_error_list, save_ocr_error_list, load_ocr_error_counts, save_ocr_error_counts, DEFAULT_OLLAMA_URL, DEFAULT_OCR_MODEL
+from app.services.ocr_service import OcrService, batch_state, watchdog_state, single_ocr_running, ocr_page_progress, load_review_queue, save_review_queue, load_ocr_ignore_list, save_ocr_ignore_list, load_ocr_error_list, save_ocr_error_list, load_ocr_error_counts, save_ocr_error_counts, DEFAULT_OLLAMA_URL, DEFAULT_OCR_MODEL
 import app.services.ocr_service as ocr_service_module
 from app.services.llm_provider import LLMProviderService, get_llm_service
 
@@ -139,7 +141,7 @@ async def save_ocr_settings_endpoint(request: OcrSettingsRequest, client: Paperl
 
 class WatchdogSettingsRequest(BaseModel):
     enabled: bool
-    interval_minutes: int = 1
+    interval_minutes: int = 5
 
 @router.get("/watchdog/status")
 async def get_watchdog_status():
@@ -206,27 +208,7 @@ async def resume_batch_ocr():
     batch_state["paused"] = False
     return {"success": True, "message": "Batch-Job fortgesetzt", "paused": False}
 
-# On startup, check if we should start watchdog
-@router.on_event("startup")
-async def on_startup():
-    """Start watchdog if enabled in settings."""
-    if ocr_settings.get("watchdog_enabled"):
-        try:
-            # We need a client. get_paperless_client depends on nothing?
-            # It creates a client.
-            client = PaperlessClient() 
-            service = get_ocr_service()
-            
-            logger.info("Starting Watchdog on startup...")
-            watchdog_state["enabled"] = True
-            watchdog_state["interval_minutes"] = ocr_settings.get("watchdog_interval", 1)
-            
-            loop = asyncio.get_running_loop()
-            watchdog_state["task"] = loop.create_task(service.watchdog_loop(client))
-        except Exception as e:
-            logger.error(f"Failed to start watchdog on startup: {e}")
-
-# ... (Original imports and other endpoints)
+# ... (Watchdog auto-start is handled in main.py lifespan)
 
 # --- Tag Management ---
 
@@ -299,13 +281,14 @@ async def get_ocr_status(
 async def ocr_single_document(
     document_id: int,
     force: bool = False,
-    client: PaperlessClient = Depends(get_paperless_client)
+    client: PaperlessClient = Depends(get_paperless_client),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Run OCR on a single document and return old vs new content."""
+    """Run OCR on a single document with page-level persistence and resume support."""
     try:
         ocr_service_module.single_ocr_running = True
         service = get_ocr_service()
-        result = await service.ocr_document(client, document_id, force=force)
+        result = await service.ocr_document(client, document_id, force=force, db_session=db)
         return result
     except ValueError as e:
         error_msg = str(e)
@@ -318,6 +301,27 @@ async def ocr_single_document(
         raise HTTPException(status_code=500, detail=f"OCR Fehler: {str(e)}")
     finally:
         ocr_service_module.single_ocr_running = False
+        ocr_service_module.ocr_page_progress.pop(document_id, None)
+
+
+@router.get("/progress/{document_id}")
+async def get_ocr_progress(document_id: int):
+    """Get live page-level progress for an ongoing OCR job."""
+    progress = ocr_page_progress.get(document_id)
+    if not progress:
+        return {"active": False, "document_id": document_id}
+    elapsed = time.time() - progress.get("started_at", time.time())
+    return {
+        "active": True,
+        "document_id": document_id,
+        "status": progress.get("status", "unknown"),
+        "total_pages": progress.get("total_pages", 0),
+        "done": progress.get("done", 0),
+        "errors": progress.get("errors", 0),
+        "current_page": progress.get("current_page", 0),
+        "elapsed_seconds": round(elapsed, 1),
+        "pages": progress.get("pages", []),
+    }
 
 
 @router.post("/apply/{document_id}")
@@ -379,15 +383,34 @@ async def start_batch_ocr(
 
 @router.get("/batch/status")
 async def get_batch_status():
-    """Get current batch OCR job status."""
+    """Get current batch OCR job status, including page-level progress for current document."""
+    current_doc = batch_state["current_document"]
+    current_doc_id = current_doc.get("id") if isinstance(current_doc, dict) else None
+
+    # Include live page progress for the currently processing document
+    page_progress = None
+    if current_doc_id and current_doc_id in ocr_page_progress:
+        pp = ocr_page_progress[current_doc_id]
+        page_progress = {
+            "document_id": current_doc_id,
+            "total_pages": pp.get("total_pages", 0),
+            "done": pp.get("done", 0),
+            "errors": pp.get("errors", 0),
+            "current_page": pp.get("current_page", 0),
+            "status": pp.get("status", "unknown"),
+            "pages": pp.get("pages", []),
+        }
+
     return {
         "running": batch_state["running"],
         "total": batch_state["total"],
         "processed": batch_state["processed"],
-        "current_document": batch_state["current_document"],
+        "current_document": current_doc,
+        "current_page_progress": page_progress,
         "errors_count": len(batch_state["errors"]),
-        "log": batch_state["log"][-50:],  # Last 50 log entries
-        "mode": batch_state["mode"]
+        "log": batch_state["log"][-50:],
+        "mode": batch_state["mode"],
+        "paused": batch_state.get("paused", False),
     }
 
 
@@ -459,6 +482,85 @@ async def dismiss_review_item(document_id: int):
         raise HTTPException(status_code=404, detail="Dokument nicht in Review Queue")
     save_review_queue(new_queue)
     return {"dismissed": True, "document_id": document_id}
+
+
+@router.post("/review/reset-all")
+async def reset_all_review_items(
+    client: PaperlessClient = Depends(get_paperless_client)
+):
+    """Reset all review queue items: remove ocrpruefen tag so batch OCR re-processes them."""
+    queue = load_review_queue()
+    if not queue:
+        return {"reset": 0, "errors": []}
+
+    # Get ocrpruefen tag ID
+    try:
+        from app.services.ocr_service import TAG_OCR_REVIEW
+        ocrpruefen_tag = await client.get_or_create_tag(TAG_OCR_REVIEW)
+        ocrpruefen_id = ocrpruefen_tag.get("id")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Tag-Lookup fehlgeschlagen: {e}")
+
+    errors = []
+    reset_count = 0
+    for item in queue:
+        doc_id = item["document_id"]
+        try:
+            if ocrpruefen_id:
+                await client.bulk_update_documents(
+                    document_ids=[doc_id],
+                    remove_tags=[ocrpruefen_id]
+                )
+            reset_count += 1
+        except Exception as e:
+            errors.append(f"Dok {doc_id}: {e}")
+
+    # Clear the review queue JSON
+    save_review_queue([])
+    return {"reset": reset_count, "errors": errors}
+
+
+@router.post("/review/keep-all-originals")
+async def keep_all_originals(
+    client: PaperlessClient = Depends(get_paperless_client)
+):
+    """Keep all original contents: set ocrfinish on all review items without changing content."""
+    queue = load_review_queue()
+    if not queue:
+        return {"kept": 0, "errors": []}
+
+    try:
+        from app.services.ocr_service import TAG_OCR_FINISH, TAG_OCR_REVIEW
+        ocrfinish_tag = await client.get_or_create_tag(TAG_OCR_FINISH)
+        ocrfinish_id = ocrfinish_tag.get("id")
+        ocrpruefen_tag = await client.get_or_create_tag(TAG_OCR_REVIEW)
+        ocrpruefen_id = ocrpruefen_tag.get("id")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Tag-Lookup fehlgeschlagen: {e}")
+
+    errors = []
+    kept_count = 0
+    doc_ids = [item["document_id"] for item in queue]
+
+    # Process in batches of 25
+    for i in range(0, len(doc_ids), 25):
+        batch = doc_ids[i:i+25]
+        try:
+            add_t = [ocrfinish_id] if ocrfinish_id else []
+            rem_t = [ocrpruefen_id] if ocrpruefen_id else []
+            if add_t or rem_t:
+                await client.bulk_update_documents(
+                    document_ids=batch,
+                    add_tags=add_t if add_t else None,
+                    remove_tags=rem_t if rem_t else None
+                )
+            kept_count += len(batch)
+        except Exception as e:
+            errors.append(f"Batch {i//25+1}: {e}")
+
+    # Clear the review queue
+    save_review_queue([])
+    return {"kept": kept_count, "errors": errors}
 
 
 @router.post("/review/ignore/{document_id}")

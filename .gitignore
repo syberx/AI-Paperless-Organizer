@@ -47,6 +47,7 @@ frontend/build/
 # =========================
 .vscode/
 .idea/
+.cursor/
 *.swp
 *.swo
 *~
@@ -59,7 +60,7 @@ Thumbs.db
 # Keine Docker-Dateien ignorieren, sie gehören ins Repo
 
 # =========================
-# Database & Data
+# Database & Data (nutzer-spezifische Laufzeitdaten)
 # =========================
 backend/data/*.db
 backend/data/*.sqlite
@@ -67,6 +68,10 @@ backend/data/*.sqlite3
 backend/data/ocr_stats.json
 backend/data/ocr_settings.json
 backend/data/ocr_review_queue.json
+backend/data/ocr_error_counts.json
+backend/data/ocr_error_list.json
+backend/data/ocr_ignore_list.json
+backend/data/scan_result.txt
 backend/data/failed_ocr_debug.png
 *.db
 *.sqlite
@@ -76,7 +81,7 @@ backend/data/failed_ocr_debug.png
 !backend/data/.gitkeep
 
 # Debug-Skripte (können lokale DB/Token referenzieren)
-backend/app/debug_5529.py
+backend/app/debug_*.py
 backend/app/simple_debug.py
 backend/app/start_retry.py
 
@@ -108,9 +113,22 @@ coverage.xml
 *.cover
 
 # =========================
+# Lokale Recherche & Notizen (nicht für die Öffentlichkeit)
+# =========================
+MUSTER/
+docs/research/
+docs/private/
+
+# =========================
+# Persönliche Einmal-Skripte (enthalten lokale URLs/Tokens)
+# =========================
+scripts/
+
+# =========================
 # Misc
 # =========================
 *.bak
 *.tmp
 *.temp
 .cache/
+debug-*.log

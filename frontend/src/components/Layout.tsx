@@ -1,4 +1,4 @@
-import { ReactNode, useState, useEffect } from 'react'
+import { ReactNode, useState, useEffect, useRef } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard,
@@ -14,8 +14,16 @@ import {
   Bug,
   Lock,
   ScanLine,
-  Trash2,
-  AlertCircle
+  AlertCircle,
+  Sparkles,
+  Eye,
+  Loader2,
+  Scan,
+  Activity,
+  ChevronDown,
+  ChevronRight,
+  FolderOpen,
+  Ban
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
@@ -24,16 +32,41 @@ interface LayoutProps {
   children: ReactNode
 }
 
-const baseNavigation = [
-  { name: 'Dashboard', href: '/', icon: LayoutDashboard, step: null, alwaysShow: true },
-  { name: '1. Korrespondenten', href: '/correspondents', icon: Users, step: 1, alwaysShow: true },
-  { name: '2. Dokumententypen', href: '/document-types', icon: FileText, step: 2, alwaysShow: true },
-  { name: '3. Tags', href: '/tags', icon: Tags, step: 3, alwaysShow: true },
-  { name: 'Prompts', href: '/prompts', icon: MessageSquare, step: null, alwaysShow: true },
-  { name: 'Einstellungen', href: '/settings', icon: Settings, step: null, alwaysShow: true },
-  { name: 'OCR', href: '/ocr', icon: ScanLine, step: null, alwaysShow: true },
-  { name: 'Aufräumen', href: '/cleanup', icon: Trash2, step: null, alwaysShow: true },
-  { name: 'Debug', href: '/debug', icon: Bug, step: null, alwaysShow: false, requiresDebug: true },
+interface NavChild {
+  name: string
+  href: string
+  icon: React.ComponentType<{ className?: string }>
+}
+
+interface NavItem {
+  name: string
+  href?: string
+  icon: React.ComponentType<{ className?: string }>
+  alwaysShow: boolean
+  requiresDebug?: boolean
+  isGroup?: boolean
+  children?: NavChild[]
+}
+
+const baseNavigation: NavItem[] = [
+  { name: 'Dashboard', href: '/', icon: LayoutDashboard, alwaysShow: true },
+  { name: 'KI-Klassifizierer', href: '/classifier', icon: Sparkles, alwaysShow: true },
+  {
+    name: 'Aufräumen',
+    icon: FolderOpen,
+    alwaysShow: true,
+    isGroup: true,
+    children: [
+      { name: '1. Korrespondenten', href: '/correspondents', icon: Users },
+      { name: '2. Dokumententypen', href: '/document-types', icon: FileText },
+      { name: '3. Tags', href: '/tags', icon: Tags },
+      { name: 'Unerwünschte Dokumente', href: '/cleanup', icon: Ban },
+    ],
+  },
+  { name: 'Prompts', href: '/prompts', icon: MessageSquare, alwaysShow: true },
+  { name: 'Einstellungen', href: '/settings', icon: Settings, alwaysShow: true },
+  { name: 'OCR', href: '/ocr', icon: ScanLine, alwaysShow: true },
+  { name: 'Debug', href: '/debug', icon: Bug, alwaysShow: false, requiresDebug: true },
 ]
 
 export default function Layout({ children }: LayoutProps) {
@@ -50,6 +83,57 @@ export default function Layout({ children }: LayoutProps) {
   const [ollamaModelAvailable, setOllamaModelAvailable] = useState<boolean | null>(null)
   const [ollamaModel, setOllamaModel] = useState<string | null>(null)
   const [reviewCount, setReviewCount] = useState<number>(0)
+  const [errorCount, setErrorCount] = useState<number>(0)
+
+  // Collapsible group state – auto-open when a child route is active
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {}
+    baseNavigation.filter(n => n.isGroup).forEach(n => {
+      const childActive = n.children?.some(c => c.href === window.location.pathname) ?? false
+      initial[n.name] = childActive
+    })
+    return initial
+  })
+
+  // Auto-expand group when navigating to a child route
+  useEffect(() => {
+    baseNavigation.filter(n => n.isGroup).forEach(n => {
+      if (n.children?.some(c => c.href === location.pathname)) {
+        setExpandedGroups(prev => ({ ...prev, [n.name]: true }))
+      }
+    })
+  }, [location.pathname])
+  const [batchOcrStatus, setBatchOcrStatus] = useState<api.BatchOcrStatus | null>(null)
+  const [watchdogStatus, setWatchdogStatus] = useState<api.WatchdogStatus | null>(null)
+  const [autoClassifyStatus, setAutoClassifyStatus] = useState<any>(null)
+  const jobPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Poll active jobs (faster when something is running)
+  const pollJobs = async () => {
+    try {
+      const [batch, watchdog, autoClassify] = await Promise.all([
+        api.getBatchOcrStatus().catch(() => null),
+        api.getWatchdogStatus().catch(() => null),
+        api.fetchJson<any>('/classifier/auto-classify/status').catch(() => null),
+      ])
+      setBatchOcrStatus(batch)
+      setWatchdogStatus(watchdog)
+      setAutoClassifyStatus(autoClassify)
+    } catch {
+      // silent
+    }
+  }
+
+  useEffect(() => {
+    pollJobs()
+    const schedule = () => {
+      if (jobPollRef.current) clearInterval(jobPollRef.current)
+      const isActive = batchOcrStatus?.running || watchdogStatus?.running || autoClassifyStatus?.running
+      jobPollRef.current = setInterval(pollJobs, isActive ? 8000 : 30000)
+    }
+    schedule()
+    return () => { if (jobPollRef.current) clearInterval(jobPollRef.current) }
+  }, [batchOcrStatus?.running, watchdogStatus?.running, autoClassifyStatus?.running])
 
   useEffect(() => {
     // First check if password is required
@@ -95,8 +179,12 @@ export default function Layout({ children }: LayoutProps) {
         setOllamaModelAvailable(ocrStatus.model_available)
         setOllamaModel(ocrStatus.requested_model || ocrStatus.model || null)
 
-        const queue = await api.getReviewQueue()
+        const [queue, errors] = await Promise.all([
+          api.getReviewQueue(),
+          api.getOcrErrorList().catch(() => ({ count: 0 })),
+        ])
         setReviewCount(queue.count)
+        setErrorCount(errors.count ?? 0)
       } catch {
         setOllamaConnected(false)
         setOllamaModelAvailable(false)
@@ -104,7 +192,7 @@ export default function Layout({ children }: LayoutProps) {
     }
 
     checkStatuses()
-    const interval = setInterval(checkStatuses, 30000)
+    const interval = setInterval(checkStatuses, 60000)
     return () => clearInterval(interval)
   }, [])
 
@@ -130,6 +218,9 @@ export default function Layout({ children }: LayoutProps) {
   const navigation = baseNavigation.filter(item =>
     item.alwaysShow || (item.requiresDebug && showDebugMenu)
   )
+
+  const isChildActive = (item: NavItem) =>
+    item.children?.some(c => c.href === location.pathname) ?? false
 
   // Password login screen - BLOCKS EVERYTHING
   if (passwordRequired && !isAuthenticated) {
@@ -257,25 +348,191 @@ export default function Layout({ children }: LayoutProps) {
             </span>
           </div>
           {reviewCount > 0 && (
-            <div className="flex items-center gap-2 text-sm mt-1 animate-pulse">
-              <AlertCircle className="w-4 h-4 text-amber-400" />
+            <Link
+              to="/ocr?tab=review"
+              onClick={() => setSidebarOpen(false)}
+              className="flex items-center gap-2 text-sm mt-1 hover:opacity-80 transition-opacity"
+            >
+              <AlertCircle className="w-4 h-4 text-amber-400 animate-pulse flex-shrink-0" />
               <span className="text-amber-400 font-medium">
                 {reviewCount} OCR-Prüfung{reviewCount !== 1 ? 'en' : ''} offen
               </span>
-            </div>
+            </Link>
+          )}
+          {errorCount > 0 && (
+            <Link
+              to="/ocr?tab=errors"
+              onClick={() => setSidebarOpen(false)}
+              className="flex items-center gap-2 text-sm mt-1 hover:opacity-80 transition-opacity"
+            >
+              <XCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
+              <span className="text-red-400 font-medium">
+                {errorCount} OCR-Fehler
+              </span>
+            </Link>
           )}
         </div>
+
+        {/* Active background jobs */}
+        {(batchOcrStatus?.running || watchdogStatus?.enabled || autoClassifyStatus?.enabled) && (
+          <div className="px-4 py-3 border-b border-surface-700/50 space-y-2">
+            <div className="flex items-center gap-1.5 mb-1">
+              <Activity className="w-3.5 h-3.5 text-surface-400" />
+              <span className="text-xs font-semibold text-surface-400 uppercase tracking-wider">Aktive Jobs</span>
+            </div>
+
+            {/* Batch OCR running */}
+            {batchOcrStatus?.running && (
+              <Link to="/ocr" className="block group">
+                <div className="flex items-center gap-2 text-sm">
+                  <Loader2 className="w-4 h-4 text-primary-400 animate-spin flex-shrink-0" />
+                  <span className="text-primary-300 font-medium truncate">
+                    {batchOcrStatus.paused ? 'Batch OCR pausiert' : 'Batch OCR läuft'}
+                  </span>
+                </div>
+                {batchOcrStatus.total > 0 && (
+                  <div className="mt-1.5 ml-6">
+                    <div className="flex justify-between text-xs text-surface-500 mb-1">
+                      <span>{batchOcrStatus.processed}/{batchOcrStatus.total} Dokumente</span>
+                      <span>{Math.round((batchOcrStatus.processed / batchOcrStatus.total) * 100)}%</span>
+                    </div>
+                    <div className="h-1 bg-surface-700 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-primary-500 rounded-full transition-all duration-500"
+                        style={{ width: `${Math.round((batchOcrStatus.processed / batchOcrStatus.total) * 100)}%` }}
+                      />
+                    </div>
+                    {batchOcrStatus.current_document && typeof batchOcrStatus.current_document === 'object' && (
+                      <p className="text-xs text-surface-500 mt-1 truncate" title={(batchOcrStatus.current_document as {title: string}).title}>
+                        {(batchOcrStatus.current_document as {title: string}).title}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </Link>
+            )}
+
+            {/* Auto-Classify */}
+            {autoClassifyStatus?.enabled && (
+              <Link to="/classifier" className="block group">
+                <div className="flex items-center gap-2 text-sm">
+                  {autoClassifyStatus.running ? (
+                    <Loader2 className="w-4 h-4 text-amber-400 animate-spin flex-shrink-0" />
+                  ) : (
+                    <Eye className="w-4 h-4 text-surface-400 flex-shrink-0" />
+                  )}
+                  <span className={clsx(
+                    'font-medium truncate',
+                    autoClassifyStatus.running ? 'text-amber-300' : 'text-surface-400'
+                  )}>
+                    {autoClassifyStatus.running
+                      ? `Klassifiziert #${autoClassifyStatus.current_doc || '...'}`
+                      : 'Klassifizierer aktiv'}
+                  </span>
+                </div>
+                {(autoClassifyStatus.processed > 0 || autoClassifyStatus.reviewed > 0) && (
+                  <p className="text-xs text-surface-500 ml-6 mt-0.5">
+                    {autoClassifyStatus.processed} angewendet, {autoClassifyStatus.reviewed} zur Prüfung
+                  </p>
+                )}
+              </Link>
+            )}
+
+            {/* Watchdog status */}
+            {watchdogStatus?.enabled && !batchOcrStatus?.running && (
+              <Link to="/ocr" className="block group">
+                <div className="flex items-center gap-2 text-sm">
+                  {watchdogStatus.running ? (
+                    <Scan className="w-4 h-4 text-cyan-400 animate-pulse flex-shrink-0" />
+                  ) : (
+                    <Eye className="w-4 h-4 text-surface-400 flex-shrink-0" />
+                  )}
+                  <span className={clsx(
+                    'font-medium truncate',
+                    watchdogStatus.running ? 'text-cyan-300' : 'text-surface-400'
+                  )}>
+                    {watchdogStatus.running ? 'Watchdog prüft...' : 'Watchdog aktiv'}
+                  </span>
+                </div>
+                {watchdogStatus.last_run && !watchdogStatus.running && (
+                  <p className="text-xs text-surface-500 ml-6 mt-0.5">
+                    Zuletzt: {new Date(watchdogStatus.last_run).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                )}
+              </Link>
+            )}
+
+          </div>
+        )}
 
         {/* Navigation */}
         <nav className="p-4 space-y-1">
           {navigation.map((item) => {
-            const isActive = location.pathname === item.href
             const Icon = item.icon
 
+            // --- Collapsible group ---
+            if (item.isGroup && item.children) {
+              const expanded = expandedGroups[item.name] ?? false
+              const anyChildActive = isChildActive(item)
+
+              return (
+                <div key={item.name}>
+                  {/* Group header button */}
+                  <button
+                    onClick={() => setExpandedGroups(prev => ({ ...prev, [item.name]: !prev[item.name] }))}
+                    className={clsx(
+                      'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200',
+                      anyChildActive
+                        ? 'text-primary-400'
+                        : 'text-surface-400 hover:text-surface-100 hover:bg-surface-800/50'
+                    )}
+                  >
+                    <Icon className={clsx('w-5 h-5 flex-shrink-0', anyChildActive && 'text-primary-400')} />
+                    <span className="font-medium flex-1 text-left">{item.name}</span>
+                    {expanded
+                      ? <ChevronDown className="w-4 h-4 text-surface-500" />
+                      : <ChevronRight className="w-4 h-4 text-surface-500" />
+                    }
+                  </button>
+
+                  {/* Sub-items */}
+                  <div className={clsx(
+                    'overflow-hidden transition-all duration-300 ease-in-out',
+                    expanded ? 'max-h-80 opacity-100' : 'max-h-0 opacity-0'
+                  )}>
+                    <div className="ml-3 pl-3 border-l border-surface-700/60 mt-0.5 mb-1 space-y-0.5">
+                      {item.children.map(child => {
+                        const isActive = location.pathname === child.href
+                        const ChildIcon = child.icon
+                        return (
+                          <Link
+                            key={child.href}
+                            to={child.href}
+                            onClick={() => setSidebarOpen(false)}
+                            className={clsx(
+                              'flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200',
+                              isActive
+                                ? 'bg-primary-600/20 text-primary-400 border border-primary-500/30'
+                                : 'text-surface-400 hover:text-surface-100 hover:bg-surface-800/50'
+                            )}
+                          >
+                            <ChildIcon className={clsx('w-4 h-4 flex-shrink-0', isActive && 'text-primary-400')} />
+                            <span className="font-medium text-sm">{child.name}</span>
+                          </Link>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )
+            }
+
+            // --- Normal nav item ---
+            const isActive = location.pathname === item.href
             return (
               <Link
                 key={item.name}
-                to={item.href}
+                to={item.href!}
                 onClick={() => setSidebarOpen(false)}
                 className={clsx(
                   'flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200',
@@ -321,7 +578,9 @@ export default function Layout({ children }: LayoutProps) {
             <Menu className="w-5 h-5" />
           </button>
           <h1 className="font-display font-semibold text-lg text-surface-100">
-            {navigation.find(n => n.href === location.pathname)?.name || 'Dashboard'}
+            {navigation.find(n => n.href === location.pathname)?.name
+              || navigation.flatMap(n => n.children ?? []).find(c => c.href === location.pathname)?.name
+              || 'Dashboard'}
           </h1>
         </header>
 

@@ -49,12 +49,22 @@ class PaperlessClient:
                 params=params,
                 json=json
             )
-            response.raise_for_status()
-            
+            if not response.is_success:
+                # Log the full Paperless error response for debugging
+                try:
+                    err_body = response.json()
+                except Exception:
+                    err_body = response.text[:500]
+                import logging as _log
+                _log.getLogger(__name__).error(
+                    f"Paperless API error {response.status_code} for {method} {endpoint}: {err_body}"
+                )
+                response.raise_for_status()
+
             # DELETE requests often return 204 No Content
             if response.status_code == 204 or not response.content:
                 return None
-            
+
             return response.json()
     
     async def test_connection(self) -> bool:
@@ -429,6 +439,78 @@ class PaperlessClient:
             response = await client.get(url, headers={"Authorization": f"Token {self.api_token}"})
             response.raise_for_status()
             return response.content
+
+    # Custom Fields
+    async def get_custom_fields(self, use_cache: bool = True) -> List[Dict]:
+        """Get all custom field definitions from Paperless."""
+        cache = get_cache()
+        cache_key = f"paperless:custom_fields:{self.base_url}"
+
+        if use_cache:
+            cached = await cache.get(cache_key)
+            if cached:
+                return cached
+
+        all_fields = []
+        page = 1
+        while True:
+            result = await self._request("GET", "/custom_fields/", params={"page": page, "page_size": 100})
+            if not result:
+                break
+            all_fields.extend(result.get("results", []))
+            if not result.get("next"):
+                break
+            page += 1
+
+        await cache.set(cache_key, all_fields, ttl_seconds=CACHE_TTL)
+        return all_fields
+
+    # Storage Paths
+    async def get_storage_paths(self, use_cache: bool = True) -> List[Dict]:
+        """Get all storage paths from Paperless."""
+        cache = get_cache()
+        cache_key = f"paperless:storage_paths:{self.base_url}"
+
+        if use_cache:
+            cached = await cache.get(cache_key)
+            if cached:
+                return cached
+
+        all_paths = []
+        page = 1
+        while True:
+            result = await self._request("GET", "/storage_paths/", params={"page": page, "page_size": 100})
+            if not result:
+                break
+            all_paths.extend(result.get("results", []))
+            if not result.get("next"):
+                break
+            page += 1
+
+        await cache.set(cache_key, all_paths, ttl_seconds=CACHE_TTL)
+        return all_paths
+
+    # Correspondent creation
+    async def create_correspondent(self, name: str) -> Dict:
+        """Create a new correspondent in Paperless."""
+        result = await self._request("POST", "/correspondents/", json={"name": name})
+        cache = get_cache()
+        await cache.clear("paperless:correspondents:")
+        return result
+
+    async def get_or_create_correspondent(self, name: str) -> Dict:
+        """Get correspondent by name or create if not found."""
+        correspondents = await self.get_correspondents(use_cache=True)
+        for c in correspondents:
+            if c.get("name", "").lower() == name.lower():
+                return c
+
+        correspondents = await self.get_correspondents(use_cache=False)
+        for c in correspondents:
+            if c.get("name", "").lower() == name.lower():
+                return c
+
+        return await self.create_correspondent(name)
 
     async def create_tag(self, name: str) -> Dict:
         """Create a new tag in Paperless."""

@@ -2,7 +2,7 @@
 
 # 🤖 AI Paperless Organizer
 
-**KI-gestützte Metadaten-Bereinigung & OCR für Paperless-ngx**
+**KI-gestützte Metadaten-Bereinigung, OCR & automatische Dokumenten-Klassifizierung für Paperless-ngx**
 
 [![GitHub](https://img.shields.io/badge/GitHub-syberx%2FAI--Paperless--Organizer-blue?logo=github)](https://github.com/syberx/AI-Paperless-Organizer)
 [![Docker Hub](https://img.shields.io/badge/Docker%20Hub-webdienste%2Fai--paperless--organizer-blue?logo=docker)](https://hub.docker.com/r/webdienste/ai-paperless-organizer)
@@ -22,12 +22,13 @@ Kennst du das? Deine **Paperless-ngx** Installation ist über die Zeit gewachsen
 - **Hunderte doppelte Korrespondenten**: "Telekom", "Deutsche Telekom", "Telekom GmbH", "DTAG"...
 - **Unzählige unsinnige Tags**: Tippfehler, Test-Tags, automatisch generierte Einträge von Paperless-AI oder Paperless-GPT
 - **Chaos bei Dokumententypen**: "Rechnung", "Invoice", "Rechnungen", "rechnung"...
+- **Tausende unklassifizierte Dokumente**: Fehlende Titel, Tags, Korrespondenten, falsche Speicherpfade
 
 Tools wie **Paperless-AI**, **Paperless-GPT** oder einfach jahrelange Nutzung hinterlassen ein Metadaten-Chaos, das manuell kaum zu bereinigen ist.
 
 ## ✨ Die Lösung
 
-**AI Paperless Organizer** analysiert deine gesamten Metadaten mit KI und schlägt intelligente Zusammenführungen vor:
+**AI Paperless Organizer** kombiniert KI-gestützte Metadaten-Bereinigung mit vollautomatischer Dokumenten-Klassifizierung:
 
 <div align="center">
 
@@ -38,10 +39,130 @@ Tools wie **Paperless-AI**, **Paperless-GPT** oder einfach jahrelange Nutzung hi
 
 ---
 
-## 🎯 Features
+## 🎯 Features im Überblick
 
-### 🧠 KI-gestützte Ähnlichkeitserkennung
-Die KI findet automatisch zusammengehörige Einträge - auch bei unterschiedlichen Schreibweisen, Abkürzungen oder Tippfehlern.
+| Feature | Beschreibung |
+|---------|-------------|
+| 🧠 **KI-Metadaten-Bereinigung** | Findet & führt doppelte Korrespondenten, Tags, Dokumententypen zusammen |
+| ✨ **Dokument-Klassifizierer** | Analysiert Dokumentinhalt und setzt Titel, Tags, Korrespondent, Typ, Speicherpfad |
+| 📷 **OCR mit Ollama Vision** | Bessere Texterkennung für Scans mit lokalen KI-Modellen |
+| 🏆 **OCR Modell-Benchmark** | Vergleicht bis zu 5 Modelle auf demselben Dokument mit KI-Bewertung |
+| 🧹 **Tag Cleanup Wizard** | 5-stufiger Assistent zur systematischen Tag-Bereinigung |
+| 🗑️ **Dokumente Aufräumen** | Findet und entfernt Junk-Dokumente (AGB, Impressum, etc.) |
+| 💾 **Analyse-Cache** | KI-Analysen speichern und kostenlos wieder laden |
+| 📊 **Statistiken** | Fortschritt, gesparte Zeit, letzte Aktivitäten |
+
+---
+
+## ✨ NEU: KI-Dokumenten-Klassifizierer
+
+Der Klassifizierer liest den **Inhalt** deiner Dokumente und befüllt automatisch alle Metadaten-Felder:
+
+<div align="center">
+
+![Dokumenten-Klassifizierer](docs/screenshots/classifier-main.png)
+*KI analysiert Dokumentinhalt und schlägt alle Metadaten vor*
+
+</div>
+
+### Was wird klassifiziert?
+
+| Feld | Beschreibung |
+|------|-------------|
+| **Titel** | Präziser, inhaltsbasierter Titel (nicht "Dokument von Firma X") |
+| **Tags** | Passende Tags aus deiner bestehenden Tag-Liste |
+| **Korrespondent** | Absender/Aussteller – sucht in bestehenden Einträgen |
+| **Dokumententyp** | Wählt aus deinen vorhandenen Typen |
+| **Speicherpfad** | Intelligente Zuordnung zu Person/Ordner anhand von Profilen |
+| **Erstelldatum** | Extrahiert das Dokumentdatum (Rechnungsdatum, Briefdatum, etc.) |
+| **Custom Fields** | Beliebige Felder: IBAN, Rechnungsnummer, Betrag, Kundennummer, ... |
+
+### Wie es funktioniert
+
+**Mit OpenAI/Cloud-Modellen (Tool-Calling):**
+Die KI ruft aktiv deine Paperless-Daten ab – sie sucht nach passenden Tags, Korrespondenten und Dokumententypen in Echtzeit, bevor sie entscheidet. Ergebnis: bessere Übereinstimmung mit bestehenden Einträgen.
+
+**Mit Ollama (lokale Modelle):**
+Mehrstufiger Prozess: Analyse → Tags → Dokumenttyp → Speicherpfad → Custom Fields → Verifikation. Alles lokal, keine Daten verlassen deinen Server.
+
+### Ergebnisse bearbeiten & anwenden
+
+Alle KI-Vorschläge sind vor dem Speichern **vollständig editierbar**:
+- Titel ändern
+- Tags einzeln hinzufügen oder entfernen (mit Live-Suche)
+- Korrespondent überschreiben
+- Speicherpfad manuell wählen
+- Custom Fields korrigieren
+
+Mit **"Anwenden & Weiter"** arbeitest du Dokumente im Fließband-Modus durch.
+
+### Konfigurierbare Einstellungen
+
+<div align="center">
+
+![Klassifizierer Einstellungen](docs/screenshots/classifier-settings.png)
+*Feingranulare Konfiguration aller Klassifizierungs-Parameter*
+
+</div>
+
+- **Felder ein-/ausschalten**: Aktiviere nur was du brauchst (z.B. nur Titel + Datum)
+- **Tag-Verhalten**: Bestehende Tags erhalten oder ersetzen
+- **Korrespondenten-Kurzname**: Automatisch "Deutsche Telekom AG" → "Telekom" kürzen
+- **Rechtsform-Entfernung**: GmbH, AG, KG, UG, OHG, Ltd. etc. automatisch abschneiden
+- **Geschützte Tags**: Tags die nie entfernt werden (z.B. `inbox`, `runocr`)
+- **Ausschlusslisten**: Dokumente mit bestimmten Tags/Korrespondenten überspringen
+- **Prompts anpassen**: Individuelle Anweisungen pro Feld (Titel, Tags, Korrespondent, Typ, Datum)
+
+### Speicherpfad-Profile
+
+Konfiguriere Personen-Profile für intelligente Pfad-Zuordnung:
+- Beschreibe **wer** welche Dokumente bekommt (privat, geschäftlich, Kinder, Partner, etc.)
+- Die KI liest den Kontext und entscheidet automatisch welcher Pfad passt
+- Kurze Begründung wird immer mitgeliefert
+
+### Custom Field Extraktion
+
+Definiere beliebige Felder die aus Dokumenten extrahiert werden sollen:
+- **Rechnungsnummer** – exakt wie im Dokument
+- **Gesamtbetrag** – als Dezimalzahl (z.B. 1499.99)
+- **IBAN** – vollständig ohne Leerzeichen
+- **Kundennummer**, **Vertragsnummer**, **Versicherungsnummer**, ...
+
+### Klassifizierungs-Verlauf & Statistiken
+
+<div align="center">
+
+![Klassifizierer Verlauf](docs/screenshots/classifier-history.png)
+*Verlauf mit allen vorgenommenen Änderungen und Statistiken*
+
+</div>
+
+Behalte den Überblick über alle klassifizierten Dokumente:
+- Vollständiger Verlauf mit vorher/nachher Vergleich
+- Statistiken: Dokumente/Tag, Feldabdeckung, häufigste Korrespondenten
+- Tag-Analyse: Welche Tags werden am häufigsten vergeben?
+
+### Provider-Benchmark
+
+<div align="center">
+
+![Klassifizierer Benchmark](docs/screenshots/classifier-benchmark.png)
+*Verschiedene LLM-Provider direkt vergleichen*
+
+</div>
+
+Teste verschiedene Modelle auf demselben Dokument:
+- Bis zu 4 Provider/Modelle gleichzeitig (z.B. GPT-4o-mini vs. GPT-4o vs. Ollama)
+- Direkter Vergleich der Klassifizierungsergebnisse
+- Kosten- und Qualitäts-Abwägung auf einen Blick
+
+> ⚠️ **Datenschutz-Hinweis:** Der Klassifizierer sendet den **OCR-Text** deiner Dokumente an das konfigurierte LLM zur Analyse. Bei Cloud-Modellen (OpenAI, etc.) verlassen die Dokumentinhalte deinen Server. Für maximalen Datenschutz: **Ollama** mit lokalen Modellen verwenden!
+
+---
+
+## 🧠 KI-gestützte Metadaten-Bereinigung
+
+Die klassische Funktion: Finde und führe doppelte Metadaten zusammen.
 
 <div align="center">
 
@@ -50,8 +171,13 @@ Die KI findet automatisch zusammengehörige Einträge - auch bei unterschiedlich
 
 </div>
 
-### 💾 Analyse-Ergebnisse zwischenspeichern
-KI-Analysen werden gespeichert und können **kostenlos** wieder geladen werden. So kannst du die Vorschläge in Ruhe durchgehen, ohne jedes Mal neue KI-Kosten zu verursachen.
+### Wie es funktioniert
+
+Die KI analysiert nur die **Namen** deiner Metadaten (z.B. "Telekom", "Rechnung", "Steuer 2024") – niemals den Inhalt deiner Dokumente. Ergebnis: Vorschläge zum Zusammenführen mit Konfidenz-Werten.
+
+### Analyse-Ergebnisse zwischenspeichern
+
+KI-Analysen werden gespeichert und können **kostenlos** wieder geladen werden – du kannst die Vorschläge in Ruhe durchgehen, ohne jedes Mal neue KI-Kosten zu verursachen.
 
 <div align="center">
 
@@ -60,14 +186,21 @@ KI-Analysen werden gespeichert und können **kostenlos** wieder geladen werden. 
 
 </div>
 
-### 🧹 Tag Cleanup Wizard
+### 👁️ Dokument-Vorschau
+
+Unsicher ob zwei Einträge wirklich zusammengehören? Schau dir die zugehörigen Dokumente direkt an, bevor du zusammenführst.
+
+---
+
+## 🧹 Tag Cleanup Wizard
+
 5-stufiger Assistent zur systematischen Tag-Bereinigung:
 
-1. **Leere Tags löschen** - Tags ohne Dokumente entfernen
-2. **Unsinnige Tags** - KI identifiziert Tippfehler, Test-Tags, Fragmente
-3. **Korrespondenten-Tags** - Tags die eigentlich Firmen/Personen sind
-4. **Dokumententyp-Tags** - Tags die eigentlich Dokumententypen sind
-5. **Ähnliche zusammenlegen** - Duplikate und Varianten zusammenführen
+1. **Leere Tags löschen** – Tags ohne Dokumente entfernen
+2. **Unsinnige Tags** – KI identifiziert Tippfehler, Test-Tags, Fragmente
+3. **Korrespondenten-Tags** – Tags die eigentlich Firmen/Personen sind
+4. **Dokumententyp-Tags** – Tags die eigentlich Dokumententypen sind
+5. **Ähnliche zusammenlegen** – Duplikate und Varianten zusammenführen
 
 <div align="center">
 
@@ -76,16 +209,19 @@ KI-Analysen werden gespeichert und können **kostenlos** wieder geladen werden. 
 
 </div>
 
-### 📝 Prompts anpassen
-Nicht zufrieden mit den KI-Vorschlägen? Passe die Prompts an deine Bedürfnisse an! Die KI verwendet deine individuellen Anweisungen für bessere Ergebnisse.
+---
 
-### 👁️ Dokument-Vorschau
-Unsicher ob zwei Einträge wirklich zusammengehören? Schau dir die zugehörigen Dokumente direkt an, bevor du zusammenführst.
+## 📝 Prompts anpassen
 
-### 📊 Statistiken & Fortschritt
-Behalte den Überblick: Wie viele Einträge wurden bereinigt? Wie viel Zeit gespart? Letzte Aktivitäten auf einen Blick.
+Nicht zufrieden mit den KI-Vorschlägen? Passe die Prompts für jeden Bereich an:
+- Metadaten-Bereinigung (Korrespondenten, Tags, Dokumententypen)
+- Klassifizierer (Titel, Tags, Korrespondent, Typ, Datum – je ein Prompt)
+- Systemweiter Kontext der KI
 
-### 🔍 OCR mit Ollama Vision
+---
+
+## 🔍 OCR mit Ollama Vision
+
 Dokumente mit besserer OCR-Erkennung neu verarbeiten – powered by **Ollama Vision Models**:
 
 - **Einzel-OCR**: Dokument-ID eingeben, alten und neuen Text vergleichen, übernehmen
@@ -105,7 +241,9 @@ Dokumente mit besserer OCR-Erkennung neu verarbeiten – powered by **Ollama Vis
 
 > 💡 **Vorteil:** Deine Dokumente verlassen nie den Server – Ollama läuft lokal!
 
-### 🏆 OCR Modell-Vergleich & KI-Benchmark
+---
+
+## 🏆 OCR Modell-Vergleich & KI-Benchmark
 
 Vergleiche verschiedene Ollama-Vision-Modelle direkt auf demselben Dokument – mit detaillierter KI-Qualitätsbewertung:
 
@@ -121,7 +259,7 @@ Vergleiche verschiedene Ollama-Vision-Modelle direkt auf demselben Dokument – 
 - **Modellspezifische Prompts**: Jedes Modell bekommt den optimalen Prompt (qwen, glm-ocr, deepseek-ocr, gemma3, minicpm-v)
 - **Health-Check & Auto-Recovery**: Prüft Ollama vor jedem Modell, wartet bei Absturz
 
-#### KI-Qualitätsbewertung
+### KI-Qualitätsbewertung
 
 Nach dem Vergleich kann ein **Cloud-LLM** (z.B. GPT-4o, o3, GPT-4.1) die OCR-Ergebnisse bewerten:
 
@@ -137,7 +275,7 @@ Nach dem Vergleich kann ein **Cloud-LLM** (z.B. GPT-4o, o3, GPT-4.1) die OCR-Erg
 - **Cross-Comparison**: Wo stimmen alle Modelle überein, wo gibt es Widersprüche?
 - **Strukturierte Empfehlung**: Bestes Modell für Qualität, Geschwindigkeit und Preis/Leistung
 
-#### Empfohlene OCR-Modelle
+### Empfohlene OCR-Modelle
 
 | Modell | Parameter | VRAM | Stärke |
 |--------|-----------|------|--------|
@@ -151,7 +289,10 @@ Nach dem Vergleich kann ein **Cloud-LLM** (z.B. GPT-4o, o3, GPT-4.1) die OCR-Erg
 
 > Mehr Details & Benchmark-Infos: [docs/ocr-benchmark/](docs/ocr-benchmark/)
 
-### 🗑️ Dokumente Aufräumen
+---
+
+## 🗑️ Dokumente Aufräumen
+
 Junk-Dokumente wie AGB, Widerrufsbelehrungen und Datenschutzerklärungen automatisch finden und entfernen:
 
 - **Titel-basierte Suche**: Findet nur Dokumente mit typischen Junk-Titeln (keine falschen Treffer bei normalen Dokumenten)
@@ -164,23 +305,30 @@ Junk-Dokumente wie AGB, Widerrufsbelehrungen und Datenschutzerklärungen automat
 
 ## ⚠️ Hinweis zum aktuellen Stand
 
-> **Aktuell getestet:** OpenAI (GPT-4o, GPT-4o-mini)
-> 
-> Andere LLM-Provider (Anthropic, Ollama, Azure) sind implementiert, aber noch nicht ausführlich getestet. Bei Problemen gerne ein Issue erstellen - wir verbessern kontinuierlich!
+> **Getestet & stabil:** OpenAI (GPT-4o, GPT-4o-mini, GPT-4.1), Ollama (qwen3-vl, llama3.1, etc.)
+>
+> Andere LLM-Provider (Anthropic, Azure) sind implementiert, aber noch nicht ausführlich getestet. Bei Problemen gerne ein Issue erstellen – wir verbessern kontinuierlich!
 
 ---
 
 ## 🔒 Datenschutz
 
-**Wichtig:** An das LLM werden **ausschließlich Metadaten** übermittelt:
+### Metadaten-Bereinigung & Tag Wizard
+
+An das LLM werden **ausschließlich Metadaten-Namen** übermittelt:
 - Namen von Tags, Korrespondenten und Dokumententypen
 - Anzahl der zugehörigen Dokumente
 
-**❌ Es werden KEINE Dokumenteninhalte, Texte oder Dateien an das LLM gesendet!**
+**❌ Es werden KEINE Dokumenteninhalte, Texte oder Dateien gesendet!**
 
-Die KI sieht nur die Namen deiner Metadaten (z.B. "Telekom", "Rechnung", "Steuer 2024") um Ähnlichkeiten zu erkennen - niemals den Inhalt deiner Dokumente.
+### KI-Dokumenten-Klassifizierer
 
-> 💡 **Tipp:** Für maximalen Datenschutz nutze **Ollama** mit lokalen Modellen - dann verlassen keine Daten deinen Server!
+Der Klassifizierer liest den **OCR-Text** des Dokuments um es zu klassifizieren:
+
+- Bei **Cloud-Modellen** (OpenAI, etc.): OCR-Text wird an den Provider gesendet
+- Bei **Ollama (lokal)**: Alle Daten bleiben auf deinem Server
+
+> 💡 **Tipp:** Für maximalen Datenschutz bei der Klassifizierung: **Ollama** mit lokalen Modellen nutzen – dann verlässt kein Dokumentinhalt deinen Server!
 
 ---
 
@@ -237,65 +385,88 @@ docker-compose up -d --build
 
 ### 2. LLM Provider einrichten
 
-| Provider | API Key von | Empfohlenes Modell | Status |
-|----------|-------------|-------------------|--------|
-| **OpenAI** | [platform.openai.com](https://platform.openai.com/api-keys) | `gpt-4o` | ✅ Getestet |
-| **Anthropic** | [console.anthropic.com](https://console.anthropic.com/) | `claude-3-5-sonnet` | 🔄 Beta |
-| **Ollama** | Kein Key nötig! | `llama3.1` | 🔄 Beta |
-| **Azure** | Azure Portal | Dein Deployment | 🔄 Beta |
+| Provider | API Key von | Empfohlenes Modell | Metadaten-Bereinigung | Klassifizierer |
+|----------|-------------|-------------------|-----------------------|----------------|
+| **OpenAI** | [platform.openai.com](https://platform.openai.com/api-keys) | `gpt-4o-mini` / `gpt-4o` | ✅ Getestet | ✅ Getestet |
+| **Ollama** | Kein Key nötig! | `llama3.1` / `qwen2.5` | 🔄 Beta | ✅ Getestet |
+| **Anthropic** | [console.anthropic.com](https://console.anthropic.com/) | `claude-3-5-sonnet` | 🔄 Beta | 🔄 Beta |
+| **Azure** | Azure Portal | Dein Deployment | 🔄 Beta | 🔄 Beta |
 
-### 3. Sensible Daten schützen
+### 3. Klassifizierer einrichten
 
-1. **Backend-Datenbank nie committen** – dank `.gitignore` und `backend/.dockerignore` wird `backend/data/organizer.db` automatisch ausgeschlossen. Vor einem Commit kannst du mit `python scripts/sanitize_data.py` (optional `--dry-run`) alle echten SQLite-Dateien aus dem Data-Ordner entfernen.
-2. **Docker-Builds bleiben sauber** – der neue `backend/.dockerignore` verhindert, dass lokale Dumps in Images landen. Für produktive Instanzen mountest du wie gehabt ein leeres Volume (`./backend/data:/app/data`).
-3. **Screenshots** – bleiben erhalten, aber prüfe vor Veröffentlichung, ob keine vertraulichen Informationen zu sehen sind.
+1. Gehe zu **Klassifizierer** → **Einstellungen**
+2. LLM Provider und Modell wählen
+3. Felder aktivieren die klassifiziert werden sollen
+4. Optional: Speicherpfad-Profile für automatische Zuordnung anlegen
+5. Optional: Custom Fields definieren (IBAN, Rechnungsnummer, etc.)
 
 ---
 
 ## 📖 Empfohlener Workflow
 
+### Metadaten-Bereinigung (einmalig)
+
 ```
 1️⃣ Korrespondenten    →    2️⃣ Dokumententypen    →    3️⃣ Tags
 ```
 
-### Für jeden Bereich:
+1. **Leere entfernen** – Ungenutzte Einträge (0 Dokumente) löschen
+2. **Mit KI analysieren** – Ähnliche Einträge finden lassen
+3. **Vorschläge prüfen** – Bei Bedarf Dokumente ansehen
+4. **Zusammenführen oder Ignorieren** – Du entscheidest!
 
-1. **Leere entfernen** - Ungenutzte Einträge (0 Dokumente) löschen
-2. **Mit KI analysieren** - Ähnliche Einträge finden lassen
-3. **Vorschläge prüfen** - Bei Bedarf Dokumente ansehen
-4. **Zusammenführen oder Ignorieren** - Du entscheidest!
+### Dokument-Klassifizierung (laufend)
 
-### Tipps:
-- Beginne mit **Korrespondenten** - sie sind die wichtigste Basis
+```
+1️⃣ OCR verbessern (optional)    →    2️⃣ Klassifizieren    →    3️⃣ Prüfen & Speichern
+```
+
+1. Dokument-ID im Klassifizierer eingeben
+2. KI-Vorschläge prüfen und bei Bedarf anpassen
+3. Mit "Anwenden" oder "Anwenden & Weiter" speichern
+
+### Tipps
+
+- Beginne mit **Korrespondenten** – sie sind die wichtigste Basis
 - Nutze den **Tag Cleanup Wizard** für systematische Tag-Bereinigung
 - **Gespeicherte Analysen** sparen KI-Kosten beim erneuten Öffnen
+- Konfiguriere **Speicherpfad-Profile** für vollautomatische Ordner-Zuordnung
+- Nutze **Ollama** für den Klassifizierer wenn Datenschutz wichtig ist
 
 ---
 
 ## 🏗️ Architektur
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     Docker Compose                          │
-├─────────────────────┬───────────────────────────────────────┤
-│   Frontend (React)  │           Backend (FastAPI)           │
-│   Port: 3001        │           Port: 8000                  │
-│                     │                                       │
-│   • Dashboard       │   • Paperless API Client              │
-│   • Korrespondenten │   • LLM Provider (OpenAI, etc.)       │
-│   • Tags            │   • Similarity Service                │
-│   • Dokumententypen │   • Merge Service                     │
-│   • Tag Wizard      │   • OCR Service (Ollama Vision)       │
-│   • OCR Manager     │   • Cleanup Service                   │
-│   • Aufräumen       │   • SQLite (Cache/History)            │
-│   • Prompts         │                                       │
-└─────────────────────┴───────────────────────────────────────┘
-                          │               │
-                          ▼               ▼
-                ┌─────────────┐   ┌─────────────┐
-                │ Paperless   │   │   Ollama     │
-                │    -ngx     │   │  (lokal)     │
-                └─────────────┘   └─────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                        Docker Compose                           │
+├──────────────────────────┬──────────────────────────────────────┤
+│   Frontend (React)       │         Backend (FastAPI)            │
+│   Port: 3001             │         Port: 8000                   │
+│                          │                                      │
+│   • Dashboard            │   • Paperless API Client             │
+│   • Korrespondenten      │   • LLM Provider (OpenAI, etc.)      │
+│   • Tags                 │   • Similarity Service               │
+│   • Dokumententypen      │   • Merge Service                    │
+│   • Tag Wizard           │   • OCR Service (Ollama Vision)      │
+│   • Klassifizierer       │   • Classifier Service               │
+│   • OCR Manager          │     ├─ OpenAI Tool-Calling           │
+│   • Aufräumen            │     └─ Ollama Multi-Call             │
+│   • Prompts              │   • Cleanup Service                  │
+│   • Einstellungen        │   • SQLite (Cache/History/Config)    │
+└──────────────────────────┴──────────────────────────────────────┘
+                           │               │
+                           ▼               ▼
+                 ┌─────────────┐   ┌─────────────┐
+                 │ Paperless   │   │   Ollama     │
+                 │    -ngx     │   │  (lokal)     │
+                 └─────────────┘   └─────────────┘
+                                         │
+                                         ▼
+                                ┌─────────────────┐
+                                │  Cloud LLMs     │
+                                │ (OpenAI, etc.)  │
+                                └─────────────────┘
 ```
 
 ---
@@ -308,14 +479,15 @@ docker-compose up -d --build
 | **Frontend** | React 18, TypeScript, Vite, TailwindCSS |
 | **Database** | SQLite (für Cache, History, Einstellungen) |
 | **Container** | Docker, Docker Compose |
-| **LLM** | OpenAI, Anthropic, Azure, Ollama |
+| **LLM (Bereinigung)** | OpenAI, Anthropic, Azure, Ollama |
+| **LLM (Klassifizierer)** | OpenAI Tool-Calling, Ollama Multi-Call |
 | **OCR** | Ollama Vision API (qwen3-vl, glm-ocr, minicpm-v, etc.) |
 
 ---
 
 ## 🤝 Beitragen
 
-Beiträge sind willkommen! 
+Beiträge sind willkommen!
 
 1. Fork das Repository
 2. Erstelle einen Feature Branch (`git checkout -b feature/AmazingFeature`)
@@ -325,7 +497,7 @@ Beiträge sind willkommen!
 
 ### Issues willkommen für:
 - 🐛 Bug Reports
-- 💡 Feature Requests  
+- 💡 Feature Requests
 - 🔌 Andere LLM Provider testen
 - 🌍 Übersetzungen
 
@@ -346,7 +518,7 @@ Wenn dir dieses Projekt gefällt und Zeit spart, kannst du mich unterstützen:
 
 ## 📄 Lizenz
 
-Dieses Projekt ist unter der MIT-Lizenz lizenziert - siehe [LICENSE](LICENSE) für Details.
+Dieses Projekt ist unter der MIT-Lizenz lizenziert – siehe [LICENSE](LICENSE) für Details.
 
 ---
 
@@ -354,7 +526,7 @@ Dieses Projekt ist unter der MIT-Lizenz lizenziert - siehe [LICENSE](LICENSE) f�
 
 **Made with ❤️ for the Paperless-ngx Community**
 
-*Endlich Ordnung in deinen Metadaten!*
+*Endlich Ordnung in deinen Metadaten – und vollautomatische Klassifizierung!*
 
 [⬆ Nach oben](#-ai-paperless-organizer)
 

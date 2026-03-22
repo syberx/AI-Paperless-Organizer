@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import {
     FileSearch,
     Play,
@@ -8,6 +8,7 @@ import {
     ArrowRightLeft,
     FileText,
     AlertTriangle,
+    RefreshCw,
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
@@ -27,6 +28,8 @@ export default function SingleOcr({ initialDocId }: SingleOcrProps = {}) {
     const [applied, setApplied] = useState(false)
     const [setFinishTag, setSetFinishTag] = useState(true)
     const [forceOcr, setForceOcr] = useState(false)
+    const [progress, setProgress] = useState<api.OcrPageProgress | null>(null)
+    const progressInterval = useRef<ReturnType<typeof setInterval> | null>(null)
 
     // Auto-start when initialDocId is passed (from Review queue "Recheck" button)
     useEffect(() => {
@@ -49,17 +52,39 @@ export default function SingleOcr({ initialDocId }: SingleOcrProps = {}) {
         autoStartTriggered.current = false
     }, [initialDocId])
 
+    const startProgressPolling = useCallback((id: number) => {
+        if (progressInterval.current) clearInterval(progressInterval.current)
+        progressInterval.current = setInterval(async () => {
+            try {
+                const p = await api.getOcrProgress(id)
+                if (p.active) setProgress(p)
+            } catch { /* ignore */ }
+        }, 2000)
+    }, [])
+
+    const stopProgressPolling = useCallback(() => {
+        if (progressInterval.current) {
+            clearInterval(progressInterval.current)
+            progressInterval.current = null
+        }
+    }, [])
+
+    useEffect(() => () => stopProgressPolling(), [stopProgressPolling])
+
     const runOcrForId = async (id: number) => {
         setLoading(true)
         setResult(null)
         setError('')
         setApplied(false)
+        setProgress(null)
+        startProgressPolling(id)
         try {
             const res = await api.ocrSingleDocument(id, true)
             setResult(res)
         } catch (e: any) {
             setError(e?.message || 'Unbekannter Fehler')
         } finally {
+            stopProgressPolling()
             setLoading(false)
         }
     }
@@ -72,6 +97,8 @@ export default function SingleOcr({ initialDocId }: SingleOcrProps = {}) {
         setResult(null)
         setError('')
         setApplied(false)
+        setProgress(null)
+        startProgressPolling(id)
 
         try {
             const res = await api.ocrSingleDocument(id, forceOcr)
@@ -79,6 +106,7 @@ export default function SingleOcr({ initialDocId }: SingleOcrProps = {}) {
         } catch (e: any) {
             setError(e?.message || 'Unbekannter Fehler')
         } finally {
+            stopProgressPolling()
             setLoading(false)
         }
     }
@@ -188,18 +216,96 @@ export default function SingleOcr({ initialDocId }: SingleOcrProps = {}) {
 
             {/* Error */}
             {error && (
-                <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 flex items-start gap-3">
-                    <XCircle className="w-5 h-5 text-red-400 mt-0.5 shrink-0" />
-                    <span className="text-red-200 text-sm">{error}</span>
+                <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 space-y-2">
+                    <div className="flex items-start gap-3">
+                        <XCircle className="w-5 h-5 text-red-400 mt-0.5 shrink-0" />
+                        <span className="text-red-200 text-sm">{error}</span>
+                    </div>
+                    {error.includes('gespeichert') && (
+                        <div className="flex items-center gap-2 ml-8">
+                            <button
+                                onClick={runOcr}
+                                disabled={loading}
+                                className="btn text-xs bg-amber-600/80 hover:bg-amber-600 text-white flex items-center gap-1.5 px-3 py-1.5"
+                            >
+                                <RefreshCw className="w-3.5 h-3.5" />
+                                Erneut versuchen (fertige Seiten werden wiederverwendet)
+                            </button>
+                        </div>
+                    )}
                 </div>
             )}
 
-            {/* Loading */}
+            {/* Loading with live page progress */}
             {loading && (
-                <div className="card p-12 text-center border border-surface-700/50 bg-surface-800/40">
-                    <Loader2 className="w-12 h-12 animate-spin text-cyan-400 mx-auto mb-4" />
-                    <p className="text-white text-lg font-medium">OCR läuft...</p>
-                    <p className="text-surface-400 text-sm mt-1">Dokument wird heruntergeladen, Seiten konvertiert und analysiert</p>
+                <div className="card p-6 border border-surface-700/50 bg-surface-800/40 space-y-4">
+                    <div className="flex items-center gap-3">
+                        <Loader2 className="w-6 h-6 animate-spin text-cyan-400" />
+                        <div>
+                            <p className="text-white font-medium">
+                                {!progress || !progress.active
+                                    ? 'OCR wird vorbereitet...'
+                                    : progress.status === 'downloading'
+                                    ? 'Dokument wird heruntergeladen...'
+                                    : progress.status === 'converting'
+                                    ? 'PDF-Seiten werden konvertiert...'
+                                    : `Seite ${progress.current_page} von ${progress.total_pages} wird analysiert...`
+                                }
+                            </p>
+                            {progress?.active && progress.elapsed_seconds && (
+                                <p className="text-xs text-surface-500 mt-0.5">
+                                    {Math.floor(progress.elapsed_seconds)}s vergangen
+                                    {progress.done ? ` · ${progress.done}/${progress.total_pages} fertig` : ''}
+                                </p>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Page grid */}
+                    {progress?.active && progress.total_pages && progress.total_pages > 0 && (
+                        <div className="space-y-2">
+                            {/* Progress bar */}
+                            <div className="w-full bg-surface-700/50 rounded-full h-2.5 overflow-hidden">
+                                <div
+                                    className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-cyan-400 transition-all duration-500"
+                                    style={{ width: `${Math.round(((progress.done || 0) / progress.total_pages) * 100)}%` }}
+                                />
+                            </div>
+                            {/* Page tiles */}
+                            <div className="flex flex-wrap gap-1.5">
+                                {(progress.pages || []).map((pg) => (
+                                    <div
+                                        key={pg.page}
+                                        className={clsx(
+                                            'w-9 h-9 rounded-lg flex flex-col items-center justify-center text-xs font-mono border transition-all',
+                                            pg.status === 'done' && 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300',
+                                            pg.status === 'processing' && 'bg-cyan-500/20 border-cyan-500/40 text-cyan-300 animate-pulse',
+                                            pg.status === 'error' && 'bg-red-500/20 border-red-500/40 text-red-300',
+                                            pg.status === 'pending' && 'bg-surface-700/30 border-surface-600/30 text-surface-500',
+                                        )}
+                                        title={
+                                            pg.status === 'done' ? `Seite ${pg.page}: ${pg.chars} Zeichen`
+                                            : pg.status === 'error' ? `Seite ${pg.page}: Fehler`
+                                            : pg.status === 'processing' ? `Seite ${pg.page}: läuft...`
+                                            : `Seite ${pg.page}: wartend`
+                                        }
+                                    >
+                                        <span className="leading-none">{pg.page}</span>
+                                        {pg.status === 'done' && <CheckCircle2 className="w-2.5 h-2.5 mt-0.5" />}
+                                        {pg.status === 'processing' && <Loader2 className="w-2.5 h-2.5 mt-0.5 animate-spin" />}
+                                        {pg.status === 'error' && <XCircle className="w-2.5 h-2.5 mt-0.5" />}
+                                    </div>
+                                ))}
+                            </div>
+                            {progress.errors ? (
+                                <p className="text-xs text-amber-400 flex items-center gap-1">
+                                    <RefreshCw className="w-3 h-3" />
+                                    {progress.errors} Seite(n) fehlgeschlagen -- fertige Seiten sind gespeichert.
+                                    Erneuter Versuch überspringt bereits fertige Seiten.
+                                </p>
+                            ) : null}
+                        </div>
+                    )}
                 </div>
             )}
 

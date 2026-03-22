@@ -43,6 +43,10 @@ batch_state = {
 # Track single OCR to prevent watchdog conflicts
 single_ocr_running = False
 
+# Live page-level progress for frontend polling
+ocr_page_progress: Dict[int, Dict[str, Any]] = {}
+# { document_id: { total_pages, done, errors, current_page, pages: [{page, status, chars}], started_at } }
+
 # Review queue file
 REVIEW_QUEUE_FILE = Path("/app/data/ocr_review_queue.json")
 # OCR Ignore list: document IDs to permanently skip in future OCR runs
@@ -163,7 +167,7 @@ def get_ocr_error_ids() -> set:
 watchdog_state = {
     "enabled": False,
     "running": False,
-    "interval_minutes": 1,
+    "interval_minutes": 5,
     "last_run": None,
     "task": None  # asyncio.Task
 }
@@ -454,19 +458,22 @@ class OcrService:
         # ── Default: paperless-gpt proven prompt + German hints ──
         # Works for: qwen2.5vl, qwen3-vl, minicpm-v, and other full-featured models
         parts = [
-            "Just transcribe the text in this image and preserve the formatting and layout (high quality OCR).",
-            "Do that for ALL the text in the image. Be thorough and pay attention. This is very important.",
-            "The image is from a text document so be sure to continue until the bottom of the page.",
-            "Thanks a lot! You tend to forget about some text in the image so please focus!",
-            "Use markdown format but without a code block.",
+            "Transcribe ALL text in this image EXACTLY as it appears – high quality OCR.",
+            "CRITICAL: Do NOT summarize, skip, or abbreviate any content. Continue until the very bottom of the page.",
+            "CRITICAL: Every single number, amount, percentage, account number, and code MUST be transcribed exactly.",
+            "For tables: transcribe each row completely, including all columns and values.",
+            "For checkboxes/tick boxes: write [ ] for unchecked and [X] for checked, followed by the label text.",
+            "For form fields: write the label followed by the filled-in value or a blank line if empty.",
+            "For structured forms (tax notices, invoices, bank statements): preserve every field label and its value.",
+            "Use markdown format without code blocks. Preserve the original layout as closely as possible.",
         ]
         if page_num > 0 and total_pages > 0:
             parts.append(f"This is page {page_num} of {total_pages}.")
         parts.append(
-            "The document is likely in German. "
-            "Pay special attention to: names, dates (DD.MM.YYYY), "
-            "IBANs, BIC codes, account numbers, monetary amounts, and addresses. "
-            "Transcribe everything exactly as shown."
+            "The document is in German. "
+            "Pay special attention to: names, dates (DD.MM.YYYY), IBANs, BIC codes, "
+            "tax IDs (Steuernummer), amounts in EUR, account numbers, reference numbers, "
+            "and addresses. Transcribe every value exactly as printed – no rounding, no omitting."
         )
         return "\n".join(parts)
 
@@ -588,9 +595,11 @@ class OcrService:
             url = self.get_current_url()
             try:
                 system_msg = (
-                    "You are an OCR module. Output ONLY the transcribed text from the image, nothing else. "
-                    "No descriptions, no commentary, no 'Let me...' or explanations. Include all text: names, dates, IBANs, numbers, checkboxes as shown. "
-                    "Raw transcription only."
+                    "You are a precise OCR module. Output ONLY the verbatim transcribed text from the image – nothing else. "
+                    "No summaries, no descriptions, no commentary, no 'Let me...', no 'Here is...'. "
+                    "Every number, every EUR amount, every date, every code must appear EXACTLY as printed. "
+                    "For tables: every row, every column, every cell value. "
+                    "Missing a single number is a critical OCR failure. Raw verbatim transcription only."
                 )
 
                 request_body = {
@@ -758,162 +767,340 @@ class OcrService:
             logger.warning(f"Native PDF text extraction failed: {e}")
             return None
 
-    async def ocr_document(self, paperless_client, document_id: int, force: bool = False) -> Dict[str, Any]:
-        """OCR a document (all pages). Download original file, convert pages to images, OCR each."""
+    async def ocr_document(self, paperless_client, document_id: int, force: bool = False, db_session=None) -> Dict[str, Any]:
+        """OCR a document with page-level persistence. Supports resume after failures."""
         start_time = time.time()
         print(f"[OCR] Starting OCR for document {document_id}")
-        
+
+        # Initialize progress tracking
+        ocr_page_progress[document_id] = {
+            "total_pages": 0, "done": 0, "errors": 0,
+            "current_page": 0, "status": "downloading",
+            "pages": [], "started_at": time.time(),
+        }
+
         # Get document metadata
         doc = await paperless_client.get_document(document_id)
         if not doc:
+            ocr_page_progress.pop(document_id, None)
             raise ValueError(f"Dokument {document_id} nicht gefunden")
-        
+
         old_content = doc.get("content", "") or ""
         title = doc.get("title", f"Dokument {document_id}")
-        
+
         # Download original file
+        MAX_FILE_SIZE_MB = 12  # skip documents larger than this (pdf2image takes too long)
         try:
             file_bytes = await paperless_client.download_document_file(document_id)
-            logger.info(f"Downloaded document {document_id}: {len(file_bytes)} bytes")
-            print(f"[OCR] Downloaded {len(file_bytes)} bytes")
+            file_mb = len(file_bytes) / 1_048_576
+            logger.info(f"Downloaded document {document_id}: {len(file_bytes)} bytes ({file_mb:.1f} MB)")
+            print(f"[OCR] Downloaded {len(file_bytes)} bytes ({file_mb:.1f} MB)")
+
+            if file_mb > MAX_FILE_SIZE_MB:
+                ocr_page_progress.pop(document_id, None)
+                error_msg = (
+                    f"Dokument zu groß für OCR ({file_mb:.1f} MB > {MAX_FILE_SIZE_MB} MB). "
+                    "Wird zur Ignore-Liste hinzugefügt."
+                )
+                ignore_list = load_ocr_ignore_list()
+                if not any(entry["document_id"] == document_id for entry in ignore_list):
+                    ignore_list.append({
+                        "document_id": document_id, "title": title,
+                        "reason": error_msg, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S")
+                    })
+                    save_ocr_ignore_list(ignore_list)
+                raise ValueError(error_msg)
+        except ValueError:
+            raise
         except Exception as e:
+            ocr_page_progress.pop(document_id, None)
             if "404" in str(e):
                 error_msg = "Originaldatei fehlt (404 Not Found)."
                 ignore_list = load_ocr_ignore_list()
                 if not any(entry["document_id"] == document_id for entry in ignore_list):
                     ignore_list.append({
-                        "document_id": document_id,
-                        "title": title,
-                        "reason": error_msg,
-                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S")
+                        "document_id": document_id, "title": title,
+                        "reason": error_msg, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S")
                     })
                     save_ocr_ignore_list(ignore_list)
                 raise ValueError(f"{error_msg} Dokument wird künftig komplett ignoriert.")
             raise ValueError(f"Download fehlgeschlagen: {e}")
 
-        # OPTIMIZATION: Check for native text first (skip OCR if present)
-        # Unless force=True is passed
+        # Native text check (skip OCR if present)
         if not force:
             native_text = self._extract_text_from_pdf(file_bytes)
             if native_text and len(native_text) > 50:
                 logger.info(f"Found native text in PDF ({len(native_text)} chars). Skipping OCR.")
                 print(f"[OCR] Native text found ({len(native_text)} chars). Skipping vision OCR.")
-                
+                ocr_page_progress.pop(document_id, None)
                 duration = time.time() - start_time
                 return {
-                    "document_id": document_id,
-                    "title": title,
-                    "old_content": old_content,
-                    "new_content": native_text,
-                    "old_length": len(old_content),
-                    "new_length": len(native_text),
-                    "ocr_duration": duration,
-                    "ocr_pages": 0,
-                    "source": "native_pdf"
+                    "document_id": document_id, "title": title,
+                    "old_content": old_content, "new_content": native_text,
+                    "old_length": len(old_content), "new_length": len(native_text),
+                    "ocr_duration": duration, "ocr_pages": 0, "source": "native_pdf",
                 }
 
-        # Convert to images with model-appropriate DPI
-        images = []
+        # Convert to images
+        ocr_page_progress[document_id]["status"] = "converting"
+        images = await self._convert_to_images(file_bytes, doc, document_id, title)
+        if not images:
+            ocr_page_progress.pop(document_id, None)
+            raise ValueError("Keine Seiten aus dem Dokument extrahiert")
+
+        total_pages = len(images)
+        ocr_page_progress[document_id].update({
+            "total_pages": total_pages, "status": "processing",
+            "pages": [{"page": i + 1, "status": "pending", "chars": 0} for i in range(total_pages)],
+        })
+
+        # Check DB for already completed pages (resume support)
+        # If force=True, always start fresh – never reuse potentially bad pages from a previous failed run
+        completed_pages = {}
+        if db_session:
+            if force:
+                await self._cleanup_page_results(db_session, document_id)
+                print(f"[OCR] Force mode: cleared DB page cache for doc {document_id}, starting fresh")
+            else:
+                completed_pages = await self._load_completed_pages(db_session, document_id, total_pages)
+                if completed_pages:
+                    print(f"[OCR] Resume: found {len(completed_pages)} completed pages in DB")
+                    for pg_num, pg_text in completed_pages.items():
+                        idx = pg_num - 1
+                        if idx < len(ocr_page_progress[document_id]["pages"]):
+                            ocr_page_progress[document_id]["pages"][idx] = {
+                                "page": pg_num, "status": "done", "chars": len(pg_text)
+                            }
+                    ocr_page_progress[document_id]["done"] = len(completed_pages)
+
+        # Process each page with retry and DB persistence
+        MAX_PAGE_RETRIES = 3
+        full_text_parts = {}
+        failed_pages = []
+
+        for i, img in enumerate(images):
+            page_num = i + 1
+
+            # Skip already completed pages
+            if page_num in completed_pages:
+                full_text_parts[page_num] = completed_pages[page_num]
+                print(f"[OCR] Page {page_num}/{total_pages}: resumed from DB ({len(completed_pages[page_num])} chars)")
+                continue
+
+            ocr_page_progress[document_id]["current_page"] = page_num
+            ocr_page_progress[document_id]["pages"][i]["status"] = "processing"
+
+            model_params = self.get_model_params(self.model)
+            optimal_size = max(self.max_image_size, model_params["max_image_size"])
+            prepared_bytes = self._prepare_image_for_ollama(img, max_size=optimal_size)
+
+            page_text = None
+            last_error = None
+
+            for attempt in range(1, MAX_PAGE_RETRIES + 1):
+                try:
+                    page_start = time.time()
+                    msg = f"Processing page {page_num}/{total_pages} (attempt {attempt})"
+                    logger.info(msg)
+                    print(f"[OCR] {msg}")
+
+                    page_text = await self._ocr_single_image(
+                        prepared_bytes, page_num=page_num, total_pages=total_pages
+                    )
+
+                    if not page_text or not page_text.strip():
+                        raise ValueError("Empty result from OCR model")
+
+                    page_duration = time.time() - page_start
+
+                    # Success: save to DB
+                    if db_session:
+                        await self._save_page_result(
+                            db_session, document_id, page_num, total_pages,
+                            page_text, "done", attempt, page_duration
+                        )
+
+                    full_text_parts[page_num] = page_text
+                    ocr_page_progress[document_id]["pages"][i] = {
+                        "page": page_num, "status": "done", "chars": len(page_text)
+                    }
+                    ocr_page_progress[document_id]["done"] += 1
+                    print(f"[OCR] Page {page_num}: OK ({len(page_text)} chars, {page_duration:.1f}s)")
+                    break
+
+                except Exception as e:
+                    last_error = str(e)
+                    logger.warning(f"OCR page {page_num} attempt {attempt} failed: {e}")
+                    print(f"[OCR] Page {page_num} attempt {attempt} failed: {e}")
+
+                    if attempt < MAX_PAGE_RETRIES:
+                        await asyncio.sleep(2)
+
+            if page_text is None:
+                # All retries exhausted for this page
+                if db_session:
+                    await self._save_page_result(
+                        db_session, document_id, page_num, total_pages,
+                        None, "error", MAX_PAGE_RETRIES, 0, last_error
+                    )
+                ocr_page_progress[document_id]["pages"][i] = {
+                    "page": page_num, "status": "error", "chars": 0, "error": last_error
+                }
+                ocr_page_progress[document_id]["errors"] += 1
+                failed_pages.append(page_num)
+                print(f"[OCR] Page {page_num}: FAILED after {MAX_PAGE_RETRIES} attempts")
+
+        # Assemble result
+        if failed_pages:
+            ocr_page_progress[document_id]["status"] = "partial"
+            raise ValueError(
+                f"OCR fehlgeschlagen auf Seite(n) {failed_pages} von {total_pages}. "
+                f"{len(full_text_parts)}/{total_pages} Seiten gespeichert -- "
+                f"erneuter Versuch wird die fertigen Seiten wiederverwenden."
+            )
+
+        # All pages done!
+        new_content = "\n\n".join(full_text_parts[p] for p in sorted(full_text_parts.keys()))
+        duration = time.time() - start_time
+
+        ocr_page_progress[document_id]["status"] = "complete"
+
+        # Clean up DB page cache for this document (no longer needed)
+        if db_session:
+            await self._cleanup_page_results(db_session, document_id)
+
+        return {
+            "document_id": document_id, "title": title,
+            "old_content": old_content, "new_content": new_content,
+            "old_length": len(old_content), "new_length": len(new_content),
+            "ocr_duration": duration, "ocr_pages": total_pages,
+        }
+
+    async def _convert_to_images(self, file_bytes: bytes, doc: dict, document_id: int, title: str) -> list:
+        """Convert file to list of PIL images."""
         model_params = self.get_model_params(self.model)
         render_dpi = model_params.get("render_dpi", 200)
-        
-        # Detect actual file type from magic bytes
         is_pdf = file_bytes[:4] == b'%PDF'
         mime_type = doc.get("mime_type", "unknown")
-        
+
         if is_pdf:
-            # Try PDF conversion with retry
             for attempt in range(2):
                 try:
                     loop = asyncio.get_running_loop()
-                    images = await loop.run_in_executor(
-                        None,
-                        lambda: convert_from_bytes(file_bytes, dpi=render_dpi)
+                    dpi = render_dpi if attempt == 0 else max(100, render_dpi - 50)
+                    print(f"[OCR] Converting PDF at {dpi} DPI (attempt {attempt+1})…")
+                    images = await asyncio.wait_for(
+                        loop.run_in_executor(
+                            None, lambda d=dpi: convert_from_bytes(file_bytes, dpi=d)
+                        ),
+                        timeout=300  # 5-minute hard timeout per attempt
                     )
-                    msg = f"Converted PDF to {len(images)} pages at {render_dpi} DPI"
-                    logger.info(msg)
-                    print(f"[OCR] {msg}")
-                    break
+                    print(f"[OCR] Converted PDF to {len(images)} pages at {dpi} DPI")
+                    return images
+                except asyncio.TimeoutError:
+                    print(f"[OCR] PDF conversion timed out after 5 min (attempt {attempt+1})")
+                    if attempt == 0:
+                        logger.warning(f"PDF conversion timeout for doc {document_id}, retrying at lower DPI")
+                        continue
+                    raise ValueError(f"PDF-Konvertierung nach 10 Minuten abgebrochen – Dokument übersprungen.")
                 except Exception as e:
                     error_str = str(e).lower()
-                    # Password-protected PDF: skip immediately, no retry
                     if "password" in error_str or "encrypted" in error_str:
-                        error_msg = f"Passwortgeschützte PDF – kann ohne Passwort nicht verarbeitet werden."
+                        error_msg = "Passwortgeschützte PDF – kann ohne Passwort nicht verarbeitet werden."
                         ignore_list = load_ocr_ignore_list()
                         if not any(entry["document_id"] == document_id for entry in ignore_list):
                             ignore_list.append({
-                                "document_id": document_id,
-                                "title": title,
-                                "reason": error_msg,
-                                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S")
+                                "document_id": document_id, "title": title,
+                                "reason": error_msg, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S")
                             })
                             save_ocr_ignore_list(ignore_list)
                         raise ValueError(f"{error_msg} Dokument wird künftig übersprungen.")
-                    
                     if attempt == 0:
-                        logger.warning(f"PDF conversion attempt 1 failed for doc {document_id}: {e}, retrying...")
                         print(f"[OCR] PDF conversion failed (attempt 1), retrying: {e}")
                         await asyncio.sleep(2)
                     else:
                         raise ValueError(f"PDF-Konvertierung fehlgeschlagen nach 2 Versuchen ({mime_type}): {e}")
         else:
-            # Not a PDF - try as image
             try:
                 img = Image.open(io.BytesIO(file_bytes))
-                img.load()  # Force load to catch deferred errors
-                images = [img]
-                msg = f"Loaded as single image ({img.format}, {img.size[0]}x{img.size[1]})"
-                logger.info(msg)
-                print(f"[OCR] {msg}")
+                img.load()
+                print(f"[OCR] Loaded as single image ({img.format}, {img.size[0]}x{img.size[1]})")
+                return [img]
             except Exception as e:
                 raise ValueError(f"Dateiformat nicht unterstützt ({mime_type}, {len(file_bytes)} bytes): {e}")
+        return []
 
-        if not images:
-            raise ValueError("Keine Seiten aus dem Dokument extrahiert")
+    async def _load_completed_pages(self, db_session, document_id: int, total_pages: int) -> Dict[int, str]:
+        """Load already-completed page results from the DB."""
+        from sqlalchemy import select
+        from app.models.ocr import OcrPageResult
+        try:
+            q = await db_session.execute(
+                select(OcrPageResult).where(
+                    OcrPageResult.document_id == document_id,
+                    OcrPageResult.total_pages == total_pages,
+                    OcrPageResult.status == "done",
+                )
+            )
+            rows = q.scalars().all()
+            return {r.page_number: r.page_text for r in rows if r.page_text}
+        except Exception as e:
+            logger.warning(f"Failed to load cached pages: {e}")
+            return {}
 
-        # Process all pages
-        full_text_parts = []
-        
-        for i, img in enumerate(images):
+    async def _save_page_result(
+        self, db_session, document_id: int, page_number: int, total_pages: int,
+        page_text: Optional[str], status: str, attempt_count: int,
+        duration: float = 0, error_message: str = None,
+    ):
+        """Upsert a page result into the DB."""
+        from sqlalchemy import select
+        from app.models.ocr import OcrPageResult
+        try:
+            q = await db_session.execute(
+                select(OcrPageResult).where(
+                    OcrPageResult.document_id == document_id,
+                    OcrPageResult.page_number == page_number,
+                )
+            )
+            row = q.scalars().first()
+            if row:
+                row.total_pages = total_pages
+                row.page_text = page_text
+                row.status = status
+                row.attempt_count = attempt_count
+                row.chars_extracted = len(page_text) if page_text else 0
+                row.duration_seconds = duration
+                row.error_message = error_message
+            else:
+                row = OcrPageResult(
+                    document_id=document_id, page_number=page_number,
+                    total_pages=total_pages, page_text=page_text,
+                    status=status, attempt_count=attempt_count,
+                    chars_extracted=len(page_text) if page_text else 0,
+                    duration_seconds=duration, error_message=error_message,
+                )
+                db_session.add(row)
+            await db_session.commit()
+        except Exception as e:
+            logger.error(f"Failed to save page result: {e}")
             try:
-                msg = f"Processing page {i+1}/{len(images)}"
-                logger.info(msg)
-                print(f"[OCR] {msg}")
-                # Use model-optimal image size
-                model_params = self.get_model_params(self.model)
-                optimal_size = max(self.max_image_size, model_params["max_image_size"])
-                prepared_bytes = self._prepare_image_for_ollama(img, max_size=optimal_size)
-                page_text = await self._ocr_single_image(prepared_bytes, page_num=i+1, total_pages=len(images))
-                
-                if not page_text or not page_text.strip():
-                     raise ValueError("Empty result from OCR model")
-                     
-                full_text_parts.append(page_text)
-            except Exception as e:
-                # STRICT MODE: If ONE page fails, the whole document fails.
-                # We do not want partial documents in Paperless.
-                error_msg = f"Error on page {i+1}: {e}"
-                logger.error(error_msg)
-                print(f"[OCR] {error_msg}")
-                raise ValueError(f"Multi-page consistency check failed: {error_msg}")
+                await db_session.rollback()
+            except Exception:
+                pass
 
-        if len(full_text_parts) != len(images):
-             raise ValueError(f"Page count mismatch: Expected {len(images)}, got {len(full_text_parts)}")
-
-        new_content = "\n\n".join(full_text_parts)
-        
-        duration = time.time() - start_time
-        
-        return {
-            "document_id": document_id,
-            "title": title,
-            "old_content": old_content,
-            "ocr_duration": duration,
-            "ocr_pages": len(images),
-            "new_content": new_content,
-            "old_length": len(old_content),
-            "new_length": len(new_content)
-        }
+    async def _cleanup_page_results(self, db_session, document_id: int):
+        """Remove page results from DB after successful completion."""
+        from sqlalchemy import delete
+        from app.models.ocr import OcrPageResult
+        try:
+            await db_session.execute(
+                delete(OcrPageResult).where(OcrPageResult.document_id == document_id)
+            )
+            await db_session.commit()
+            print(f"[OCR] Cleaned up page cache for document {document_id}")
+        except Exception as e:
+            logger.warning(f"Failed to cleanup page results: {e}")
 
     # Batch method uses ocr_document internally implicitly by calling ocr_image logic
     # But wait, batch_ocr calls ocr_image directly. We should update batch_ocr too to use ocr_document logic or reuse methods.
@@ -1029,12 +1216,32 @@ class OcrService:
                  batch_state["log"].append(f"⚠️ Warnung: Kein Server antwortet schnell. Nutze {self.get_current_url()}")
 
             if mode == "all":
-                # Get all documents
+                # Get all documents – with retry on connection errors
                 batch_state["log"].append("⏳ Lade Dokumentenliste von Paperless (das kann dauern)...")
-                all_docs = await paperless_client.get_documents()
+                all_docs = None
+                for _attempt in range(3):
+                    try:
+                        all_docs = await paperless_client.get_documents()
+                        break
+                    except Exception as fetch_err:
+                        if _attempt < 2:
+                            wait_sec = 30 * (_attempt + 1)
+                            batch_state["log"].append(
+                                f"⚠️ Paperless nicht erreichbar (Versuch {_attempt + 1}/3): {fetch_err} – "
+                                f"Retry in {wait_sec}s..."
+                            )
+                            logger.warning(f"batch_ocr: get_documents failed (attempt {_attempt+1}): {fetch_err}")
+                            await asyncio.sleep(wait_sec)
+                        else:
+                            batch_state["log"].append(
+                                f"❌ Paperless nach 3 Versuchen nicht erreichbar – Batch abgebrochen."
+                            )
+                            logger.error(f"batch_ocr: get_documents failed after 3 attempts: {fetch_err}")
+                            return
+
                 # Filter out those already having ocrfinish, ocrpruefen, or ocrfehler tag
                 documents = [
-                    d for d in all_docs 
+                    d for d in all_docs
                     if ocrfinish_tag_id not in d.get("tags", [])
                     and ocrreview_tag_id not in d.get("tags", [])
                     and ocrerror_tag_id not in d.get("tags", [])
@@ -1111,8 +1318,10 @@ class OcrService:
                 batch_state["log"].append(f"🔄 [{i+1}/{len(documents)}] Verarbeite: {doc_title} (ID: {doc_id})")
                 
                 try:
-                    # Use the multi-page aware OCR logic
-                    ocr_result = await self.ocr_document(paperless_client, doc_id)
+                    # Use the multi-page aware OCR logic with DB persistence
+                    from app.database import async_session
+                    async with async_session() as db_sess:
+                        ocr_result = await self.ocr_document(paperless_client, doc_id, db_session=db_sess)
                     new_content = ocr_result.get("new_content")
                     old_content = ocr_result.get("old_content", "")
                     ocr_duration = ocr_result.get("ocr_duration", 0)
@@ -1133,9 +1342,10 @@ class OcrService:
                             # Wait briefly before retry to let Ollama stabilize
                             await asyncio.sleep(3)
                             
-                            # RETRY: Run OCR again on the same document
+                            # RETRY: Run OCR again fresh (force=True clears DB page cache)
                             try:
-                                retry_result = await self.ocr_document(paperless_client, doc_id)
+                                async with async_session() as db_sess2:
+                                    retry_result = await self.ocr_document(paperless_client, doc_id, force=True, db_session=db_sess2)
                                 retry_content = retry_result.get("new_content")
                                 retry_len = len(retry_content) if retry_content else 0
                                 
@@ -1167,6 +1377,7 @@ class OcrService:
                             if old_len > 100 and new_len < old_len * QUALITY_THRESHOLD:
                                 needs_review = True
                                 ratio = round(new_len / old_len * 100) if old_len > 0 else 0
+                                suggest_keep_original = old_len > 500 and ratio < 25
                                 batch_state["log"].append(
                                     f"⚠️ {doc_title}: Auch nach Retry nur {ratio}% des Originals "
                                     f"({new_len} vs {old_len} Zeichen) → In Prüfliste"
@@ -1180,11 +1391,11 @@ class OcrService:
                                     "old_length": old_len,
                                     "new_length": new_len,
                                     "ratio": ratio,
+                                    "suggest_keep_original": suggest_keep_original,
                                     "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
                                     "retried": True
                                 })
                                 save_review_queue(queue)
-                                
                                 # SET OCRPRUEFEN TAG
                                 try:
                                     add_t = [ocrreview_tag_id] if ocrreview_tag_id else []
@@ -1322,47 +1533,84 @@ class OcrService:
 
     async def watchdog_loop(self, paperless_client):
         """Continuous background loop to check for new documents."""
-        # Note: Imports are inside to avoid circular deps if any, but standard lib is fine.
-        import asyncio
         from datetime import datetime
-        
+
         logger.info("Watchdog started")
         print("[OCR] Watchdog started")
-        
+
+        # Cache tag objects so we don't query Paperless on every cycle
+        _ocrfinish_tag = None
+        _ocrpruefen_tag = None
+        _ocrerror_tag = None
+
+        async def _get_exclude_tag_ids():
+            nonlocal _ocrfinish_tag, _ocrpruefen_tag, _ocrerror_tag
+            try:
+                if _ocrfinish_tag is None:
+                    _ocrfinish_tag = await paperless_client.get_or_create_tag(TAG_OCR_FINISH)
+                if _ocrpruefen_tag is None:
+                    _ocrpruefen_tag = await paperless_client.get_or_create_tag(TAG_OCR_REVIEW)
+                if _ocrerror_tag is None:
+                    _ocrerror_tag = await paperless_client.get_or_create_tag(TAG_OCR_ERROR)
+                return [
+                    t["id"] for t in [_ocrfinish_tag, _ocrpruefen_tag, _ocrerror_tag]
+                    if t and t.get("id")
+                ]
+            except Exception:
+                return []
+
         while watchdog_state["enabled"]:
             try:
                 watchdog_state["running"] = True
-                
+
                 if batch_state["running"] or single_ocr_running:
                     reason = "Batch" if batch_state["running"] else "Single-OCR"
                     logger.info(f"Watchdog: {reason} already running, skipping this cycle")
                 else:
                     logger.info("Watchdog checking for new documents...")
                     print(f"[OCR] Watchdog check at {datetime.now().isoformat()}")
-                    
-                    # Run batch in "all" mode
-                    # This will update batch_state and UI will see it running.
-                    await self.batch_ocr(
-                        paperless_client, 
-                        mode="all", 
-                        set_finish_tag=True, 
-                        remove_runocr_tag=True
-                    )
-                    
+
+                    # --- Smart pre-check: only start batch when there's something to do ---
+                    should_run = True
+                    try:
+                        exclude_ids = await _get_exclude_tag_ids()
+                        if exclude_ids:
+                            pending_count = await paperless_client.get_document_count(
+                                tags_id_none=exclude_ids
+                            )
+                            # NOTE: Do NOT subtract the ignore list here – ignored documents already
+                            # have ocrfinish/ocrfehler tags and are excluded by the Paperless query.
+                            # Subtracting would cause false negatives when the ignore list is large.
+                            if pending_count == 0:
+                                logger.info("Watchdog: Keine neuen Dokumente – überspringe diesen Zyklus")
+                                should_run = False
+                            else:
+                                logger.info(f"Watchdog: ~{pending_count} Dokument(e) ohne OCR gefunden, starte Batch...")
+                    except Exception as check_err:
+                        logger.warning(f"Watchdog: Pre-Check fehlgeschlagen, starte Batch trotzdem: {check_err}")
+
+                    if should_run:
+                        await self.batch_ocr(
+                            paperless_client,
+                            mode="all",
+                            set_finish_tag=True,
+                            remove_runocr_tag=True
+                        )
+
                 watchdog_state["last_run"] = datetime.now().isoformat()
-                
+
             except Exception as e:
                 logger.error(f"Watchdog error: {e}")
                 print(f"[OCR] Watchdog error: {e}")
-            
-            # Wait for interval
+
+            # Idle between cycles – not "running" during the wait
+            watchdog_state["running"] = False
             interval_min = watchdog_state.get("interval_minutes", 1)
-            # Check every second to allow faster stopping
             for _ in range(interval_min * 60):
                 if not watchdog_state["enabled"]:
                     break
                 await asyncio.sleep(1)
-        
+
         watchdog_state["running"] = False
         logger.info("Watchdog stopped")
         print("[OCR] Watchdog stopped")

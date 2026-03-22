@@ -1,17 +1,87 @@
+import logging
+import sys
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.database import create_tables
-from app.routers import paperless, correspondents, tags, document_types, settings, llm, debug, statistics, ignored_items, ocr, cleanup
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s %(name)s: %(message)s",
+    stream=sys.stdout,
+)
+from app.routers import paperless, correspondents, tags, document_types, settings, llm, debug, statistics, ignored_items, ocr, cleanup, classifier
+from app.routers.ocr import ocr_settings, get_ocr_service
+from app.services.ocr_service import watchdog_state
+from app.services.paperless_client import PaperlessClient
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
+    from app.database import async_session
+    from app.models.settings_model import PaperlessSettings
+    from sqlalchemy import select as sa_select
+
     # Startup: Create database tables
     await create_tables()
+
+    # Auto-start watchdog if it was enabled before shutdown
+    if ocr_settings.get("watchdog_enabled"):
+        try:
+            async with async_session() as db_sess:
+                result = await db_sess.execute(sa_select(PaperlessSettings).where(PaperlessSettings.id == 1))
+                pl_settings = result.scalar_one_or_none()
+
+            if pl_settings and pl_settings.is_configured:
+                client = PaperlessClient(base_url=pl_settings.url, api_token=pl_settings.api_token)
+                service = get_ocr_service()
+                watchdog_state["enabled"] = True
+                watchdog_state["interval_minutes"] = ocr_settings.get("watchdog_interval", 5)
+                loop = asyncio.get_running_loop()
+                watchdog_state["task"] = loop.create_task(service.watchdog_loop(client))
+                logging.getLogger(__name__).info(
+                    f"Watchdog auto-started (interval: {watchdog_state['interval_minutes']} min)"
+                )
+            else:
+                logging.getLogger(__name__).warning(
+                    "Watchdog: Paperless nicht konfiguriert – Watchdog wird nicht gestartet."
+                )
+        except Exception as e:
+            logging.getLogger(__name__).error(f"Watchdog auto-start failed: {e}")
+
+    # Auto-start classifier background job if enabled
+    try:
+        from app.models.classifier import ClassifierConfig
+        async with async_session() as db_sess:
+            q = await db_sess.execute(sa_select(ClassifierConfig).where(ClassifierConfig.id == 1))
+            cls_config = q.scalars().first()
+            if cls_config and getattr(cls_config, "auto_classify_enabled", False):
+                from app.routers.classifier import _auto_classify_state, _auto_classify_loop
+                _auto_classify_state["enabled"] = True
+                asyncio.get_running_loop().create_task(_auto_classify_loop())
+                logging.getLogger(__name__).info("Auto-classify auto-started")
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Auto-classify auto-start failed: {e}")
+
     yield
-    # Shutdown: cleanup if needed
+    # Shutdown: stop auto-classify + watchdog gracefully
+    try:
+        from app.routers.classifier import _auto_classify_state
+        _auto_classify_state["enabled"] = False
+        task = _auto_classify_state.get("task")
+        if task and not task.done():
+            task.cancel()
+    except Exception:
+        pass
+
+    if watchdog_state.get("enabled"):
+        watchdog_state["enabled"] = False
+        task = watchdog_state.get("task")
+        if task and not task.done():
+            task.cancel()
 
 
 app = FastAPI(
@@ -42,6 +112,7 @@ app.include_router(statistics.router, prefix="/api/statistics", tags=["Statistic
 app.include_router(ignored_items.router, prefix="/api/ignored-items", tags=["Ignored Items"])
 app.include_router(ocr.router, prefix="/api/ocr", tags=["OCR"])
 app.include_router(cleanup.router, prefix="/api/cleanup", tags=["Cleanup"])
+app.include_router(classifier.router, prefix="/api/classifier", tags=["Classifier"])
 
 
 @app.get("/api/health")

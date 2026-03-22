@@ -3,6 +3,10 @@ from app.models.merge_history import MergeHistory, MergeHistoryItem
 from app.models.statistics import CleanupStatistics, DailyStats
 from app.models.saved_analysis import SavedAnalysis
 from app.models.cache_model import PaperlessCache
+from app.models.classifier import (
+    ClassifierConfig, StoragePathProfile, CustomFieldMapping, ClassificationHistory
+)
+from app.models.ocr import OcrPageResult
 
 __all__ = [
     "PaperlessSettings",
@@ -15,6 +19,11 @@ __all__ = [
     "CleanupStatistics",
     "DailyStats",
     "SavedAnalysis",
-    "PaperlessCache"
+    "PaperlessCache",
+    "ClassifierConfig",
+    "StoragePathProfile",
+    "CustomFieldMapping",
+    "ClassificationHistory",
+    "OcrPageResult",
 ]
 

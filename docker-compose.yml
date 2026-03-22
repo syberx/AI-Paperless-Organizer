@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
     container_name: paperless-organizer-backend
     ports:
-      - "8000:8000"
+      - "8081:8000"
     volumes:
       - ./backend/data:/app/data
     environment:
@@ -20,7 +20,7 @@ services:
       dockerfile: Dockerfile
     container_name: paperless-organizer-frontend
     ports:
-      - "3001:80"
+      - "8088:80"
     depends_on:
       - backend
     restart: unless-stopped

@@ -10,12 +10,14 @@ import PromptEditor from './components/PromptEditor'
 import DebugPanel from './components/DebugPanel'
 import OcrManager from './components/OcrManager'
 import CleanupManager from './components/CleanupManager'
+import DocumentClassifier from './components/DocumentClassifier'
 
 function App() {
   return (
     <Layout>
       <Routes>
         <Route path="/" element={<Dashboard />} />
+        <Route path="/classifier" element={<DocumentClassifier />} />
         <Route path="/ocr" element={<OcrManager />} />
         <Route path="/cleanup" element={<CleanupManager />} />
         <Route path="/correspondents" element={<CorrespondentManager />} />

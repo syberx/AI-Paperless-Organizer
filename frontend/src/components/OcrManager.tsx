@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
     ScanLine,
     Settings,
@@ -16,6 +17,7 @@ import {
     RotateCcw,
     XCircle,
     Ban,
+    CheckCircle2,
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
@@ -29,8 +31,16 @@ type BatchMode = 'all' | 'tagged' | 'manual'
 type Tab = 'processing' | 'single' | 'review' | 'compare' | 'stats' | 'settings' | 'ignore' | 'errors'
 
 export default function OcrManager() {
-    const [activeTab, setActiveTab] = useState<Tab>('processing')
+    const [searchParams] = useSearchParams()
+    const initialTab = (searchParams.get('tab') as Tab) || 'processing'
+    const [activeTab, setActiveTab] = useState<Tab>(initialTab)
     const [recheckDocId, setRecheckDocId] = useState<number | null>(null)
+
+    // Switch tab when URL param changes (e.g. sidebar link)
+    useEffect(() => {
+        const t = searchParams.get('tab') as Tab | null
+        if (t) setActiveTab(t)
+    }, [searchParams])
 
     // Handler: Review -> SingleOcr recheck
     const handleRecheckDocument = (docId: number) => {
@@ -67,10 +77,10 @@ export default function OcrManager() {
         refreshCounts()
         const rPoll = setInterval(refreshCounts, 15000)
 
-        // Always poll for watchdog and batch status every 5 seconds if not running
+        // Background poll – only when batch is NOT running (startPolling covers the running case)
         const bgPoll = setInterval(() => {
             if (!batchRunning) checkStatus()
-        }, 5000)
+        }, 15000)
 
         return () => {
             if (pollInterval.current) clearInterval(pollInterval.current)
@@ -128,7 +138,7 @@ export default function OcrManager() {
                     api.getWatchdogStatus().then(setWatchdogStatus)
                 }
             } catch { }
-        }, 1000)
+        }, 3000)
     }
 
     const startBatch = async () => {
@@ -408,6 +418,51 @@ export default function OcrManager() {
                                                 )}
                                             </div>
                                         </div>
+                                        {/* Live page progress for current document */}
+                                        {batchStatus.current_page_progress && (batchStatus.current_page_progress.total_pages ?? 0) > 0 && (
+                                            <div className="rounded-xl bg-surface-800/60 border border-cyan-500/20 p-3 space-y-2">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-2">
+                                                        <Loader2 className="w-3.5 h-3.5 text-cyan-400 animate-spin" />
+                                                        <span className="text-xs text-cyan-300 font-medium">
+                                                            Seite {batchStatus.current_page_progress.current_page}/{batchStatus.current_page_progress.total_pages}
+                                                        </span>
+                                                    </div>
+                                                    <span className="text-xs text-surface-500">
+                                                        {batchStatus.current_page_progress.done}/{batchStatus.current_page_progress.total_pages} fertig
+                                                        {batchStatus.current_page_progress.errors ? ` · ${batchStatus.current_page_progress.errors} Fehler` : ''}
+                                                    </span>
+                                                </div>
+                                                {/* Page progress bar */}
+                                                <div className="w-full bg-surface-700/50 rounded-full h-1.5 overflow-hidden">
+                                                    <div
+                                                        className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-cyan-400 transition-all duration-500"
+                                                        style={{ width: `${Math.round(((batchStatus.current_page_progress.done || 0) / (batchStatus.current_page_progress.total_pages || 1)) * 100)}%` }}
+                                                    />
+                                                </div>
+                                                {/* Page tiles */}
+                                                <div className="flex flex-wrap gap-1">
+                                                    {(batchStatus.current_page_progress.pages || []).map((pg) => (
+                                                        <div
+                                                            key={pg.page}
+                                                            className={clsx(
+                                                                'w-7 h-7 rounded flex flex-col items-center justify-center text-[10px] font-mono border transition-all',
+                                                                pg.status === 'done' && 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300',
+                                                                pg.status === 'processing' && 'bg-cyan-500/20 border-cyan-500/40 text-cyan-300 animate-pulse',
+                                                                pg.status === 'error' && 'bg-red-500/20 border-red-500/40 text-red-300',
+                                                                pg.status === 'pending' && 'bg-surface-700/30 border-surface-600/30 text-surface-500',
+                                                            )}
+                                                        >
+                                                            <span className="leading-none">{pg.page}</span>
+                                                            {pg.status === 'done' && <CheckCircle2 className="w-2 h-2" />}
+                                                            {pg.status === 'processing' && <Loader2 className="w-2 h-2 animate-spin" />}
+                                                            {pg.status === 'error' && <XCircle className="w-2 h-2" />}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
                                         <div
                                             ref={logContainerRef}
                                             className="rounded-xl bg-black/40 border border-surface-700/50 p-4 font-mono text-xs h-64 overflow-y-auto custom-scrollbar shadow-inner"
@@ -487,9 +542,9 @@ export default function OcrManager() {
         </div>
     )
 }
-// ---- Prüfen Tab (Review queue only, no inline lists below) ----
+// ---- Prüfen Tab (with ignore list visible below) ----
 function OcrReviewTab({ onRecheckDocument }: { onRecheckDocument?: (id: number) => void }) {
-    return <OcrReview onRecheckDocument={onRecheckDocument} hideSubLists />
+    return <OcrReview onRecheckDocument={onRecheckDocument} />
 }
 
 // ---- Fehler Tab ----
@@ -497,6 +552,7 @@ function OcrErrorTab({ onCountChange }: { onCountChange: (n: number) => void }) 
     const [items, setItems] = useState<api.OcrErrorItem[]>([])
     const [loading, setLoading] = useState(true)
     const [actionLoading, setActionLoading] = useState<number | null>(null)
+    const [bulkLoading, setBulkLoading] = useState(false)
     const [success, setSuccess] = useState('')
     const [error, setError] = useState('')
 
@@ -515,12 +571,19 @@ function OcrErrorTab({ onCountChange }: { onCountChange: (n: number) => void }) 
         }
     }
 
+    const removeEntry = (docId: number) => {
+        setItems(prev => {
+            const next = prev.filter(i => i.document_id !== docId)
+            onCountChange(next.length)
+            return next
+        })
+    }
+
     const retry = async (docId: number, title: string) => {
         setActionLoading(docId)
         try {
             await api.removeFromOcrErrorList(docId)
-            setItems(prev => prev.filter(i => i.document_id !== docId))
-            onCountChange(items.length - 1)
+            removeEntry(docId)
             setSuccess(`"${title}" – Fehlerzähler zurückgesetzt, wird beim nächsten Batch erneut versucht.`)
             setTimeout(() => setSuccess(''), 5000)
         } catch (e: any) {
@@ -530,8 +593,47 @@ function OcrErrorTab({ onCountChange }: { onCountChange: (n: number) => void }) 
         }
     }
 
+    const ignoreOne = async (docId: number, title: string) => {
+        setActionLoading(docId)
+        try {
+            await Promise.all([
+                api.addToOcrIgnoreList(docId),
+                api.removeFromOcrErrorList(docId),
+            ])
+            removeEntry(docId)
+            setSuccess(`"${title}" – zur Ignore-Liste hinzugefügt, wird künftig übersprungen.`)
+            setTimeout(() => setSuccess(''), 5000)
+        } catch (e: any) {
+            setError(e?.message || 'Fehler')
+        } finally {
+            setActionLoading(null)
+        }
+    }
+
+    const ignoreAll = async () => {
+        if (!confirm(`Alle ${items.length} Dokumente ignorieren? Sie werden zur Ignore-Liste verschoben und nicht mehr verarbeitet.`)) return
+        setBulkLoading(true)
+        try {
+            await Promise.all(items.map(it =>
+                Promise.all([
+                    api.addToOcrIgnoreList(it.document_id),
+                    api.removeFromOcrErrorList(it.document_id),
+                ])
+            ))
+            setItems([])
+            onCountChange(0)
+            setSuccess(`${items.length} Dokumente ignoriert – Fehlerliste ist jetzt leer.`)
+            setTimeout(() => setSuccess(''), 5000)
+        } catch (e: any) {
+            setError(e?.message || 'Fehler')
+            await load()
+        } finally {
+            setBulkLoading(false)
+        }
+    }
+
     const clearAll = async () => {
-        if (!confirm(`Alle ${items.length} Einträge von der Fehlerliste entfernen?`)) return
+        if (!confirm(`Alle ${items.length} Einträge von der Fehlerliste entfernen (ohne zu ignorieren)?`)) return
         try {
             await api.clearOcrErrorList()
             setItems([])
@@ -546,7 +648,7 @@ function OcrErrorTab({ onCountChange }: { onCountChange: (n: number) => void }) 
     return (
         <div className="space-y-6">
             {/* Header */}
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-3">
                 <div>
                     <h2 className="font-display text-3xl font-bold text-white flex items-center gap-3">
                         <div className="p-2 bg-gradient-to-br from-red-500 to-red-700 rounded-xl shadow-lg shadow-red-500/20">
@@ -563,15 +665,23 @@ function OcrErrorTab({ onCountChange }: { onCountChange: (n: number) => void }) 
                         Dokumente die nach 3 Fehlversuchen dauerhaft markiert wurden (Tag: <code className="text-red-300 text-sm">ocrfehler</code>)
                     </p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                     <button onClick={load} className="btn bg-surface-700 hover:bg-surface-600 text-surface-200 flex items-center gap-2">
                         <RotateCcw className="w-4 h-4" /> Aktualisieren
                     </button>
-                    {items.length > 0 && (
+                    {items.length > 0 && (<>
+                        <button
+                            onClick={ignoreAll}
+                            disabled={bulkLoading}
+                            className="btn bg-amber-600/20 hover:bg-amber-600/40 text-amber-300 border border-amber-500/30 flex items-center gap-2 disabled:opacity-50"
+                        >
+                            {bulkLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Ban className="w-4 h-4" />}
+                            Alle ignorieren
+                        </button>
                         <button onClick={clearAll} className="btn bg-red-600/20 hover:bg-red-600/40 text-red-300 border border-red-500/30 flex items-center gap-2">
                             <XCircle className="w-4 h-4" /> Alle löschen
                         </button>
-                    )}
+                    </>)}
                 </div>
             </div>
 
@@ -589,15 +699,15 @@ function OcrErrorTab({ onCountChange }: { onCountChange: (n: number) => void }) 
                 </div>
             ) : items.length === 0 ? (
                 <div className="card p-12 text-center border border-surface-700/50 bg-surface-800/40">
-                    <AlertTriangle className="w-14 h-14 text-surface-600 mx-auto mb-4" />
+                    <CheckCircle2 className="w-14 h-14 text-emerald-500 mx-auto mb-4" />
                     <p className="text-xl font-bold text-white">Keine Fehler 🎉</p>
                     <p className="text-surface-400 mt-2">Alle Dokumente konnten verarbeitet werden.</p>
                 </div>
             ) : (
                 <div className="space-y-2">
                     <p className="text-sm text-surface-500 mb-3">
-                        "Retry" entfernt das Dokument von der Fehlerliste und löscht den <code className="text-red-300">ocrfehler</code> Tag —
-                        beim nächsten Batch wird ein neuer Versuch gestartet.
+                        <span className="text-amber-400 font-medium">Ignorieren</span> → dauerhaft überspringen (zur Ignore-Liste) ·{' '}
+                        <span className="text-primary-400 font-medium">Retry</span> → Fehlerzähler zurücksetzen, nächster Batch versucht es erneut
                     </p>
                     {items.map(entry => (
                         <div key={entry.document_id} className="flex items-center justify-between p-4 rounded-xl bg-surface-800/40 border border-red-500/20 gap-4">
@@ -615,17 +725,32 @@ function OcrErrorTab({ onCountChange }: { onCountChange: (n: number) => void }) 
                                     <p className="text-xs text-red-300/70 mt-1 truncate" title={entry.error}>{entry.error}</p>
                                 </div>
                             </div>
-                            <button
-                                onClick={() => retry(entry.document_id, entry.title)}
-                                disabled={actionLoading === entry.document_id}
-                                className="btn bg-surface-700 hover:bg-primary-600 text-surface-400 hover:text-white text-xs px-4 py-2 flex items-center gap-2 disabled:opacity-50 shrink-0"
-                            >
-                                {actionLoading === entry.document_id
-                                    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                    : <RotateCcw className="w-3.5 h-3.5" />
-                                }
-                                Retry
-                            </button>
+                            <div className="flex gap-2 shrink-0">
+                                <button
+                                    onClick={() => ignoreOne(entry.document_id, entry.title)}
+                                    disabled={actionLoading === entry.document_id}
+                                    title="Dauerhaft ignorieren – nie wieder versuchen"
+                                    className="btn bg-amber-600/20 hover:bg-amber-600/50 text-amber-300 hover:text-amber-100 text-xs px-3 py-2 flex items-center gap-1.5 disabled:opacity-50"
+                                >
+                                    {actionLoading === entry.document_id
+                                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        : <Ban className="w-3.5 h-3.5" />
+                                    }
+                                    Ignorieren
+                                </button>
+                                <button
+                                    onClick={() => retry(entry.document_id, entry.title)}
+                                    disabled={actionLoading === entry.document_id}
+                                    title="Fehlerzähler zurücksetzen – nächster Batch versucht es erneut"
+                                    className="btn bg-surface-700 hover:bg-primary-600 text-surface-400 hover:text-white text-xs px-3 py-2 flex items-center gap-1.5 disabled:opacity-50"
+                                >
+                                    {actionLoading === entry.document_id
+                                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        : <RotateCcw className="w-3.5 h-3.5" />
+                                    }
+                                    Retry
+                                </button>
+                            </div>
                         </div>
                     ))}
                 </div>
