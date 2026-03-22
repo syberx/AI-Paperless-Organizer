@@ -13,6 +13,9 @@
 
 </div>
 
+> **⚠️ Frueher Betatest – Bitte vor der Nutzung IMMER ein vollstaendiges Paperless-ngx Backup erstellen!**
+> Dieses Projekt befindet sich in aktiver Entwicklung. Es werden Dokumente, Tags, Korrespondenten und Metadaten in Paperless-ngx veraendert. Fehler koennen vorkommen. **Keine Garantie, keine Haftung bei Datenverlust oder fehlerhaften Aenderungen.** Nutzung auf eigenes Risiko.
+
 ---
 
 ## 🚀 Warum AI Paperless Organizer?
