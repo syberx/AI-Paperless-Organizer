@@ -20,24 +20,20 @@
 
 ## 🚀 Warum AI Paperless Organizer?
 
-Tools wie **Paperless-GPT** und **Paperless-AI** klassifizieren Dokumente beim Import – aber sie lösen nicht das eigentliche Problem: **Was ist mit den Tausenden Dokumenten die bereits in deinem System schlummern?** Und was wenn die automatische Klassifizierung Fehler gemacht hat?
+Es gibt andere Tools die Dokumente beim Import klassifizieren – aber sie lösen nicht das eigentliche Problem: **Was ist mit den Tausenden Dokumenten die bereits in deinem System schlummern?** Und was wenn die automatische Klassifizierung Fehler gemacht hat?
 
-**AI Paperless Organizer** setzt dort an, wo andere aufhören:
+**AI Paperless Organizer** setzt den Fokus auf **Flexibilität, Tiefe und Kontrolle** – du entscheidest wie viel die KI alleine macht:
 
-| | Paperless-GPT / Paperless-AI | **AI Paperless Organizer** |
-|--|------------------------------|---------------------------|
-| Neue Dokumente klassifizieren | ✅ Automatisch beim Import | ✅ Manuell mit voller Kontrolle |
-| **Bestehende Dokumente nachklassifizieren** | ❌ | ✅ **Jedes Dokument einzeln oder im Batch** |
-| **Klassifizierung prüfen & korrigieren** | ❌ Läuft blind durch | ✅ **Jeder Vorschlag editierbar vor dem Speichern** |
-| **Bestehende Tags/Korrespondenten nutzen** | ⚠️ Erfindet oft neue | ✅ **Sucht aktiv in deinen Paperless-Daten** |
-| **Speicherpfad-Zuordnung nach Personen** | ❌ | ✅ **Konfigurierbare Profile (privat/geschäftlich)** |
-| **Custom Fields extrahieren** | ❌ | ✅ **IBAN, Rechnungsnr., Betrag, etc.** |
-| **Metadaten-Chaos bereinigen** | ❌ | ✅ **Duplikate finden & zusammenführen** |
-| **OCR verbessern** | ❌ | ✅ **Ollama Vision, Batch, Watchdog** |
-| **Modelle vergleichen (lokal vs. Cloud)** | ❌ | ✅ **Benchmark: bis zu 4 Provider gleichzeitig** |
-| **100% lokal möglich** | ⚠️ Teilweise | ✅ **Vollständig mit Ollama** |
+- ⚡ **Drei Modi: Vollautomatisch, Halb-automatisch oder Manuell** – Lass die KI alles sofort anwenden, nur unsichere Ergebnisse zur Prüfung vorlegen, oder jeden Vorschlag selbst abnehmen. Du stellst ein was du willst.
+- 📂 **Speicherpfad-Profile** – Konfiguriere Personen-Profile (privat, geschäftlich, Kinder, Partner) mit Kontext-Beschreibung. Die KI ordnet Dokumente automatisch dem richtigen Ordner zu – inklusive Begründung.
+- 🔧 **Custom Fields** – Extrahiere beliebige Felder direkt aus dem Dokumentinhalt: IBAN, Rechnungsnummer, Betrag, Kundennummer, Vertragsnummer, ... vollständig konfigurierbar.
+- 🚫 **Feingranulare Ausschlüsse & Schutzmechanismen** – Geschützte Tags die nie entfernt werden, Dokumente mit bestimmten Tags/Korrespondenten komplett überspringen, einzelne Felder deaktivieren.
+- ✏️ **Prompts pro Feld anpassen** – Individuelle Anweisung für Titel, Tags, Korrespondent, Typ und Datum. Die KI macht genau was du ihr sagst.
+- 🏆 **Lokal vs. Cloud Benchmark** – Teste bis zu 4 LLM-Provider gleichzeitig auf demselben Dokument und finde heraus welches Modell für deine Dokumente am besten passt – ohne Bauchgefühl.
+- 🧹 **Metadaten-Bereinigung** – Nicht nur klassifizieren, sondern auch das bestehende Chaos aufräumen: doppelte Korrespondenten, unsinnige Tags, Dokumententyp-Duplikate zusammenführen.
+- 📷 **OCR mit Ollama Vision** – Bessere Texterkennung für Scans, mit Watchdog für automatische Verarbeitung neuer Dokumente.
 
-> 💡 **Kurz gesagt:** Paperless-GPT/AI läuft im Hintergrund beim Import. AI Paperless Organizer gibt dir die **volle Kontrolle** – über neue UND bestehende Dokumente, mit transparenten Vorschlägen die du vor dem Speichern anpassen kannst.
+> 💡 **Kurz gesagt:** Vollautomatisch wenn du willst – mit voller Kontrolle wenn du sie brauchst.
 
 ---
 
@@ -419,6 +415,7 @@ docker-compose up -d --build
 | Provider | API Key von | Empfohlenes Modell | Metadaten-Bereinigung | Klassifizierer |
 |----------|-------------|-------------------|-----------------------|----------------|
 | **OpenAI** | [platform.openai.com](https://platform.openai.com/api-keys) | `gpt-4o-mini` / `gpt-4o` | ✅ Getestet | ✅ Getestet |
+| **Mistral** | [console.mistral.ai](https://console.mistral.ai/) | `mistral-small-latest` | 🔄 Beta | ✅ Getestet |
 | **Ollama** | Kein Key nötig! | `llama3.1` / `qwen2.5` | 🔄 Beta | ✅ Getestet |
 | **Anthropic** | [console.anthropic.com](https://console.anthropic.com/) | `claude-3-5-sonnet` | 🔄 Beta | 🔄 Beta |
 | **Azure** | Azure Portal | Dein Deployment | 🔄 Beta | 🔄 Beta |
@@ -510,8 +507,8 @@ docker-compose up -d --build
 | **Frontend** | React 18, TypeScript, Vite, TailwindCSS |
 | **Database** | SQLite (für Cache, History, Einstellungen) |
 | **Container** | Docker, Docker Compose |
-| **LLM (Bereinigung)** | OpenAI, Anthropic, Azure, Ollama |
-| **LLM (Klassifizierer)** | OpenAI Tool-Calling, Ollama Multi-Call |
+| **LLM (Bereinigung)** | OpenAI, Mistral, Anthropic, Azure, Ollama |
+| **LLM (Klassifizierer)** | OpenAI Tool-Calling, Mistral, Ollama Multi-Call |
 | **OCR** | Ollama Vision API (qwen3-vl, glm-ocr, minicpm-v, etc.) |
 
 ---
