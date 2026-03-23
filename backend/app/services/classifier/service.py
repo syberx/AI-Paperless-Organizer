@@ -1013,6 +1013,11 @@ class DocumentClassifierService:
         if result.error:
             return {"document_id": document_id, "action": "error", "reason": result.error}
 
+        # Sync tags_new with actual result.tags (verification may have removed some)
+        if result.tags_new and result.tags:
+            final_tag_set = {t.lower() for t in result.tags}
+            result.tags_new = [t for t in result.tags_new if t.lower() in final_tag_set]
+
         # Extract new tag ideas before applying
         tag_ideas = list(result.tags_new) if result.tags_new else []
         has_tag_ideas = len(tag_ideas) > 0
