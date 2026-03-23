@@ -1144,7 +1144,7 @@ async def get_auto_classify_status():
         "reviewed": _auto_classify_state["reviewed"],
         "current_doc": _auto_classify_state["current_doc"],
         "last_run": _auto_classify_state["last_run"],
-        "waiting_for": ollama_holder() if ollama_is_locked() and not _auto_classify_state["running"] else None,
+        "waiting_for": ollama_holder() if ollama_is_locked() and _auto_classify_state["enabled"] and ollama_holder() != "classifier" else None,
     }
 
 

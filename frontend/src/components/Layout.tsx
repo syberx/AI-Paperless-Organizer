@@ -23,7 +23,8 @@ import {
   ChevronDown,
   ChevronRight,
   FolderOpen,
-  Ban
+  Ban,
+  Clock
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
@@ -416,18 +417,24 @@ export default function Layout({ children }: LayoutProps) {
             {autoClassifyStatus?.enabled && (
               <Link to="/classifier" className="block group">
                 <div className="flex items-center gap-2 text-sm">
-                  {autoClassifyStatus.running ? (
+                  {autoClassifyStatus.waiting_for ? (
+                    <Clock className="w-4 h-4 text-yellow-400 flex-shrink-0" />
+                  ) : autoClassifyStatus.running ? (
                     <Loader2 className="w-4 h-4 text-amber-400 animate-spin flex-shrink-0" />
                   ) : (
                     <Eye className="w-4 h-4 text-surface-400 flex-shrink-0" />
                   )}
                   <span className={clsx(
                     'font-medium truncate',
-                    autoClassifyStatus.running ? 'text-amber-300' : 'text-surface-400'
+                    autoClassifyStatus.waiting_for ? 'text-yellow-400'
+                      : autoClassifyStatus.running ? 'text-amber-300'
+                      : 'text-surface-400'
                   )}>
-                    {autoClassifyStatus.running
-                      ? `Klassifiziert #${autoClassifyStatus.current_doc || '...'}`
-                      : 'Klassifizierer aktiv'}
+                    {autoClassifyStatus.waiting_for
+                      ? `Wartet auf ${autoClassifyStatus.waiting_for === 'ocr-batch' ? 'OCR' : autoClassifyStatus.waiting_for}`
+                      : autoClassifyStatus.running
+                        ? `Klassifiziert #${autoClassifyStatus.current_doc || '...'}`
+                        : 'Klassifizierer aktiv'}
                   </span>
                 </div>
                 {(autoClassifyStatus.processed > 0 || autoClassifyStatus.reviewed > 0) && (
