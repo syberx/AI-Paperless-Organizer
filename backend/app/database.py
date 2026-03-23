@@ -64,6 +64,8 @@ async def _migrate_columns(conn):
         ("classifier_history", "tag_ideas", "TEXT DEFAULT '[]'"),
         ("classifier_config", "mistral_api_key", "TEXT DEFAULT ''"),
         ("classifier_config", "mistral_model", "TEXT DEFAULT 'mistral-small-latest'"),
+        ("classifier_config", "openrouter_api_key", "TEXT DEFAULT ''"),
+        ("classifier_config", "openrouter_model", "TEXT DEFAULT 'mistralai/mistral-small-2603'"),
     ]
 
     for table, column, col_type in migrations:
