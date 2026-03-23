@@ -575,9 +575,9 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
                                 pass
                         if sp_id in valid_path_ids:
                             result.storage_path_id = sp_id
-                            result.storage_path_reason = verify_data.get(
-                                "storage_path_reason", result.storage_path_reason
-                            )
+                            raw_reason = verify_data.get("storage_path_reason", "")
+                            if raw_reason and not self._contains_non_latin(raw_reason):
+                                result.storage_path_reason = raw_reason
                         else:
                             logger.warning(f"Verification path_id {sp_id} invalid – ignored")
 
@@ -780,6 +780,24 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
             logger.info(f"Ollama generate cleaned ({len(content)} chars): {content[:200]}")
             return content
 
+    @staticmethod
+    def _contains_non_latin(text: str) -> bool:
+        """Return True if the text contains CJK or other non-Latin script characters."""
+        for ch in text:
+            cp = ord(ch)
+            # CJK Unified Ideographs + Extensions, Katakana, Hiragana, Hangul, Arabic, etc.
+            if (
+                0x4E00 <= cp <= 0x9FFF   # CJK main block
+                or 0x3400 <= cp <= 0x4DBF  # CJK Ext-A
+                or 0x20000 <= cp <= 0x2A6DF  # CJK Ext-B
+                or 0x3040 <= cp <= 0x30FF   # Hiragana / Katakana
+                or 0xAC00 <= cp <= 0xD7AF   # Hangul
+                or 0x0600 <= cp <= 0x06FF   # Arabic
+                or 0x0400 <= cp <= 0x04FF   # Cyrillic
+            ):
+                return True
+        return False
+
     def _is_hallucinated_correspondent(self, value: str) -> bool:
         """Detect correspondent values that are clearly hallucinations."""
         if not value:
@@ -790,6 +808,9 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
             return True
         # Suspiciously long (> 120 chars)
         if len(value) > 120:
+            return True
+        # Non-Latin script (Chinese, Japanese, Korean, Arabic, Cyrillic …)
+        if self._contains_non_latin(value):
             return True
         # Known hallucination fragments from LLM training data bleed-through
         _HALLUCINATION_PATTERNS = (
