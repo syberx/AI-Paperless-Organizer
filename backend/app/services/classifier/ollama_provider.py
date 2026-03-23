@@ -44,6 +44,11 @@ OLLAMA_CALL_TIMEOUT = 180.0
 
 THINKING_MODEL_PREFIXES = ("qwen3", "deepseek-r1", "qwq")
 
+# Models known to hallucinate JSON values even when format=json is set.
+# For these we use strict enum-based schemas to constrain grammar at tokenizer level.
+# Well-behaved models (qwen3, qwen2.5, llama3, etc.) don't need this overhead.
+_STRICT_SCHEMA_MODELS = ("mistral",)
+
 # --- JSON Schemas for structured Ollama output ---
 # Forces grammar-based constrained generation – prevents models like mistral-nemo
 # from returning arbitrary JSON structures that don't match the expected schema.
@@ -114,6 +119,10 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
         self.tool_executor = tool_executor
         self._is_thinking = any(
             k in self.model.lower() for k in THINKING_MODEL_PREFIXES
+        )
+        # Use strict enum-constrained schemas for models known to hallucinate values
+        self._use_strict_schemas = any(
+            k in self.model.lower() for k in _STRICT_SCHEMA_MODELS
         )
 
     def get_name(self) -> str:
@@ -276,15 +285,17 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
                         f"VERFUEGBARE TYPEN: {', '.join(type_names)}\n\n"
                         'Antworte als JSON: {"document_type": "Name"}'
                     )
-                    # Enum-schema: model can only output a valid type name or null
-                    dtype_schema = {
-                        "type": "object",
-                        "required": ["document_type"],
-                        "properties": {
-                            "document_type": {"type": ["string", "null"], "enum": type_names + [None]},
-                        },
-                        "additionalProperties": False,
-                    }
+                    # Strict models: enum constrains output to only valid type names
+                    dtype_schema = _SCHEMA_DOCTYPE
+                    if self._use_strict_schemas:
+                        dtype_schema = {
+                            "type": "object",
+                            "required": ["document_type"],
+                            "properties": {
+                                "document_type": {"type": ["string", "null"], "enum": type_names + [None]},
+                            },
+                            "additionalProperties": False,
+                        }
                     dtype_response = await self._call_ollama(dtype_prompt, "", max_tokens=80, json_schema=dtype_schema)
                     total_calls += 1
                     dtype_data = self._parse_json(dtype_response)
@@ -356,23 +367,28 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
 
                     result.debug_info["tag_prompt_length"] = len(tag_prompt)
 
-                    # Enum-schema: model can ONLY return tag names from candidate_tags
                     candidate_set_lower = {t.lower(): t for t in candidate_tags}
-                    tags_enum_schema = {
-                        "type": "object",
-                        "required": ["tags"],
-                        "properties": {
-                            "tags": {
-                                "type": "array",
-                                "items": {"type": "string", "enum": candidate_tags},
-                                "minItems": 0,
-                                "maxItems": tags_max,
-                            },
-                        },
-                        "additionalProperties": False,
-                    }
 
-                    tag_response = await self._call_ollama(tag_prompt, "", max_tokens=200, json_schema=tags_enum_schema)
+                    # Strict models: enum constrains output to only valid tag names
+                    # (avoids heavy grammar for well-behaved models like qwen/llama)
+                    if self._use_strict_schemas:
+                        tags_schema = {
+                            "type": "object",
+                            "required": ["tags"],
+                            "properties": {
+                                "tags": {
+                                    "type": "array",
+                                    "items": {"type": "string", "enum": candidate_tags},
+                                    "minItems": 0,
+                                    "maxItems": tags_max,
+                                },
+                            },
+                            "additionalProperties": False,
+                        }
+                    else:
+                        tags_schema = _SCHEMA_TAGS
+
+                    tag_response = await self._call_ollama(tag_prompt, "", max_tokens=200, json_schema=tags_schema)
                     total_calls += 1
                     result.debug_info["tag_raw_response"] = tag_response[:300]
 
@@ -430,19 +446,23 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
                     ]
                     result.debug_info["storage_path_prompt_length"] = len(path_prompt)
 
-                    # Enum-schema: model can only pick a valid path ID (or null)
                     valid_path_ids = [p["id"] for p in paths]
-                    path_enum_schema = {
-                        "type": "object",
-                        "required": ["path_id", "reason"],
-                        "properties": {
-                            "path_id": {"enum": valid_path_ids + [None]},
-                            "reason":  {"type": "string"},
-                        },
-                        "additionalProperties": False,
-                    }
 
-                    path_response = await self._call_ollama(path_prompt, "", max_tokens=200, json_schema=path_enum_schema)
+                    # Strict models: enum constrains path_id to only valid IDs
+                    if self._use_strict_schemas:
+                        path_schema = {
+                            "type": "object",
+                            "required": ["path_id", "reason"],
+                            "properties": {
+                                "path_id": {"enum": valid_path_ids + [None]},
+                                "reason":  {"type": "string"},
+                            },
+                            "additionalProperties": False,
+                        }
+                    else:
+                        path_schema = _SCHEMA_STORAGE_PATH
+
+                    path_response = await self._call_ollama(path_prompt, "", max_tokens=200, json_schema=path_schema)
                     total_calls += 1
                     result.debug_info["storage_path_raw_response"] = path_response
 
