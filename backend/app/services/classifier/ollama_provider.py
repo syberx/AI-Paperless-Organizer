@@ -168,9 +168,11 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
         result.debug_info["model"] = self.model
         result.debug_info["is_thinking"] = self._is_thinking
 
-        # Shared across calls; populated when tags are fetched
+        # Shared across calls – populated in their respective call blocks
         candidate_tags: List[str] = []
         candidate_set_lower: Dict[str, str] = {}
+        type_names: List[str] = []
+        valid_path_ids: List[int] = []
 
         try:
             # --- Call 1: Analyze (title, correspondent, date, summary) ---
@@ -246,12 +248,7 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
             if config.get("enable_correspondent", True):
                 corr = analysis_data.get("correspondent")
                 # Discard obvious hallucinations: URLs, placeholder strings, suspiciously long values
-                if corr and (
-                    corr.startswith(("http://", "https://", "www."))
-                    or len(corr) > 120
-                    or "placeholder" in corr.lower()
-                    or "field in the json" in corr.lower()
-                ):
+                if corr and self._is_hallucinated_correspondent(corr):
                     logger.warning(f"Correspondent looks like hallucination, discarding: {corr[:80]}")
                     corr = None
                 result.correspondent = corr
@@ -265,7 +262,7 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
             if config.get("enable_document_type", True) and self.tool_executor:
                 doc_types_data = await self.tool_executor.execute("get_document_types", {})
                 doc_types = json.loads(doc_types_data)
-                type_names = [dt["name"] for dt in doc_types] if doc_types else []
+                type_names = [dt["name"] for dt in doc_types] if doc_types else []  # shared scope
 
                 if type_names:
                     dtype_prompt = (
@@ -446,7 +443,7 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
                     ]
                     result.debug_info["storage_path_prompt_length"] = len(path_prompt)
 
-                    valid_path_ids = [p["id"] for p in paths]
+                    valid_path_ids = [p["id"] for p in paths]  # shared scope
 
                     # Strict models: enum constrains path_id to only valid IDs
                     if self._use_strict_schemas:
@@ -540,7 +537,25 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
                     storage_paths=paths_text,
                 )
 
-                verify_response = await self._call_ollama(verify_prompt, "", max_tokens=300, json_schema=_SCHEMA_VERIFY)
+                # For strict-schema models: add enum constraints to verification too
+                if self._use_strict_schemas:
+                    verify_schema: Dict[str, Any] = {
+                        "type": "object",
+                        "properties": {
+                            "storage_path_id": {"enum": valid_path_ids + [None]},
+                            "storage_path_reason": {"type": "string"},
+                            "tags": {"type": "array", "items": {
+                                "type": "string", "enum": candidate_tags or [""],
+                            }},
+                            "document_type": {"type": ["string", "null"],
+                                              "enum": (type_names + [None]) if type_names else [None]},
+                            "correspondent": {"type": ["string", "null"]},
+                        },
+                    }
+                else:
+                    verify_schema = _SCHEMA_VERIFY
+
+                verify_response = await self._call_ollama(verify_prompt, "", max_tokens=300, json_schema=verify_schema)
                 total_calls += 1
                 verify_data = self._parse_json(verify_response)
 
@@ -551,13 +566,14 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
                     # storage_path_id: only accept if it's a valid ID from our list
                     if "storage_path_id" in verify_data and verify_data["storage_path_id"] is not None:
                         sp_id = verify_data["storage_path_id"]
-                        try:
-                            sp_data_v = await self.tool_executor.execute("get_storage_paths", {})
-                            sp_list_v = json.loads(sp_data_v)
-                            valid_sp_ids = [p["id"] for p in sp_list_v]
-                        except Exception:
-                            valid_sp_ids = []
-                        if sp_id in valid_sp_ids:
+                        # Use already-fetched valid_path_ids if available, else re-fetch
+                        if not valid_path_ids and self.tool_executor:
+                            try:
+                                sp_data_v = await self.tool_executor.execute("get_storage_paths", {})
+                                valid_path_ids = [p["id"] for p in json.loads(sp_data_v)]
+                            except Exception:
+                                pass
+                        if sp_id in valid_path_ids:
                             result.storage_path_id = sp_id
                             result.storage_path_reason = verify_data.get(
                                 "storage_path_reason", result.storage_path_reason
@@ -566,18 +582,30 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
                             logger.warning(f"Verification path_id {sp_id} invalid – ignored")
 
                     if "tags" in verify_data and isinstance(verify_data["tags"], list):
-                        # Filter to only valid tags from the previously fetched candidate list
                         result.tags = [
                             candidate_set_lower[t.lower()] if t.lower() in candidate_set_lower else t
                             for t in verify_data["tags"]
                             if isinstance(t, str) and (t in candidate_tags or t.lower() in candidate_set_lower)
                         ]
+
                     if "document_type" in verify_data and verify_data["document_type"]:
-                        result.document_type = verify_data["document_type"]
+                        dt_v = verify_data["document_type"]
+                        # Only accept if it's a known document type
+                        if not type_names or any(
+                            dt_v.lower() == tn.lower() for tn in type_names
+                        ):
+                            result.document_type = next(
+                                (tn for tn in type_names if tn.lower() == dt_v.lower()), dt_v
+                            ) if type_names else dt_v
+                        else:
+                            logger.warning(f"Verification document_type '{dt_v}' not in valid list – ignored")
+
                     if "correspondent" in verify_data and verify_data["correspondent"]:
                         corr_v = verify_data["correspondent"]
-                        if not (corr_v.startswith(("http://", "https://")) or len(corr_v) > 120):
+                        if not self._is_hallucinated_correspondent(corr_v):
                             result.correspondent = corr_v
+                        else:
+                            logger.warning(f"Verification correspondent looks like hallucination – ignored: {corr_v[:80]}")
                 else:
                     logger.info("Verification: no corrections needed or empty response")
                     result.debug_info["verification_corrections"] = None
@@ -751,6 +779,25 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
 
             logger.info(f"Ollama generate cleaned ({len(content)} chars): {content[:200]}")
             return content
+
+    def _is_hallucinated_correspondent(self, value: str) -> bool:
+        """Detect correspondent values that are clearly hallucinations."""
+        if not value:
+            return False
+        v = value.lower().strip()
+        # URL patterns
+        if v.startswith(("http://", "https://", "www.")):
+            return True
+        # Suspiciously long (> 120 chars)
+        if len(value) > 120:
+            return True
+        # Known hallucination fragments from LLM training data bleed-through
+        _HALLUCINATION_PATTERNS = (
+            "placeholder", "field in the json", "ckan", "api reference",
+            "openapi", "swagger", "graphql", "rest api", "json api",
+            "example.com", "lorem ipsum", "insert here", "your name",
+        )
+        return any(p in v for p in _HALLUCINATION_PATTERNS)
 
     def _strip_thinking_text(self, text: str) -> str:
         """Aggressively remove thinking preamble from response."""
