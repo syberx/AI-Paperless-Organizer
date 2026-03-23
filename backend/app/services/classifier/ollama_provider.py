@@ -44,6 +44,61 @@ OLLAMA_CALL_TIMEOUT = 180.0
 
 THINKING_MODEL_PREFIXES = ("qwen3", "deepseek-r1", "qwq")
 
+# --- JSON Schemas for structured Ollama output ---
+# Forces grammar-based constrained generation – prevents models like mistral-nemo
+# from returning arbitrary JSON structures that don't match the expected schema.
+_SCHEMA_ANALYZE = {
+    "type": "object",
+    "required": ["title", "correspondent", "created_date", "summary", "language"],
+    "properties": {
+        "title":         {"type": ["string", "null"]},
+        "correspondent": {"type": ["string", "null"]},
+        "created_date":  {"type": ["string", "null"]},
+        "summary":       {"type": "string"},
+        "language":      {"type": "string"},
+    },
+    "additionalProperties": False,
+}
+
+_SCHEMA_TAGS = {
+    "type": "object",
+    "required": ["tags"],
+    "properties": {
+        "tags": {"type": "array", "items": {"type": "string"}},
+    },
+    "additionalProperties": False,
+}
+
+_SCHEMA_DOCTYPE = {
+    "type": "object",
+    "required": ["document_type"],
+    "properties": {
+        "document_type": {"type": ["string", "null"]},
+    },
+    "additionalProperties": False,
+}
+
+_SCHEMA_STORAGE_PATH = {
+    "type": "object",
+    "required": ["path_id", "reason"],
+    "properties": {
+        "path_id": {"type": ["integer", "null"]},
+        "reason":  {"type": "string"},
+    },
+    "additionalProperties": False,
+}
+
+_SCHEMA_VERIFY = {
+    "type": "object",
+    "properties": {
+        "storage_path_id":     {"type": ["integer", "null"]},
+        "storage_path_reason": {"type": "string"},
+        "tags":                {"type": "array", "items": {"type": "string"}},
+        "document_type":       {"type": ["string", "null"]},
+        "correspondent":       {"type": ["string", "null"]},
+    },
+}
+
 
 class OllamaMultiCallProvider(BaseClassifierProvider):
     """Classifies documents using Ollama with sequential focused calls."""
@@ -157,6 +212,7 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
                     analyze_prompt,
                     analyze_user_msg,
                     max_tokens=500,
+                    json_schema=_SCHEMA_ANALYZE,
                 )
                 total_calls += 1
                 analysis_data = self._parse_json(analysis)
@@ -206,7 +262,7 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
                         f"VERFUEGBARE TYPEN: {', '.join(type_names)}\n\n"
                         'Antworte als JSON: {"document_type": "Name"}'
                     )
-                    dtype_response = await self._call_ollama(dtype_prompt, "", max_tokens=80)
+                    dtype_response = await self._call_ollama(dtype_prompt, "", max_tokens=80, json_schema=_SCHEMA_DOCTYPE)
                     total_calls += 1
                     dtype_data = self._parse_json(dtype_response)
                     if isinstance(dtype_data, dict):
@@ -277,7 +333,7 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
 
                     result.debug_info["tag_prompt_length"] = len(tag_prompt)
 
-                    tag_response = await self._call_ollama(tag_prompt, "", max_tokens=200)
+                    tag_response = await self._call_ollama(tag_prompt, "", max_tokens=200, json_schema=_SCHEMA_TAGS)
                     total_calls += 1
                     result.debug_info["tag_raw_response"] = tag_response[:300]
 
@@ -320,7 +376,7 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
                     ]
                     result.debug_info["storage_path_prompt_length"] = len(path_prompt)
 
-                    path_response = await self._call_ollama(path_prompt, "", max_tokens=200)
+                    path_response = await self._call_ollama(path_prompt, "", max_tokens=200, json_schema=_SCHEMA_STORAGE_PATH)
                     total_calls += 1
                     result.debug_info["storage_path_raw_response"] = path_response
 
@@ -393,7 +449,7 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
                     storage_paths=paths_text,
                 )
 
-                verify_response = await self._call_ollama(verify_prompt, "", max_tokens=300)
+                verify_response = await self._call_ollama(verify_prompt, "", max_tokens=300, json_schema=_SCHEMA_VERIFY)
                 total_calls += 1
                 verify_data = self._parse_json(verify_response)
 
@@ -434,33 +490,39 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
     async def _call_ollama(
         self, system_prompt: str, user_message: str,
         max_tokens: int = 500, keep_alive: str = "5m",
+        json_schema: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Make a single Ollama call. Uses /api/generate with raw prompt for
         thinking models (bypasses chat template that triggers thinking),
-        /api/chat with format=json for standard models.
+        /api/chat with format=json/schema for standard models.
         """
         if self._is_thinking:
             return await self._call_ollama_generate(
-                system_prompt, user_message, max_tokens, keep_alive
+                system_prompt, user_message, max_tokens, keep_alive, json_schema
             )
         return await self._call_ollama_chat(
-            system_prompt, user_message, max_tokens, keep_alive
+            system_prompt, user_message, max_tokens, keep_alive, json_schema
         )
 
     async def _call_ollama_chat(
         self, system_prompt: str, user_message: str,
         max_tokens: int, keep_alive: str,
+        json_schema: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Standard models: /api/chat with format=json."""
+        """Standard models: /api/chat with format=json or JSON schema."""
         messages = [{"role": "system", "content": system_prompt}]
         if user_message:
             messages.append({"role": "user", "content": user_message})
+
+        # Use JSON schema if provided (Ollama >= 0.5 structured output),
+        # otherwise fall back to plain "json" mode.
+        fmt = json_schema if json_schema is not None else "json"
 
         payload = {
             "model": self.model,
             "messages": messages,
             "stream": False,
-            "format": "json",
+            "format": fmt,
             "keep_alive": keep_alive,
             "options": {
                 "temperature": 0.1,
@@ -471,8 +533,22 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
         }
 
         async with httpx.AsyncClient(timeout=OLLAMA_CALL_TIMEOUT) as client:
-            resp = await client.post(f"{self.host}/api/chat", json=payload)
-            resp.raise_for_status()
+            try:
+                resp = await client.post(f"{self.host}/api/chat", json=payload)
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                # Schema enforcement not supported by this Ollama version – retry without schema
+                if json_schema is not None and e.response.status_code in (400, 422):
+                    logger.warning(
+                        f"Ollama schema enforcement rejected (HTTP {e.response.status_code}), "
+                        f"retrying without schema."
+                    )
+                    payload["format"] = "json"
+                    resp = await client.post(f"{self.host}/api/chat", json=payload)
+                    resp.raise_for_status()
+                else:
+                    raise
+
             data = resp.json()
             content = data.get("message", {}).get("content", "")
 
@@ -491,6 +567,7 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
     async def _call_ollama_generate(
         self, system_prompt: str, user_message: str,
         max_tokens: int, keep_alive: str,
+        json_schema: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Thinking models: /api/generate bypasses chat template entirely.
         We construct a raw prompt that forces direct JSON output without
@@ -509,12 +586,14 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
 
         raw_prompt = "\n".join(prompt_parts)
 
+        fmt = json_schema if json_schema is not None else "json"
+
         payload = {
             "model": self.model,
             "prompt": raw_prompt,
             "stream": False,
             "raw": True,
-            "format": "json",
+            "format": fmt,
             "keep_alive": keep_alive,
             "options": {
                 "temperature": 0.1,
@@ -526,8 +605,20 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
         }
 
         async with httpx.AsyncClient(timeout=OLLAMA_CALL_TIMEOUT) as client:
-            resp = await client.post(f"{self.host}/api/generate", json=payload)
-            resp.raise_for_status()
+            try:
+                resp = await client.post(f"{self.host}/api/generate", json=payload)
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                if json_schema is not None and e.response.status_code in (400, 422):
+                    logger.warning(
+                        f"Ollama schema enforcement rejected (HTTP {e.response.status_code}), "
+                        f"retrying without schema."
+                    )
+                    payload["format"] = "json"
+                    resp = await client.post(f"{self.host}/api/generate", json=payload)
+                    resp.raise_for_status()
+                else:
+                    raise
             data = resp.json()
             content = data.get("response", "")
 
