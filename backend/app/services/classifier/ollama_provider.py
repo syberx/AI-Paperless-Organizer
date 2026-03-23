@@ -159,6 +159,10 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
         result.debug_info["model"] = self.model
         result.debug_info["is_thinking"] = self._is_thinking
 
+        # Shared across calls; populated when tags are fetched
+        candidate_tags: List[str] = []
+        candidate_set_lower: Dict[str, str] = {}
+
         try:
             # --- Call 1: Analyze (title, correspondent, date, summary) ---
             # Replace default rules with user-configured prompts when set
@@ -231,7 +235,17 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
             if config.get("enable_title", True):
                 result.title = analysis_data.get("title")
             if config.get("enable_correspondent", True):
-                result.correspondent = analysis_data.get("correspondent")
+                corr = analysis_data.get("correspondent")
+                # Discard obvious hallucinations: URLs, placeholder strings, suspiciously long values
+                if corr and (
+                    corr.startswith(("http://", "https://", "www."))
+                    or len(corr) > 120
+                    or "placeholder" in corr.lower()
+                    or "field in the json" in corr.lower()
+                ):
+                    logger.warning(f"Correspondent looks like hallucination, discarding: {corr[:80]}")
+                    corr = None
+                result.correspondent = corr
             if config.get("enable_created_date", True):
                 result.created_date = analysis_data.get("created_date")
 
@@ -262,7 +276,16 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
                         f"VERFUEGBARE TYPEN: {', '.join(type_names)}\n\n"
                         'Antworte als JSON: {"document_type": "Name"}'
                     )
-                    dtype_response = await self._call_ollama(dtype_prompt, "", max_tokens=80, json_schema=_SCHEMA_DOCTYPE)
+                    # Enum-schema: model can only output a valid type name or null
+                    dtype_schema = {
+                        "type": "object",
+                        "required": ["document_type"],
+                        "properties": {
+                            "document_type": {"type": ["string", "null"], "enum": type_names + [None]},
+                        },
+                        "additionalProperties": False,
+                    }
+                    dtype_response = await self._call_ollama(dtype_prompt, "", max_tokens=80, json_schema=dtype_schema)
                     total_calls += 1
                     dtype_data = self._parse_json(dtype_response)
                     if isinstance(dtype_data, dict):
@@ -333,18 +356,49 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
 
                     result.debug_info["tag_prompt_length"] = len(tag_prompt)
 
-                    tag_response = await self._call_ollama(tag_prompt, "", max_tokens=200, json_schema=_SCHEMA_TAGS)
+                    # Enum-schema: model can ONLY return tag names from candidate_tags
+                    candidate_set_lower = {t.lower(): t for t in candidate_tags}
+                    tags_enum_schema = {
+                        "type": "object",
+                        "required": ["tags"],
+                        "properties": {
+                            "tags": {
+                                "type": "array",
+                                "items": {"type": "string", "enum": candidate_tags},
+                                "minItems": 0,
+                                "maxItems": tags_max,
+                            },
+                        },
+                        "additionalProperties": False,
+                    }
+
+                    tag_response = await self._call_ollama(tag_prompt, "", max_tokens=200, json_schema=tags_enum_schema)
                     total_calls += 1
                     result.debug_info["tag_raw_response"] = tag_response[:300]
 
                     tag_data = self._parse_json(tag_response)
+                    raw_tags: List[str] = []
                     if isinstance(tag_data, dict):
-                        tags = tag_data.get("tags", [])
-                        if isinstance(tags, list):
-                            result.tags = [t for t in tags if isinstance(t, str)]
+                        raw_tags = tag_data.get("tags", [])
+                        if not isinstance(raw_tags, list):
+                            raw_tags = []
                     elif isinstance(tag_data, list):
-                        result.tags = [t for t in tag_data if isinstance(t, str)]
-                    logger.info(f"Tags call result: {result.tags}")
+                        raw_tags = tag_data
+
+                    # Post-processing: keep only tags that actually exist in candidate list
+                    valid_tags = []
+                    for t in raw_tags:
+                        if not isinstance(t, str):
+                            continue
+                        if t in candidate_tags:
+                            valid_tags.append(t)
+                        elif t.lower() in candidate_set_lower:
+                            valid_tags.append(candidate_set_lower[t.lower()])
+                        else:
+                            logger.warning(f"Tag '{t}' not in candidate list – discarded")
+
+                    result.tags = valid_tags
+                    logger.info(f"Tags call result: {result.tags} (raw: {raw_tags})")
 
             # --- Call 4: Storage Path (with ALL context from previous calls) ---
             if config.get("enable_storage_path", True) and self.tool_executor:
@@ -376,13 +430,30 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
                     ]
                     result.debug_info["storage_path_prompt_length"] = len(path_prompt)
 
-                    path_response = await self._call_ollama(path_prompt, "", max_tokens=200, json_schema=_SCHEMA_STORAGE_PATH)
+                    # Enum-schema: model can only pick a valid path ID (or null)
+                    valid_path_ids = [p["id"] for p in paths]
+                    path_enum_schema = {
+                        "type": "object",
+                        "required": ["path_id", "reason"],
+                        "properties": {
+                            "path_id": {"enum": valid_path_ids + [None]},
+                            "reason":  {"type": "string"},
+                        },
+                        "additionalProperties": False,
+                    }
+
+                    path_response = await self._call_ollama(path_prompt, "", max_tokens=200, json_schema=path_enum_schema)
                     total_calls += 1
                     result.debug_info["storage_path_raw_response"] = path_response
 
                     path_data = self._parse_json(path_response)
                     if isinstance(path_data, dict):
-                        result.storage_path_id = path_data.get("path_id")
+                        raw_path_id = path_data.get("path_id")
+                        # Post-processing: validate that path_id is actually in the list
+                        if raw_path_id is not None and raw_path_id in valid_path_ids:
+                            result.storage_path_id = raw_path_id
+                        elif raw_path_id is not None:
+                            logger.warning(f"path_id {raw_path_id} not in valid list {valid_path_ids} – discarded")
                         result.storage_path_reason = path_data.get("reason")
 
             # --- Call 5: Custom Fields ---
@@ -456,17 +527,37 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
                 if isinstance(verify_data, dict) and verify_data:
                     logger.info(f"Verification corrections: {verify_data}")
                     result.debug_info["verification_corrections"] = verify_data
-                    if "storage_path_id" in verify_data and verify_data["storage_path_id"]:
-                        result.storage_path_id = verify_data["storage_path_id"]
-                        result.storage_path_reason = verify_data.get(
-                            "storage_path_reason", result.storage_path_reason
-                        )
+
+                    # storage_path_id: only accept if it's a valid ID from our list
+                    if "storage_path_id" in verify_data and verify_data["storage_path_id"] is not None:
+                        sp_id = verify_data["storage_path_id"]
+                        try:
+                            sp_data_v = await self.tool_executor.execute("get_storage_paths", {})
+                            sp_list_v = json.loads(sp_data_v)
+                            valid_sp_ids = [p["id"] for p in sp_list_v]
+                        except Exception:
+                            valid_sp_ids = []
+                        if sp_id in valid_sp_ids:
+                            result.storage_path_id = sp_id
+                            result.storage_path_reason = verify_data.get(
+                                "storage_path_reason", result.storage_path_reason
+                            )
+                        else:
+                            logger.warning(f"Verification path_id {sp_id} invalid – ignored")
+
                     if "tags" in verify_data and isinstance(verify_data["tags"], list):
-                        result.tags = verify_data["tags"]
+                        # Filter to only valid tags from the previously fetched candidate list
+                        result.tags = [
+                            candidate_set_lower[t.lower()] if t.lower() in candidate_set_lower else t
+                            for t in verify_data["tags"]
+                            if isinstance(t, str) and (t in candidate_tags or t.lower() in candidate_set_lower)
+                        ]
                     if "document_type" in verify_data and verify_data["document_type"]:
                         result.document_type = verify_data["document_type"]
                     if "correspondent" in verify_data and verify_data["correspondent"]:
-                        result.correspondent = verify_data["correspondent"]
+                        corr_v = verify_data["correspondent"]
+                        if not (corr_v.startswith(("http://", "https://")) or len(corr_v) > 120):
+                            result.correspondent = corr_v
                 else:
                     logger.info("Verification: no corrections needed or empty response")
                     result.debug_info["verification_corrections"] = None
