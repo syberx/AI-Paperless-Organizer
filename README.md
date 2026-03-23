@@ -102,8 +102,8 @@ Der Klassifizierer liest den **Inhalt** deiner Dokumente und befüllt automatisc
 **Mit OpenAI/Cloud-Modellen (Tool-Calling):**
 Die KI ruft aktiv deine Paperless-Daten ab – sie sucht nach passenden Tags, Korrespondenten und Dokumententypen in Echtzeit, bevor sie entscheidet. Ergebnis: bessere Übereinstimmung mit bestehenden Einträgen.
 
-**Mit Ollama (lokale Modelle):**
-Mehrstufiger Prozess: Analyse → Tags → Dokumenttyp → Speicherpfad → Custom Fields → Verifikation. Alles lokal, keine Daten verlassen deinen Server.
+**Mit Ollama (lokale Modelle) ⭐ Empfohlen:**
+Mehrstufiger Prozess: Analyse → Tags → Dokumenttyp → Speicherpfad → Custom Fields → Verifikation. Alles lokal, keine Daten verlassen deinen Server. Für beste Ergebnisse: **`qwen3:4b`** oder **`qwen3:8b`** – Qwen3 nutzt intern Reasoning (Thinking-Modus) und liefert damit deutlich bessere Klassifizierungsqualität als ältere Modelle ohne Reasoning.
 
 ### Ergebnisse bearbeiten & anwenden
 
@@ -416,9 +416,11 @@ docker-compose up -d --build
 |----------|-------------|-------------------|-----------------------|----------------|
 | **OpenAI** | [platform.openai.com](https://platform.openai.com/api-keys) | `gpt-4o-mini` / `gpt-4o` | ✅ Getestet | ✅ Getestet |
 | **Mistral** | [console.mistral.ai](https://console.mistral.ai/) | `mistral-small-latest` | 🔄 Beta | ✅ Getestet |
-| **Ollama** | Kein Key nötig! | `llama3.1` / `qwen2.5` | 🔄 Beta | ✅ Getestet |
+| **Ollama** ⭐ | Kein Key nötig! | `qwen3:4b` / `qwen3:8b` | 🔄 Beta | ✅ Empfohlen |
 | **Anthropic** | [console.anthropic.com](https://console.anthropic.com/) | `claude-3-5-sonnet` | 🔄 Beta | 🔄 Beta |
 | **Azure** | Azure Portal | Dein Deployment | 🔄 Beta | 🔄 Beta |
+
+> 💡 **Empfehlung für lokale Klassifizierung:** **Ollama mit `qwen3:4b` oder `qwen3:8b`** liefert aktuell die besten Ergebnisse bei lokal laufenden Modellen. Qwen3 verwendet intern eine Reasoning-Chain (Thinking-Modus) bevor es antwortet – das macht einen deutlichen Qualitätsunterschied bei der Auswahl von Tags, Dokumententypen und Speicherpfaden gegenüber klassischen Modellen wie `mistral-nemo:12b`. Wer mehr RAM hat, kann auch `qwen3:14b` oder `qwen3:32b` ausprobieren – mehr Parameter + Reasoning = bessere Ergebnisse.
 
 ### 3. Klassifizierer einrichten
 
