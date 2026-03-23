@@ -309,6 +309,7 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
                                     if dt_str.lower() in tn.lower() or tn.lower() in dt_str.lower():
                                         result.document_type = tn
                                         break
+                    result.debug_info["doctype_raw_response"] = dtype_response
                     logger.info(f"DocType call: raw='{dtype_response[:100]}' -> '{result.document_type}'")
 
             # --- Call 3: Tags (all tags after configured exclusions) ---
