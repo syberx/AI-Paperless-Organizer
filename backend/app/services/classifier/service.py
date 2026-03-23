@@ -221,6 +221,18 @@ class DocumentClassifierService:
                 base_url="https://api.mistral.ai/v1",
                 provider_label="Mistral",
             )
+        elif config.active_provider == "openrouter":
+            api_key = getattr(config, "openrouter_api_key", "") or ""
+            if not api_key:
+                raise ValueError("OpenRouter API key not configured. Set it in Classifier settings.")
+            return OpenAIToolCallingProvider(
+                api_key=api_key,
+                model=getattr(config, "openrouter_model", "mistral/mistral-small-3.1-24b-instruct"),
+                tool_executor=tool_executor,
+                base_url="https://openrouter.ai/api/v1",
+                provider_label="OpenRouter",
+                extra_headers={"HTTP-Referer": "https://github.com/syberx/AI-Paperless-Organizer"},
+            )
         elif config.active_provider == "ollama":
             return OllamaMultiCallProvider(
                 host=config.ollama_host,
@@ -695,6 +707,7 @@ class DocumentClassifierService:
             model=(
                 config.openai_model if config.active_provider == "openai"
                 else getattr(config, "mistral_model", "mistral-small-latest") if config.active_provider == "mistral"
+                else getattr(config, "openrouter_model", "mistral/mistral-small-3.1-24b-instruct") if config.active_provider == "openrouter"
                 else config.ollama_model
             ),
             result_json=asdict(result),
@@ -740,6 +753,18 @@ class DocumentClassifierService:
                 base_url="https://api.mistral.ai/v1",
                 provider_label="Mistral",
             )
+        elif provider_name == "openrouter":
+            api_key = getattr(config, "openrouter_api_key", "") or ""
+            if not api_key:
+                raise ValueError("OpenRouter API key not configured")
+            return OpenAIToolCallingProvider(
+                api_key=api_key,
+                model=model_override or getattr(config, "openrouter_model", "mistral/mistral-small-3.1-24b-instruct"),
+                tool_executor=tool_executor,
+                base_url="https://openrouter.ai/api/v1",
+                provider_label="OpenRouter",
+                extra_headers={"HTTP-Referer": "https://github.com/syberx/AI-Paperless-Organizer"},
+            )
         elif provider_name == "ollama":
             return OllamaMultiCallProvider(
                 host=config.ollama_host,
@@ -753,11 +778,7 @@ class DocumentClassifierService:
         self, document_id: int,
         slots: List[tuple],
     ) -> Dict[str, Any]:
-        """Run classification with N provider/model combos.
-
-        Ollama models run sequentially (shared GPU), cloud providers run in
-        parallel alongside.
-        """
+        """Run classification with N provider/model combos, strictly sequential."""
         import asyncio
 
         config = await self.get_config()
@@ -801,30 +822,11 @@ class DocumentClassifierService:
                     "result": asdict(ClassificationResult(error=str(e))),
                 }
 
-        cloud_slots = [(n, m) for n, m in slots if n != "ollama"]
-        local_slots = [(n, m) for n, m in slots if n == "ollama"]
-
-        async def run_local_sequential() -> List[Dict[str, Any]]:
-            results = []
-            for name, model in local_slots:
-                r = await run_single(name, model)
-                results.append(r)
-            return results
-
-        cloud_tasks = [asyncio.create_task(run_single(n, m)) for n, m in cloud_slots]
-        local_task = asyncio.create_task(run_local_sequential()) if local_slots else None
-
-        cloud_results = await asyncio.gather(*cloud_tasks) if cloud_tasks else []
-        local_results = await local_task if local_task else []
-
+        # All slots run strictly sequential to avoid GPU contention
         all_results = []
-        cloud_iter = iter(cloud_results)
-        local_iter = iter(local_results)
-        for name, _ in slots:
-            if name == "ollama":
-                all_results.append(next(local_iter))
-            else:
-                all_results.append(next(cloud_iter))
+        for name, model in slots:
+            r = await run_single(name, model)
+            all_results.append(r)
 
         return {
             "document_id": document_id,

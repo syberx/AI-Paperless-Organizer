@@ -39,10 +39,13 @@ class OpenAIToolCallingProvider(BaseClassifierProvider):
         tool_executor: Optional[ToolExecutor] = None,
         base_url: Optional[str] = None,
         provider_label: str = "OpenAI",
+        extra_headers: Optional[Dict[str, str]] = None,
     ):
         kwargs: Dict[str, Any] = {"api_key": api_key}
         if base_url:
             kwargs["base_url"] = base_url
+        if extra_headers:
+            kwargs["default_headers"] = extra_headers
         self.client = AsyncOpenAI(**kwargs)
         self.model = model
         self.tool_executor = tool_executor

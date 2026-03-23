@@ -11,7 +11,7 @@ class ClassifierConfig(Base):
 
     id = Column(Integer, primary_key=True, default=1)
 
-    # Active provider: "openai", "mistral", or "ollama"
+    # Active provider: "openai", "mistral", "openrouter", or "ollama"
     active_provider = Column(String(50), default="openai")
 
     # OpenAI settings (reuses existing LLMProvider for api_key)
@@ -20,6 +20,10 @@ class ClassifierConfig(Base):
     # Mistral settings
     mistral_api_key = Column(String(500), default="")
     mistral_model = Column(String(200), default="mistral-small-latest")
+
+    # OpenRouter settings (openai-compatible, many models)
+    openrouter_api_key = Column(String(500), default="")
+    openrouter_model = Column(String(200), default="mistral/mistral-small-3.1-24b-instruct")
 
     # Separate Ollama config (independent from OCR Ollama)
     ollama_host = Column(String(500), default="http://localhost:11434")

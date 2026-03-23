@@ -50,6 +50,8 @@ export default function DocumentClassifier() {
   const [ollamaTesting, setOllamaTesting] = useState(false)
   const [mistralTestResult, setMistralTestResult] = useState<any>(null)
   const [mistralTesting, setMistralTesting] = useState(false)
+  const [openrouterTestResult, setOpenrouterTestResult] = useState<any>(null)
+  const [openrouterTesting, setOpenrouterTesting] = useState(false)
 
   // Collapsible sections
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
@@ -670,7 +672,11 @@ export default function DocumentClassifier() {
               KI-Klassifizierer
             </h1>
             <p className="text-sm text-surface-400">
-              Automatische Dokumentenklassifizierung mit {config?.active_provider === 'openai' ? 'OpenAI' : 'Ollama'}
+              Automatische Dokumentenklassifizierung mit {
+                config?.active_provider === 'openai' ? 'OpenAI' :
+                config?.active_provider === 'mistral' ? 'Mistral' :
+                config?.active_provider === 'openrouter' ? 'OpenRouter' : 'Ollama'
+              }
             </p>
           </div>
         </div>
@@ -1215,6 +1221,7 @@ export default function DocumentClassifier() {
                     >
                       <option value="openai">OpenAI</option>
                       <option value="mistral">Mistral</option>
+                      <option value="openrouter">OpenRouter</option>
                       <option value="ollama">Ollama</option>
                     </select>
                     {slot.provider === 'openai' ? (
@@ -1224,7 +1231,7 @@ export default function DocumentClassifier() {
                         <option value="gpt-4o">gpt-4o</option>
                       </select>
                     ) : slot.provider === 'mistral' ? (
-                      <select value={slot.model} onChange={(e) => updateBenchSlot(idx, 'model', e.target.value)} className="input text-sm py-1.5 flex-1">
+                        <select value={slot.model} onChange={(e) => updateBenchSlot(idx, 'model', e.target.value)} className="input text-sm py-1.5 flex-1">
                         <option value="">Standard ({config?.mistral_model || 'mistral-small-latest'})</option>
                         <option value="mistral-small-latest">mistral-small</option>
                         <option value="mistral-medium-latest">mistral-medium</option>
@@ -1233,6 +1240,14 @@ export default function DocumentClassifier() {
                         <option value="ministral-8b-latest">ministral-8b</option>
                         <option value="codestral-latest">codestral</option>
                       </select>
+                    ) : slot.provider === 'openrouter' ? (
+                      <input
+                        type="text"
+                        value={slot.model}
+                        onChange={(e) => updateBenchSlot(idx, 'model', e.target.value)}
+                        className="input text-sm py-1.5 flex-1"
+                        placeholder={config?.openrouter_model || 'mistral/mistral-small-3.1-24b-instruct'}
+                      />
                     ) : (
                       <select value={slot.model} onChange={(e) => updateBenchSlot(idx, 'model', e.target.value)} className="input text-sm py-1.5 flex-1">
                         {ollamaLoading ? (
@@ -1302,7 +1317,7 @@ export default function DocumentClassifier() {
             {benchmarkRunning && (
               <p className="text-xs text-amber-400 mt-2 flex items-center gap-1">
                 <Loader2 className="w-3 h-3 animate-spin" />
-                {benchSlots.length} Provider laufen parallel -- lokale Modelle koennen etwas laenger brauchen.
+                {benchSlots.length} Provider laufen nacheinander -- das kann je nach Anzahl etwas dauern.
               </p>
             )}
             {!ollamaModels?.connected && (
@@ -1470,6 +1485,7 @@ export default function DocumentClassifier() {
               {([
                 { id: 'openai', label: 'OpenAI (Cloud)', desc: 'Tool Calling, token-sparsam, schnell' },
                 { id: 'mistral', label: 'Mistral (Cloud)', desc: 'Tool Calling, guenstig, europaeisch' },
+                { id: 'openrouter', label: 'OpenRouter (Cloud)', desc: 'Viele Modelle, eine API, flexibel' },
                 { id: 'ollama', label: 'Ollama (Lokal)', desc: 'Kostenlos, Datenschutz, Multi-Call' },
               ] as const).map(p => (
                 <button
@@ -1556,6 +1572,72 @@ export default function DocumentClassifier() {
                       : 'bg-red-500/10 text-red-300 border border-red-500/30'
                   )}>
                     {mistralTestResult.message}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {config.active_provider === 'openrouter' && (
+              <div className="mt-4 space-y-3">
+                <div className="flex items-start gap-3 p-3 bg-violet-500/10 border border-violet-500/30 rounded-lg">
+                  <Info className="w-5 h-5 text-violet-400 shrink-0 mt-0.5" />
+                  <div className="text-sm">
+                    <p className="text-violet-300 font-medium">OpenRouter – Viele Modelle, eine API</p>
+                    <p className="text-violet-300/70 mt-1">
+                      Zugang zu 300+ Modellen (Mistral, Llama, Gemini, Claude, ...) über eine einheitliche OpenAI-kompatible API. API-Key auf <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" className="underline">openrouter.ai/keys</a> erstellen.
+                    </p>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-sm text-surface-400">OpenRouter API-Key</label>
+                  <input
+                    type="password"
+                    value={config.openrouter_api_key || ''}
+                    onChange={(e) => setConfig({ ...config, openrouter_api_key: e.target.value })}
+                    className="input mt-1 w-full"
+                    placeholder="sk-or-v1-..."
+                  />
+                  <p className="text-xs text-surface-500 mt-1">Von openrouter.ai/keys</p>
+                </div>
+                <div>
+                  <label className="text-sm text-surface-400">Modell</label>
+                  <input
+                    type="text"
+                    value={config.openrouter_model || ''}
+                    onChange={(e) => setConfig({ ...config, openrouter_model: e.target.value })}
+                    className="input mt-1 w-full"
+                    placeholder="mistral/mistral-small-3.1-24b-instruct"
+                  />
+                  <p className="text-xs text-surface-500 mt-1">
+                    Format: <code>anbieter/modellname</code> – z.B. <code>mistral/mistral-large-2411</code>, <code>google/gemini-2.0-flash-001</code>, <code>meta-llama/llama-3.3-70b-instruct</code>. Alle Modelle auf <a href="https://openrouter.ai/models" target="_blank" rel="noopener noreferrer" className="underline text-violet-400">openrouter.ai/models</a>.
+                  </p>
+                </div>
+                <button
+                  onClick={async () => {
+                    setOpenrouterTesting(true)
+                    try {
+                      const r = await api.fetchJson<any>('/classifier/openrouter/test', { method: 'POST' })
+                      setOpenrouterTestResult(r)
+                    } catch (e: any) {
+                      setOpenrouterTestResult({ connected: false, message: e.message })
+                    } finally {
+                      setOpenrouterTesting(false)
+                    }
+                  }}
+                  disabled={openrouterTesting || !config.openrouter_api_key}
+                  className="btn flex items-center gap-2 bg-surface-700 hover:bg-surface-600 text-surface-300 text-sm"
+                >
+                  {openrouterTesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+                  Verbindung testen
+                </button>
+                {openrouterTestResult && (
+                  <div className={clsx(
+                    'p-3 rounded-lg text-sm',
+                    openrouterTestResult.connected
+                      ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30'
+                      : 'bg-red-500/10 text-red-300 border border-red-500/30'
+                  )}>
+                    {openrouterTestResult.message}
                   </div>
                 )}
               </div>
@@ -3001,6 +3083,7 @@ export default function DocumentClassifier() {
                               'text-xs px-1.5 py-0.5 rounded font-medium',
                               p.provider === 'openai' ? 'bg-sky-500/20 text-sky-400' :
                               p.provider === 'mistral' ? 'bg-orange-500/20 text-orange-400' :
+                      p.provider === 'openrouter' ? 'bg-violet-500/20 text-violet-400' :
                               'bg-emerald-500/20 text-emerald-400'
                             )}>
                               {p.provider === 'ollama' ? 'Lokal' : 'Cloud'}
@@ -3095,6 +3178,7 @@ export default function DocumentClassifier() {
                             'px-1.5 py-0 rounded text-[10px] font-medium',
                             entry.provider === 'openai' ? 'bg-sky-500/20 text-sky-400' :
                             entry.provider === 'mistral' ? 'bg-orange-500/20 text-orange-400' :
+                            entry.provider === 'openrouter' ? 'bg-violet-500/20 text-violet-400' :
                             'bg-emerald-500/20 text-emerald-400'
                           )}>
                             {entry.model || entry.provider}

@@ -416,9 +416,12 @@ docker-compose up -d --build
 |----------|-------------|-------------------|-----------------------|----------------|
 | **OpenAI** | [platform.openai.com](https://platform.openai.com/api-keys) | `gpt-4o-mini` / `gpt-4o` | ✅ Getestet | ✅ Getestet |
 | **Mistral** | [console.mistral.ai](https://console.mistral.ai/) | `mistral-small-latest` | 🔄 Beta | ✅ Getestet |
+| **OpenRouter** | [openrouter.ai/keys](https://openrouter.ai/keys) | `mistral/mistral-large-2411` | ❌ | ✅ Getestet |
 | **Ollama** ⭐ | Kein Key nötig! | `qwen3:4b` / `qwen3:8b` | 🔄 Beta | ✅ Empfohlen |
 | **Anthropic** | [console.anthropic.com](https://console.anthropic.com/) | `claude-3-5-sonnet` | 🔄 Beta | 🔄 Beta |
 | **Azure** | Azure Portal | Dein Deployment | 🔄 Beta | 🔄 Beta |
+
+> 💡 **OpenRouter-Tipp:** Über OpenRouter kannst du **Mistral Large**, **Llama 3.3 70B**, **Gemini 2.0 Flash**, **Claude 3.5 Haiku** und 300+ weitere Modelle mit einer einzigen API testen – ideal für den Benchmark ohne separate API-Keys.
 
 > 💡 **Empfehlung für lokale Klassifizierung:** **Ollama mit `qwen3:4b` oder `qwen3:8b`** liefert aktuell die besten Ergebnisse bei lokal laufenden Modellen. Qwen3 verwendet intern eine Reasoning-Chain (Thinking-Modus) bevor es antwortet – das macht einen deutlichen Qualitätsunterschied bei der Auswahl von Tags, Dokumententypen und Speicherpfaden gegenüber klassischen Modellen wie `mistral-nemo:12b`. Wer mehr RAM hat, kann auch `qwen3:14b` oder `qwen3:32b` ausprobieren – mehr Parameter + Reasoning = bessere Ergebnisse.
 

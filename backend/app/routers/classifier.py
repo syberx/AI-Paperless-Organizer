@@ -27,6 +27,8 @@ class ClassifierConfigUpdate(BaseModel):
     openai_model: Optional[str] = None
     mistral_api_key: Optional[str] = None
     mistral_model: Optional[str] = None
+    openrouter_api_key: Optional[str] = None
+    openrouter_model: Optional[str] = None
     ollama_host: Optional[str] = None
     ollama_model: Optional[str] = None
     enable_title: Optional[bool] = None
@@ -111,6 +113,8 @@ async def get_config(service: DocumentClassifierService = Depends(_get_service))
         "openai_model": config.openai_model,
         "mistral_api_key": getattr(config, "mistral_api_key", "") or "",
         "mistral_model": getattr(config, "mistral_model", "mistral-small-latest") or "mistral-small-latest",
+        "openrouter_api_key": getattr(config, "openrouter_api_key", "") or "",
+        "openrouter_model": getattr(config, "openrouter_model", "mistral/mistral-small-3.1-24b-instruct") or "mistral/mistral-small-3.1-24b-instruct",
         "ollama_host": config.ollama_host,
         "ollama_model": config.ollama_model,
         "enable_title": config.enable_title,
@@ -626,7 +630,7 @@ async def test_mistral_connection(
     try:
         from openai import AsyncOpenAI
         client = AsyncOpenAI(api_key=api_key, base_url="https://api.mistral.ai/v1")
-        response = await client.chat.completions.create(
+        await client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": "Antworte mit OK"}],
             max_tokens=5,
@@ -635,6 +639,39 @@ async def test_mistral_connection(
             "connected": True,
             "model": model,
             "message": f"Mistral verbunden, Modell '{model}' funktioniert.",
+        }
+    except Exception as e:
+        return {"connected": False, "model": model, "message": f"Fehler: {str(e)}"}
+
+
+@router.post("/openrouter/test")
+async def test_openrouter_connection(
+    service: DocumentClassifierService = Depends(_get_service),
+):
+    """Test OpenRouter API connection."""
+    config = await service.get_config()
+    api_key = getattr(config, "openrouter_api_key", "") or ""
+    model = getattr(config, "openrouter_model", "mistral/mistral-small-3.1-24b-instruct") or "mistral/mistral-small-3.1-24b-instruct"
+
+    if not api_key:
+        return {"connected": False, "message": "Kein OpenRouter API-Key konfiguriert."}
+
+    try:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(
+            api_key=api_key,
+            base_url="https://openrouter.ai/api/v1",
+            default_headers={"HTTP-Referer": "https://github.com/syberx/AI-Paperless-Organizer"},
+        )
+        await client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": "OK"}],
+            max_tokens=5,
+        )
+        return {
+            "connected": True,
+            "model": model,
+            "message": f"OpenRouter verbunden, Modell '{model}' funktioniert.",
         }
     except Exception as e:
         return {"connected": False, "model": model, "message": f"Fehler: {str(e)}"}

@@ -837,6 +837,8 @@ export interface ClassifierConfig {
   openai_model: string
   mistral_api_key: string
   mistral_model: string
+  openrouter_api_key: string
+  openrouter_model: string
   ollama_host: string
   ollama_model: string
   enable_title: boolean
