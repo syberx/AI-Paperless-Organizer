@@ -24,7 +24,10 @@ import {
   ChevronRight,
   FolderOpen,
   Ban,
-  Clock
+  Clock,
+  Github,
+  Heart,
+  Coffee
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
@@ -556,17 +559,58 @@ export default function Layout({ children }: LayoutProps) {
         </nav>
 
         {/* Footer */}
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-surface-700/50">
-          <div className="text-xs text-surface-500 text-center">
+        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-surface-700/50 space-y-2">
+          {/* GitHub + Donate links */}
+          <div className="flex gap-2">
+            <a
+              href="https://github.com/syberx/AI-Paperless-Organizer"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg
+                         text-xs text-surface-400 hover:text-surface-100 hover:bg-surface-800/60
+                         border border-surface-700/40 hover:border-surface-600/60 transition-all duration-200"
+              title="GitHub Repository"
+            >
+              <Github className="w-3.5 h-3.5" />
+              <span>GitHub</span>
+            </a>
+            <a
+              href="https://ko-fi.com/chriswilms"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg
+                         text-xs text-surface-400 hover:text-amber-300 hover:bg-amber-500/10
+                         border border-surface-700/40 hover:border-amber-500/40 transition-all duration-200"
+              title="Ko-fi – Unterstützen"
+            >
+              <Coffee className="w-3.5 h-3.5" />
+              <span>Ko-fi</span>
+            </a>
+            <a
+              href="https://www.paypal.com/paypalme/withmoney"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg
+                         text-xs text-surface-400 hover:text-blue-300 hover:bg-blue-500/10
+                         border border-surface-700/40 hover:border-blue-500/40 transition-all duration-200"
+              title="PayPal – Spenden"
+            >
+              <Heart className="w-3.5 h-3.5" />
+              <span>Spende</span>
+            </a>
+          </div>
+
+          <div className="text-xs text-surface-600 text-center">
             AI Paperless Organizer v1.1
           </div>
+
           {localStorage.getItem('app_authenticated') === 'true' && (
             <button
               onClick={() => {
                 localStorage.removeItem('app_authenticated')
                 window.location.reload()
               }}
-              className="mt-2 w-full text-xs text-surface-500 hover:text-red-400 transition-colors"
+              className="w-full text-xs text-surface-500 hover:text-red-400 transition-colors"
             >
               🔓 Abmelden
             </button>
