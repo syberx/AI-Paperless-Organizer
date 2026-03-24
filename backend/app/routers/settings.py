@@ -23,6 +23,8 @@ class LLMProviderSchema(BaseModel):
     api_key: Optional[str] = ""
     api_base_url: Optional[str] = ""
     model: Optional[str] = ""
+    classifier_model: Optional[str] = ""
+    vision_model: Optional[str] = ""
     is_active: bool = False
 
 
@@ -89,21 +91,32 @@ async def get_llm_providers(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(LLMProvider).order_by(LLMProvider.name))
     providers = result.scalars().all()
     
-    # If no providers exist, create defaults
+    ALL_DEFAULTS = [
+        {"name": "openai", "display_name": "OpenAI", "model": "gpt-4o"},
+        {"name": "anthropic", "display_name": "Anthropic Claude", "model": "claude-3-5-sonnet-20241022"},
+        {"name": "azure", "display_name": "Azure OpenAI", "model": "gpt-4"},
+        {"name": "ollama", "display_name": "Ollama (Lokal)", "api_base_url": "http://localhost:11434", "model": "llama3.1"},
+        {"name": "mistral", "display_name": "Mistral AI", "model": "mistral-small-latest"},
+        {"name": "openrouter", "display_name": "OpenRouter", "model": "mistralai/mistral-small-2603"},
+    ]
+
     if not providers:
-        default_providers = [
-            {"name": "openai", "display_name": "OpenAI", "model": "gpt-4o"},
-            {"name": "anthropic", "display_name": "Anthropic Claude", "model": "claude-3-5-sonnet-20241022"},
-            {"name": "azure", "display_name": "Azure OpenAI", "model": "gpt-4"},
-            {"name": "ollama", "display_name": "Ollama (Lokal)", "api_base_url": "http://localhost:11434", "model": "llama3.1"},
-        ]
-        for p in default_providers:
-            provider = LLMProvider(**p)
-            db.add(provider)
+        for p in ALL_DEFAULTS:
+            db.add(LLMProvider(**p))
         await db.commit()
-        
         result = await db.execute(select(LLMProvider).order_by(LLMProvider.name))
         providers = result.scalars().all()
+    else:
+        existing_names = {p.name for p in providers}
+        added = False
+        for p in ALL_DEFAULTS:
+            if p["name"] not in existing_names:
+                db.add(LLMProvider(**p))
+                added = True
+        if added:
+            await db.commit()
+            result = await db.execute(select(LLMProvider).order_by(LLMProvider.name))
+            providers = result.scalars().all()
     
     return [
         {
@@ -111,10 +124,12 @@ async def get_llm_providers(db: AsyncSession = Depends(get_db)):
             "name": p.name,
             "display_name": p.display_name,
             "api_key": "***" if p.api_key else "",
-            "api_base_url": p.api_base_url,
-            "model": p.model,
+            "api_base_url": p.api_base_url or "",
+            "model": p.model or "",
+            "classifier_model": getattr(p, "classifier_model", "") or "",
+            "vision_model": getattr(p, "vision_model", "") or "",
             "is_active": p.is_active,
-            "is_configured": p.is_configured
+            "is_configured": p.is_configured,
         }
         for p in providers
     ]
@@ -145,8 +160,11 @@ async def update_llm_provider(
     # else: keep existing provider.api_key
     provider.api_base_url = data.api_base_url
     provider.model = data.model
+    if data.classifier_model is not None:
+        provider.classifier_model = data.classifier_model
+    if data.vision_model is not None:
+        provider.vision_model = data.vision_model
     provider.is_active = data.is_active
-    # Provider is configured if it has a key (new or existing) or is Ollama
     provider.is_configured = bool(
         provider.api_key or provider.name == "ollama"
     )
@@ -343,6 +361,7 @@ class AppSettingsSchema(BaseModel):
     password: Optional[str] = None  # Plain password, will be hashed
     show_debug_menu: Optional[bool] = None
     sidebar_compact: Optional[bool] = None
+    classifier_provider: Optional[str] = None
 
 
 class PasswordVerifySchema(BaseModel):
@@ -371,7 +390,8 @@ async def get_app_settings(db: AsyncSession = Depends(get_db)):
         "password_enabled": settings.password_enabled,
         "password_set": bool(settings.password_hash),
         "show_debug_menu": settings.show_debug_menu,
-        "sidebar_compact": settings.sidebar_compact
+        "sidebar_compact": settings.sidebar_compact,
+        "classifier_provider": getattr(settings, "classifier_provider", "ollama") or "ollama",
     }
 
 
@@ -399,6 +419,9 @@ async def update_app_settings(
     
     if data.sidebar_compact is not None:
         settings.sidebar_compact = data.sidebar_compact
+
+    if data.classifier_provider is not None:
+        settings.classifier_provider = data.classifier_provider
     
     await db.commit()
     

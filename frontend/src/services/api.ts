@@ -127,6 +127,7 @@ export interface AppSettingsResponse {
   password_set: boolean
   show_debug_menu: boolean
   sidebar_compact: boolean
+  classifier_provider: string
 }
 
 export const getAppSettings = () =>
@@ -137,6 +138,7 @@ export const updateAppSettings = (data: {
   password?: string
   show_debug_menu?: boolean
   sidebar_compact?: boolean
+  classifier_provider?: string
 }) =>
   fetchJson<{ success: boolean }>('/settings/app', {
     method: 'PUT',
@@ -834,13 +836,7 @@ export const evaluateOcrResults = (documentTitle: string, results: OcrModelCompa
 
 export interface ClassifierConfig {
   active_provider: string
-  openai_model: string
-  mistral_api_key: string
-  mistral_model: string
-  openrouter_api_key: string
-  openrouter_model: string
-  ollama_host: string
-  ollama_model: string
+  active_model: string
   enable_title: boolean
   enable_tags: boolean
   enable_correspondent: boolean
@@ -1052,8 +1048,8 @@ export const testClassifierOllama = (model?: string, host?: string) => {
   const params = new URLSearchParams()
   if (model) params.set('model', model)
   if (host) params.set('host', host)
-  const query = params.toString() ? `?${params.toString()}` : ''
-  return fetchJson<OllamaTestResponse>(`/classifier/ollama/test${query}`, { method: 'POST' })
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  return fetchJson<OllamaTestResponse>(`/classifier/ollama/test${qs}`, { method: 'POST' })
 }
 
 export const getStoragePathsFromPaperless = () =>

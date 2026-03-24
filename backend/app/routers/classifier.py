@@ -23,14 +23,7 @@ router = APIRouter()
 # --- Pydantic Models ---
 
 class ClassifierConfigUpdate(BaseModel):
-    active_provider: Optional[str] = None
-    openai_model: Optional[str] = None
-    mistral_api_key: Optional[str] = None
-    mistral_model: Optional[str] = None
-    openrouter_api_key: Optional[str] = None
-    openrouter_model: Optional[str] = None
-    ollama_host: Optional[str] = None
-    ollama_model: Optional[str] = None
+    # Provider fields removed — now managed centrally in Settings → LLM
     enable_title: Optional[bool] = None
     enable_tags: Optional[bool] = None
     enable_correspondent: Optional[bool] = None
@@ -105,18 +98,28 @@ def _get_service(
 # --- Config ---
 
 @router.get("/config")
-async def get_config(service: DocumentClassifierService = Depends(_get_service)):
+async def get_config(
+    service: DocumentClassifierService = Depends(_get_service),
+    db: AsyncSession = Depends(get_db),
+):
     """Get classifier configuration."""
     config = await service.get_config()
+
+    # Read classifier provider from central AppSettings
+    from app.models import AppSettings as _AppSettings
+    app_s = await db.execute(select(_AppSettings).where(_AppSettings.id == 1))
+    app_settings = app_s.scalar_one_or_none()
+    active_provider = (getattr(app_settings, "classifier_provider", None) or "ollama") if app_settings else "ollama"
+
+    # Read model info from central LLMProvider table
+    from app.models import LLMProvider as _LLP
+    llp_result = await db.execute(select(_LLP).where(_LLP.name == active_provider))
+    llp = llp_result.scalar_one_or_none()
+    active_model = (llp.classifier_model or llp.model) if llp else ""
+
     return {
-        "active_provider": config.active_provider,
-        "openai_model": config.openai_model,
-        "mistral_api_key": getattr(config, "mistral_api_key", "") or "",
-        "mistral_model": getattr(config, "mistral_model", "mistral-small-latest") or "mistral-small-latest",
-        "openrouter_api_key": getattr(config, "openrouter_api_key", "") or "",
-        "openrouter_model": getattr(config, "openrouter_model", "mistral/mistral-small-3.1-24b-instruct") or "mistral/mistral-small-3.1-24b-instruct",
-        "ollama_host": config.ollama_host,
-        "ollama_model": config.ollama_model,
+        "active_provider": active_provider,
+        "active_model": active_model,
         "enable_title": config.enable_title,
         "enable_tags": config.enable_tags,
         "enable_correspondent": config.enable_correspondent,
@@ -481,11 +484,13 @@ OLLAMA_RECOMMENDED_MODELS = {
 
 @router.get("/ollama/models")
 async def get_ollama_models(
-    service: DocumentClassifierService = Depends(_get_service),
+    db: AsyncSession = Depends(get_db),
 ):
     """List installed Ollama models with recommendations and thinking-model warnings."""
-    config = await service.get_config()
-    ollama_host = config.ollama_host.rstrip("/")
+    from app.models import LLMProvider as _LLP
+    llp_res = await db.execute(select(_LLP).where(_LLP.name == "ollama"))
+    ollama_prov = llp_res.scalar_one_or_none()
+    ollama_host = ((ollama_prov.api_base_url if ollama_prov else None) or "http://localhost:11434").rstrip("/")
 
     installed = []
     connected = False
@@ -557,12 +562,14 @@ async def get_ollama_models(
 async def test_ollama_connection(
     model: Optional[str] = None,
     host: Optional[str] = None,
-    service: DocumentClassifierService = Depends(_get_service),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Test Ollama connection and selected model. Accepts optional model/host overrides."""
-    config = await service.get_config()
-    ollama_host = (host or config.ollama_host).rstrip("/")
-    model = model or config.ollama_model
+    """Test Ollama connection and selected model. Reads config from central LLM table."""
+    from app.models import LLMProvider as _LLP
+    llp_res = await db.execute(select(_LLP).where(_LLP.name == "ollama"))
+    ollama_prov = llp_res.scalar_one_or_none()
+    ollama_host = (host or (ollama_prov.api_base_url if ollama_prov else None) or "http://localhost:11434").rstrip("/")
+    model = model or (ollama_prov.classifier_model if ollama_prov else None) or (ollama_prov.model if ollama_prov else "qwen3:4b")
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -617,15 +624,17 @@ async def test_ollama_connection(
 
 @router.post("/mistral/test")
 async def test_mistral_connection(
-    service: DocumentClassifierService = Depends(_get_service),
+    db: AsyncSession = Depends(get_db),
 ):
     """Test Mistral API connection."""
-    config = await service.get_config()
-    api_key = getattr(config, "mistral_api_key", "") or ""
-    model = getattr(config, "mistral_model", "mistral-small-latest") or "mistral-small-latest"
+    from app.models import LLMProvider as _LLP
+    llp_res = await db.execute(select(_LLP).where(_LLP.name == "mistral"))
+    prov = llp_res.scalar_one_or_none()
+    api_key = prov.api_key if prov else ""
+    model = (prov.classifier_model or prov.model) if prov else "mistral-small-latest"
 
     if not api_key:
-        return {"connected": False, "message": "Kein Mistral API-Key konfiguriert."}
+        return {"connected": False, "message": "Kein Mistral API-Key konfiguriert. Einstellungen → LLM."}
 
     try:
         from openai import AsyncOpenAI
@@ -646,15 +655,17 @@ async def test_mistral_connection(
 
 @router.post("/openrouter/test")
 async def test_openrouter_connection(
-    service: DocumentClassifierService = Depends(_get_service),
+    db: AsyncSession = Depends(get_db),
 ):
     """Test OpenRouter API connection."""
-    config = await service.get_config()
-    api_key = getattr(config, "openrouter_api_key", "") or ""
-    model = getattr(config, "openrouter_model", "mistral/mistral-small-3.1-24b-instruct") or "mistral/mistral-small-3.1-24b-instruct"
+    from app.models import LLMProvider as _LLP
+    llp_res = await db.execute(select(_LLP).where(_LLP.name == "openrouter"))
+    prov = llp_res.scalar_one_or_none()
+    api_key = prov.api_key if prov else ""
+    model = (prov.classifier_model or prov.model) if prov else "mistralai/mistral-small-2603"
 
     if not api_key:
-        return {"connected": False, "message": "Kein OpenRouter API-Key konfiguriert."}
+        return {"connected": False, "message": "Kein OpenRouter API-Key konfiguriert. Einstellungen → LLM."}
 
     try:
         from openai import AsyncOpenAI

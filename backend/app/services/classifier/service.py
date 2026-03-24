@@ -195,59 +195,81 @@ class DocumentClassifierService:
             tags_ignore=config.tags_ignore or [],
         )
 
+    async def _get_llm_provider(self, provider_name: str) -> 'LLMProvider':
+        """Get a configured LLMProvider from the central table."""
+        result = await self.db.execute(
+            select(LLMProvider).where(LLMProvider.name == provider_name)
+        )
+        provider = result.scalar_one_or_none()
+        if not provider:
+            raise ValueError(f"Provider '{provider_name}' not found in LLM settings.")
+        return provider
+
+    async def _get_classifier_provider_name(self) -> str:
+        """Get the classifier provider name from AppSettings."""
+        from app.models import AppSettings
+        result = await self.db.execute(select(AppSettings).where(AppSettings.id == 1))
+        app_settings = result.scalar_one_or_none()
+        if app_settings and getattr(app_settings, "classifier_provider", None):
+            return app_settings.classifier_provider
+        return "ollama"
+
     async def _build_provider(self, config: ClassifierConfig) -> BaseClassifierProvider:
-        """Build the appropriate provider based on config."""
+        """Build the appropriate provider based on central LLM settings."""
         storage_profiles = await self.get_storage_profiles()
         field_mappings = await self.get_custom_field_mappings()
         tool_executor = self._build_tool_executor(config, storage_profiles, field_mappings)
 
-        if config.active_provider == "openai":
-            api_key = await self._get_openai_key()
-            if not api_key:
-                raise ValueError("OpenAI API key not configured. Set it in LLM Provider settings.")
+        provider_name = await self._get_classifier_provider_name()
+        return await self._create_provider_instance(provider_name, tool_executor)
+
+    async def _create_provider_instance(
+        self, provider_name: str, tool_executor: ToolExecutor,
+        model_override: Optional[str] = None,
+    ) -> BaseClassifierProvider:
+        """Create a provider instance from the central LLMProvider table."""
+        llm = await self._get_llm_provider(provider_name)
+        model = model_override or llm.classifier_model or llm.model
+
+        if provider_name == "openai":
+            if not llm.api_key:
+                raise ValueError("OpenAI API key not configured. Set it in Settings → LLM.")
             return OpenAIToolCallingProvider(
-                api_key=api_key,
-                model=config.openai_model,
-                tool_executor=tool_executor,
+                api_key=llm.api_key, model=model, tool_executor=tool_executor,
             )
-        elif config.active_provider == "mistral":
-            api_key = getattr(config, "mistral_api_key", "") or ""
-            if not api_key:
-                raise ValueError("Mistral API key not configured. Set it in Classifier settings.")
+        elif provider_name == "mistral":
+            if not llm.api_key:
+                raise ValueError("Mistral API key not configured. Set it in Settings → LLM.")
             return OpenAIToolCallingProvider(
-                api_key=api_key,
-                model=getattr(config, "mistral_model", "mistral-small-latest"),
-                tool_executor=tool_executor,
-                base_url="https://api.mistral.ai/v1",
-                provider_label="Mistral",
+                api_key=llm.api_key, model=model, tool_executor=tool_executor,
+                base_url="https://api.mistral.ai/v1", provider_label="Mistral",
             )
-        elif config.active_provider == "openrouter":
-            api_key = getattr(config, "openrouter_api_key", "") or ""
-            if not api_key:
-                raise ValueError("OpenRouter API key not configured. Set it in Classifier settings.")
+        elif provider_name == "openrouter":
+            if not llm.api_key:
+                raise ValueError("OpenRouter API key not configured. Set it in Settings → LLM.")
             return OpenAIToolCallingProvider(
-                api_key=api_key,
-                model=getattr(config, "openrouter_model", "mistral/mistral-small-3.1-24b-instruct"),
-                tool_executor=tool_executor,
-                base_url="https://openrouter.ai/api/v1",
-                provider_label="OpenRouter",
+                api_key=llm.api_key, model=model, tool_executor=tool_executor,
+                base_url="https://openrouter.ai/api/v1", provider_label="OpenRouter",
                 extra_headers={"HTTP-Referer": "https://github.com/syberx/AI-Paperless-Organizer"},
             )
-        elif config.active_provider == "ollama":
+        elif provider_name == "ollama":
+            host = llm.api_base_url or "http://localhost:11434"
             return OllamaMultiCallProvider(
-                host=config.ollama_host,
-                model=config.ollama_model,
-                tool_executor=tool_executor,
+                host=host, model=model, tool_executor=tool_executor,
+            )
+        elif provider_name == "anthropic":
+            if not llm.api_key:
+                raise ValueError("Anthropic API key not configured. Set it in Settings → LLM.")
+            return OpenAIToolCallingProvider(
+                api_key=llm.api_key, model=model, tool_executor=tool_executor,
+                base_url="https://api.anthropic.com/v1", provider_label="Anthropic",
             )
         else:
-            raise ValueError(f"Unknown provider: {config.active_provider}")
+            raise ValueError(f"Unknown provider: {provider_name}")
 
-    async def _get_openai_key(self) -> Optional[str]:
-        result = await self.db.execute(
-            select(LLMProvider).where(LLMProvider.name == "openai")
-        )
-        provider = result.scalar_one_or_none()
-        return provider.api_key if provider and provider.api_key else None
+    async def _get_active_classifier_provider_name(self) -> str:
+        """Alias for backward compat."""
+        return await self._get_classifier_provider_name()
 
     def _build_config_dict(self, config: ClassifierConfig) -> Dict[str, Any]:
         return {
@@ -700,16 +722,18 @@ class DocumentClassifierService:
             .where(ClassificationHistory.status == "pending")
         )
 
+        classifier_provider_name = await self._get_classifier_provider_name()
+        try:
+            llm_prov = await self._get_llm_provider(classifier_provider_name)
+            history_model = llm_prov.classifier_model or llm_prov.model
+        except Exception:
+            history_model = "unknown"
+
         history = ClassificationHistory(
             document_id=document_id,
             document_title=doc_data.get("title", ""),
-            provider=config.active_provider,
-            model=(
-                config.openai_model if config.active_provider == "openai"
-                else getattr(config, "mistral_model", "mistral-small-latest") if config.active_provider == "mistral"
-                else getattr(config, "openrouter_model", "mistral/mistral-small-3.1-24b-instruct") if config.active_provider == "openrouter"
-                else config.ollama_model
-            ),
+            provider=classifier_provider_name,
+            model=history_model,
             result_json=asdict(result),
             tokens_input=result.tokens_input,
             tokens_output=result.tokens_output,
@@ -728,51 +752,12 @@ class DocumentClassifierService:
         self, provider_name: str, config: ClassifierConfig,
         model_override: Optional[str] = None,
     ) -> BaseClassifierProvider:
-        """Build a specific provider with optional model override."""
+        """Build a specific provider with optional model override (for benchmarks)."""
         storage_profiles = await self.get_storage_profiles()
         field_mappings = await self.get_custom_field_mappings()
         tool_executor = self._build_tool_executor(config, storage_profiles, field_mappings)
 
-        if provider_name == "openai":
-            api_key = await self._get_openai_key()
-            if not api_key:
-                raise ValueError("OpenAI API key not configured")
-            return OpenAIToolCallingProvider(
-                api_key=api_key,
-                model=model_override or config.openai_model,
-                tool_executor=tool_executor,
-            )
-        elif provider_name == "mistral":
-            api_key = getattr(config, "mistral_api_key", "") or ""
-            if not api_key:
-                raise ValueError("Mistral API key not configured")
-            return OpenAIToolCallingProvider(
-                api_key=api_key,
-                model=model_override or getattr(config, "mistral_model", "mistral-small-latest"),
-                tool_executor=tool_executor,
-                base_url="https://api.mistral.ai/v1",
-                provider_label="Mistral",
-            )
-        elif provider_name == "openrouter":
-            api_key = getattr(config, "openrouter_api_key", "") or ""
-            if not api_key:
-                raise ValueError("OpenRouter API key not configured")
-            return OpenAIToolCallingProvider(
-                api_key=api_key,
-                model=model_override or getattr(config, "openrouter_model", "mistral/mistral-small-3.1-24b-instruct"),
-                tool_executor=tool_executor,
-                base_url="https://openrouter.ai/api/v1",
-                provider_label="OpenRouter",
-                extra_headers={"HTTP-Referer": "https://github.com/syberx/AI-Paperless-Organizer"},
-            )
-        elif provider_name == "ollama":
-            return OllamaMultiCallProvider(
-                host=config.ollama_host,
-                model=model_override or config.ollama_model,
-                tool_executor=tool_executor,
-            )
-        else:
-            raise ValueError(f"Unknown provider: {provider_name}")
+        return await self._create_provider_instance(provider_name, tool_executor, model_override)
 
     async def benchmark_document(
         self, document_id: int,

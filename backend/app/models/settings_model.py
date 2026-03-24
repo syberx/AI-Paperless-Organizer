@@ -16,16 +16,18 @@ class PaperlessSettings(Base):
 
 
 class LLMProvider(Base):
-    """LLM Provider configuration."""
+    """LLM Provider configuration – central for all jobs."""
     __tablename__ = "llm_providers"
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(100), nullable=False, unique=True)  # openai, anthropic, azure, ollama
+    name = Column(String(100), nullable=False, unique=True)  # openai, anthropic, azure, ollama, mistral, openrouter
     display_name = Column(String(200), nullable=False)
     api_key = Column(String(500), default="")
     api_base_url = Column(String(500), default="")  # For Ollama or Azure
-    model = Column(String(200), default="")
-    is_active = Column(Boolean, default=False)
+    model = Column(String(200), default="")  # Default / Bereinigung model
+    classifier_model = Column(String(200), default="")  # Model for classification job (empty = use `model`)
+    vision_model = Column(String(200), default="")  # Vision model for OCR (only Ollama)
+    is_active = Column(Boolean, default=False)  # Active for Bereinigung job
     is_configured = Column(Boolean, default=False)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
@@ -79,5 +81,9 @@ class AppSettings(Base):
     show_debug_menu = Column(Boolean, default=False)
     # Theme/Display
     sidebar_compact = Column(Boolean, default=False)
+
+    # Job → Provider assignments (store provider name, e.g. "openai", "ollama")
+    classifier_provider = Column(String(100), default="ollama")
+
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

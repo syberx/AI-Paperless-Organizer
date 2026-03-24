@@ -3,8 +3,8 @@ import {
   Sparkles, Settings2, Play, Check, Loader2,
   FileText, Tags, Users, FolderOpen, Calendar, Hash,
   Clock, Coins, AlertCircle, RefreshCw,
-  History, CheckCircle2, XCircle, Info, ChevronDown, ChevronRight,
-  Save, MessageSquare, Scale, Plus, Minus, Copy, Bug, X, Search, Pencil, Zap
+  History, XCircle, Info, ChevronDown, ChevronRight,
+  Save, MessageSquare, Scale, Plus, Minus, Copy, Bug, X, Search, Pencil
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
@@ -46,12 +46,7 @@ export default function DocumentClassifier() {
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [ollamaModels, setOllamaModels] = useState<api.OllamaModelsResponse | null>(null)
   const [ollamaLoading, setOllamaLoading] = useState(false)
-  const [ollamaTestResult, setOllamaTestResult] = useState<api.OllamaTestResponse | null>(null)
-  const [ollamaTesting, setOllamaTesting] = useState(false)
-  const [mistralTestResult, setMistralTestResult] = useState<any>(null)
-  const [mistralTesting, setMistralTesting] = useState(false)
-  const [openrouterTestResult, setOpenrouterTestResult] = useState<any>(null)
-  const [openrouterTesting, setOpenrouterTesting] = useState(false)
+  const [, setOllamaTestResult] = useState<api.OllamaTestResponse | null>(null)
 
   // Collapsible sections
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
@@ -354,7 +349,7 @@ export default function DocumentClassifier() {
     if (activeTab === 'settings' && paperlessTags.length === 0) {
       loadPaperlessItems()
     }
-    if ((activeTab === 'settings' || activeTab === 'benchmark') && !ollamaModels && config?.ollama_host) {
+    if ((activeTab === 'settings' || activeTab === 'benchmark') && !ollamaModels) {
       loadOllamaModels()
     }
   }, [activeTab])
@@ -406,35 +401,14 @@ export default function DocumentClassifier() {
     try {
       const models = await api.getClassifierOllamaModels()
       setOllamaModels(models)
-      // Falls das gespeicherte Modell nicht installiert ist, erstes verfuegbares vorwaehlen
-      if (models.connected && models.installed.length > 0 && config) {
-        const installedNames = models.installed.map(m => m.name)
-        const currentModel = config.ollama_model
-        const currentInstalled = installedNames.some(n => n === currentModel || n.startsWith(currentModel.split(':')[0]))
-        if (!currentInstalled) {
-          const preferred = models.installed.find(m => m.recommendation) || models.installed[0]
-          setConfig(prev => prev ? { ...prev, ollama_model: preferred.name } : prev)
-        }
-      }
     } catch (e) {
       console.error('Failed to load Ollama models:', e)
-      setOllamaModels({ connected: false, ollama_host: config?.ollama_host || '', installed: [], suggestions: [], top_recommendation: null })
+      setOllamaModels({ connected: false, ollama_host: '', installed: [], suggestions: [], top_recommendation: null })
     } finally {
       setOllamaLoading(false)
     }
   }
 
-  const handleOllamaTest = async () => {
-    setOllamaTesting(true)
-    try {
-      const result = await api.testClassifierOllama(config?.ollama_model, config?.ollama_host)
-      setOllamaTestResult(result)
-    } catch (e: any) {
-      setOllamaTestResult({ connected: false, model_available: false, model: config?.ollama_model || '', message: e.message || 'Verbindungsfehler' })
-    } finally {
-      setOllamaTesting(false)
-    }
-  }
 
   const handleSaveConfig = async () => {
     if (!config) return
@@ -1222,6 +1196,7 @@ export default function DocumentClassifier() {
                       <option value="openai">OpenAI</option>
                       <option value="mistral">Mistral</option>
                       <option value="openrouter">OpenRouter</option>
+                      <option value="anthropic">Anthropic</option>
                       <option value="ollama">Ollama</option>
                     </select>
                     {slot.provider === 'openai' ? (
@@ -1232,7 +1207,7 @@ export default function DocumentClassifier() {
                       </select>
                     ) : slot.provider === 'mistral' ? (
                         <select value={slot.model} onChange={(e) => updateBenchSlot(idx, 'model', e.target.value)} className="input text-sm py-1.5 flex-1">
-                        <option value="">Standard ({config?.mistral_model || 'mistral-small-latest'})</option>
+                        <option value="">Standard</option>
                         <option value="mistral-small-latest">mistral-small</option>
                         <option value="mistral-medium-latest">mistral-medium</option>
                         <option value="mistral-large-latest">mistral-large</option>
@@ -1240,13 +1215,13 @@ export default function DocumentClassifier() {
                         <option value="ministral-8b-latest">ministral-8b</option>
                         <option value="codestral-latest">codestral</option>
                       </select>
-                    ) : slot.provider === 'openrouter' ? (
+                    ) : slot.provider === 'openrouter' || slot.provider === 'anthropic' ? (
                       <input
                         type="text"
                         value={slot.model}
                         onChange={(e) => updateBenchSlot(idx, 'model', e.target.value)}
                         className="input text-sm py-1.5 flex-1"
-                        placeholder={config?.openrouter_model || 'mistral/mistral-small-3.1-24b-instruct'}
+                        placeholder="Modellname eingeben"
                       />
                     ) : (
                       <select value={slot.model} onChange={(e) => updateBenchSlot(idx, 'model', e.target.value)} className="input text-sm py-1.5 flex-1">
@@ -1254,7 +1229,7 @@ export default function DocumentClassifier() {
                           <option value="">Lade Modelle...</option>
                         ) : ollamaModels?.installed && ollamaModels.installed.length > 0 ? (
                           <>
-                            <option value="">Standard ({config?.ollama_model || 'nicht gesetzt'})</option>
+                            <option value="">Standard</option>
                             {ollamaModels.installed
                               .sort((a: any, b: any) => {
                                 if (a.is_thinking && !b.is_thinking) return 1
@@ -1478,337 +1453,31 @@ export default function DocumentClassifier() {
       {/* Settings Tab */}
       {activeTab === 'settings' && config && (
         <div className="space-y-6">
-          {/* Provider */}
+          {/* Provider (read-only, configured in Settings) */}
           <div className="card p-6">
             <h2 className="text-lg font-semibold text-surface-100 mb-4">Provider</h2>
-            <div className="grid grid-cols-3 gap-3">
-              {([
-                { id: 'openai', label: 'OpenAI (Cloud)', desc: 'Tool Calling, token-sparsam, schnell' },
-                { id: 'mistral', label: 'Mistral (Cloud)', desc: 'Tool Calling, guenstig, europaeisch' },
-                { id: 'openrouter', label: 'OpenRouter (Cloud)', desc: 'Viele Modelle, eine API, flexibel' },
-                { id: 'ollama', label: 'Ollama (Lokal)', desc: 'Kostenlos, Datenschutz, Multi-Call' },
-              ] as const).map(p => (
-                <button
-                  key={p.id}
-                  onClick={() => setConfig({ ...config, active_provider: p.id })}
-                  className={clsx(
-                    'p-4 rounded-xl border-2 transition-all text-left',
-                    config.active_provider === p.id
-                      ? 'border-primary-500 bg-primary-500/10'
-                      : 'border-surface-700 hover:border-surface-600'
-                  )}
-                >
-                  <p className="font-semibold text-surface-100">{p.label}</p>
-                  <p className="text-xs text-surface-400 mt-1">{p.desc}</p>
-                </button>
-              ))}
+            <div className="flex items-center justify-between p-4 rounded-xl border-2 border-primary-500 bg-primary-500/10">
+              <div>
+                <p className="font-semibold text-surface-100">
+                  {config.active_provider === 'openai' ? 'OpenAI' :
+                   config.active_provider === 'mistral' ? 'Mistral' :
+                   config.active_provider === 'openrouter' ? 'OpenRouter' :
+                   config.active_provider === 'ollama' ? 'Ollama (Lokal)' :
+                   config.active_provider === 'anthropic' ? 'Anthropic' :
+                   config.active_provider}
+                </p>
+                <p className="text-sm text-surface-400 mt-1">
+                  Modell: <span className="text-surface-200">{config.active_model || 'Standard'}</span>
+                </p>
+              </div>
+              <a
+                href="/settings"
+                className="btn bg-surface-700 hover:bg-surface-600 text-surface-300 text-sm"
+              >
+                In Einstellungen aendern
+              </a>
             </div>
 
-            {config.active_provider === 'openai' && (
-              <div className="mt-4">
-                <label className="text-sm text-surface-400">OpenAI Modell</label>
-                <select
-                  value={config.openai_model}
-                  onChange={(e) => setConfig({ ...config, openai_model: e.target.value })}
-                  className="input mt-1"
-                >
-                  <option value="gpt-4o-mini">gpt-4o-mini (guenstig, empfohlen)</option>
-                  <option value="gpt-4o">gpt-4o (staerker, teurer)</option>
-                </select>
-              </div>
-            )}
-
-            {config.active_provider === 'mistral' && (
-              <div className="mt-4 space-y-3">
-                <div>
-                  <label className="text-sm text-surface-400">Mistral API-Key</label>
-                  <input
-                    type="password"
-                    value={config.mistral_api_key}
-                    onChange={(e) => setConfig({ ...config, mistral_api_key: e.target.value })}
-                    className="input mt-1 w-full"
-                    placeholder="sk-..."
-                  />
-                  <p className="text-xs text-surface-500 mt-1">Von console.mistral.ai</p>
-                </div>
-                <div>
-                  <label className="text-sm text-surface-400">Mistral Modell</label>
-                  <select
-                    value={config.mistral_model}
-                    onChange={(e) => setConfig({ ...config, mistral_model: e.target.value })}
-                    className="input mt-1"
-                  >
-                    <option value="mistral-small-latest">mistral-small (guenstig, schnell)</option>
-                    <option value="mistral-medium-latest">mistral-medium (ausgewogen)</option>
-                    <option value="mistral-large-latest">mistral-large (staerkstes Modell)</option>
-                    <option value="open-mistral-nemo">open-mistral-nemo (guenstig)</option>
-                    <option value="ministral-8b-latest">ministral-8b (schnell, kompakt)</option>
-                    <option value="codestral-latest">codestral (code-optimiert)</option>
-                  </select>
-                </div>
-                <button
-                  onClick={async () => {
-                    setMistralTesting(true)
-                    try {
-                      const r = await api.fetchJson<any>('/classifier/mistral/test', { method: 'POST' })
-                      setMistralTestResult(r)
-                    } catch (e: any) {
-                      setMistralTestResult({ connected: false, message: e.message })
-                    } finally {
-                      setMistralTesting(false)
-                    }
-                  }}
-                  disabled={mistralTesting || !config.mistral_api_key}
-                  className="btn flex items-center gap-2 bg-surface-700 hover:bg-surface-600 text-surface-300 text-sm"
-                >
-                  {mistralTesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
-                  Verbindung testen
-                </button>
-                {mistralTestResult && (
-                  <div className={clsx(
-                    'p-3 rounded-lg text-sm',
-                    mistralTestResult.connected
-                      ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30'
-                      : 'bg-red-500/10 text-red-300 border border-red-500/30'
-                  )}>
-                    {mistralTestResult.message}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {config.active_provider === 'openrouter' && (
-              <div className="mt-4 space-y-3">
-                <div className="flex items-start gap-3 p-3 bg-violet-500/10 border border-violet-500/30 rounded-lg">
-                  <Info className="w-5 h-5 text-violet-400 shrink-0 mt-0.5" />
-                  <div className="text-sm">
-                    <p className="text-violet-300 font-medium">OpenRouter – Viele Modelle, eine API</p>
-                    <p className="text-violet-300/70 mt-1">
-                      Zugang zu 300+ Modellen (Mistral, Llama, Gemini, Claude, ...) über eine einheitliche OpenAI-kompatible API. API-Key auf <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" className="underline">openrouter.ai/keys</a> erstellen.
-                    </p>
-                  </div>
-                </div>
-                <div>
-                  <label className="text-sm text-surface-400">OpenRouter API-Key</label>
-                  <input
-                    type="password"
-                    value={config.openrouter_api_key || ''}
-                    onChange={(e) => setConfig({ ...config, openrouter_api_key: e.target.value })}
-                    className="input mt-1 w-full"
-                    placeholder="sk-or-v1-..."
-                  />
-                  <p className="text-xs text-surface-500 mt-1">Von openrouter.ai/keys</p>
-                </div>
-                <div>
-                  <label className="text-sm text-surface-400">Modell</label>
-                  <input
-                    type="text"
-                    value={config.openrouter_model || ''}
-                    onChange={(e) => setConfig({ ...config, openrouter_model: e.target.value })}
-                    className="input mt-1 w-full"
-                    placeholder="mistral/mistral-small-3.1-24b-instruct"
-                  />
-                  <p className="text-xs text-surface-500 mt-1">
-                    Format: <code>anbieter/modellname</code> – z.B. <code>mistral/mistral-large-2411</code>, <code>google/gemini-2.0-flash-001</code>, <code>meta-llama/llama-3.3-70b-instruct</code>. Alle Modelle auf <a href="https://openrouter.ai/models" target="_blank" rel="noopener noreferrer" className="underline text-violet-400">openrouter.ai/models</a>.
-                  </p>
-                </div>
-                <button
-                  onClick={async () => {
-                    setOpenrouterTesting(true)
-                    try {
-                      const r = await api.fetchJson<any>('/classifier/openrouter/test', { method: 'POST' })
-                      setOpenrouterTestResult(r)
-                    } catch (e: any) {
-                      setOpenrouterTestResult({ connected: false, message: e.message })
-                    } finally {
-                      setOpenrouterTesting(false)
-                    }
-                  }}
-                  disabled={openrouterTesting || !config.openrouter_api_key}
-                  className="btn flex items-center gap-2 bg-surface-700 hover:bg-surface-600 text-surface-300 text-sm"
-                >
-                  {openrouterTesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
-                  Verbindung testen
-                </button>
-                {openrouterTestResult && (
-                  <div className={clsx(
-                    'p-3 rounded-lg text-sm',
-                    openrouterTestResult.connected
-                      ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30'
-                      : 'bg-red-500/10 text-red-300 border border-red-500/30'
-                  )}>
-                    {openrouterTestResult.message}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {config.active_provider === 'ollama' && (
-              <div className="mt-4 space-y-4">
-                <div className="flex items-start gap-3 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
-                  <Info className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
-                  <div className="text-sm">
-                    <p className="text-emerald-300 font-medium">Ollama Multi-Call-Modus (JSON erzwungen)</p>
-                    <p className="text-emerald-300/70 mt-1">
-                      Macht 3-4 fokussierte LLM-Calls mit <strong>erzwungenem JSON-Output</strong>. Kostenlos + Datenschutz.
-                    </p>
-                  </div>
-                </div>
-
-                {/* Host */}
-                <div>
-                  <label className="text-sm text-surface-400">Ollama Host</label>
-                  <div className="flex gap-2 mt-1">
-                    <input
-                      type="text"
-                      value={config.ollama_host}
-                      onChange={(e) => { setConfig({ ...config, ollama_host: e.target.value }); setOllamaModels(null) }}
-                      className="input flex-1"
-                      placeholder="http://localhost:11434"
-                    />
-                    <button
-                      onClick={loadOllamaModels}
-                      disabled={ollamaLoading}
-                      className="btn btn-primary flex items-center gap-2 whitespace-nowrap"
-                    >
-                      {ollamaLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                      Modelle laden
-                    </button>
-                  </div>
-                </div>
-
-                {/* Connection Status */}
-                {ollamaModels && (
-                  <div className={clsx(
-                    'flex items-center gap-2 text-sm p-2 rounded',
-                    ollamaModels.connected ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
-                  )}>
-                    {ollamaModels.connected ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
-                    {ollamaModels.connected
-                      ? `Verbunden -- ${ollamaModels.installed.length} Modell(e) installiert`
-                      : `Keine Verbindung zu ${ollamaModels.ollama_host}`
-                    }
-                  </div>
-                )}
-
-                {/* Model Selection */}
-                {ollamaModels?.connected && ollamaModels.installed.length > 0 && (
-                  <div>
-                    <label className="text-sm text-surface-400">Modell auswaehlen</label>
-                    <select
-                      value={config.ollama_model}
-                      onChange={(e) => setConfig({ ...config, ollama_model: e.target.value })}
-                      className="input mt-1"
-                    >
-                      {ollamaModels.installed
-                        .sort((a: any, b: any) => {
-                          if (a.is_thinking && !b.is_thinking) return 1
-                          if (!a.is_thinking && b.is_thinking) return -1
-                          return 0
-                        })
-                        .map((m: any) => (
-                        <option key={m.name} value={m.name}>
-                          {m.is_thinking ? '⚠ ' : ''}{m.name} ({m.size_gb}GB{m.parameter_size ? `, ${m.parameter_size}` : ''})
-                          {m.recommendation && !m.is_thinking ? ' ★' : ''}
-                        </option>
-                      ))}
-                    </select>
-
-                    {/* Show recommendation / thinking warning for selected model */}
-                    {(() => {
-                      const selected = ollamaModels.installed.find((m: any) => m.name === config.ollama_model)
-                      if (!selected) return null
-
-                      if (selected.is_thinking) {
-                        return (
-                          <div className="mt-2 p-2 bg-amber-500/10 border border-amber-500/30 rounded text-xs">
-                            <p className="text-amber-300 font-medium">Thinking-Modell erkannt</p>
-                            <p className="text-amber-300/70 mt-1">
-                              {selected.name} denkt intern nach bevor es antwortet. Das ist <strong>deutlich langsamer</strong> und
-                              kann 2-5x laenger dauern. JSON-Modus ist erzwungen, sollte aber funktionieren.
-                            </p>
-                            <p className="text-amber-300/70 mt-1">
-                              Empfehlung: <strong className="text-amber-200">qwen2.5:3b</strong> oder <strong className="text-amber-200">qwen2.5:7b</strong> fuer
-                              schnelle, zuverlaessige Klassifizierung.
-                            </p>
-                          </div>
-                        )
-                      }
-
-                      if (selected.recommendation) {
-                        return (
-                          <p className="text-xs mt-1 flex items-center gap-1">
-                            <Sparkles className="w-3 h-3 text-emerald-400" />
-                            <span className="text-emerald-400">{selected.recommendation}</span>
-                            {selected.speed && <span className="text-surface-500 ml-2">Tempo: {selected.speed}</span>}
-                            {selected.quality && <span className="text-surface-500 ml-1">| Qualitaet: {selected.quality}</span>}
-                          </p>
-                        )
-                      }
-                      return null
-                    })()}
-                  </div>
-                )}
-
-                {/* Manual model input if no models loaded */}
-                {(!ollamaModels || !ollamaModels.connected) && (
-                  <div>
-                    <label className="text-sm text-surface-400">Ollama Modell</label>
-                    <input
-                      type="text"
-                      value={config.ollama_model}
-                      onChange={(e) => setConfig({ ...config, ollama_model: e.target.value })}
-                      className="input mt-1"
-                      placeholder="qwen2.5:3b"
-                    />
-                    <p className="text-xs text-surface-500 mt-1">
-                      Empfehlung: <strong className="text-surface-300">qwen2.5:3b</strong> (schnell) oder <strong className="text-surface-300">qwen2.5:7b</strong> (beste Balance)
-                    </p>
-                  </div>
-                )}
-
-                {/* Suggestions for missing models */}
-                {ollamaModels?.connected && ollamaModels.suggestions.length > 0 && (
-                  <div>
-                    <p className="text-sm text-surface-400 mb-2">Empfohlene Standard-Modelle zum Installieren:</p>
-                    <div className="space-y-2">
-                      {ollamaModels.suggestions.slice(0, 4).map((s: any) => (
-                        <div key={s.name} className="flex items-center justify-between p-2 rounded bg-surface-800/50 text-sm">
-                          <div className="flex-1 min-w-0">
-                            <span className="text-surface-200 font-medium">{s.name}</span>
-                            {s.speed && <span className="text-surface-500 text-xs ml-2">{s.speed}</span>}
-                            <p className="text-surface-500 text-xs truncate">{s.recommendation}</p>
-                          </div>
-                          <code className="text-xs text-primary-400 bg-primary-500/10 px-2 py-1 rounded ml-2 shrink-0">
-                            {s.install_command}
-                          </code>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Connection Test Button */}
-                <div className="flex items-center gap-3 pt-2 border-t border-surface-700/30">
-                  <button
-                    onClick={handleOllamaTest}
-                    disabled={ollamaTesting}
-                    className="btn flex items-center gap-2 bg-surface-700 hover:bg-surface-600 text-surface-200"
-                  >
-                    {ollamaTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                    Verbindung testen
-                  </button>
-                  {ollamaTestResult && (
-                    <span className={clsx(
-                      'text-sm',
-                      ollamaTestResult.connected && ollamaTestResult.model_available ? 'text-emerald-400' : 'text-red-400'
-                    )}>
-                      {ollamaTestResult.message}
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Fields with collapsible filter sections */}
