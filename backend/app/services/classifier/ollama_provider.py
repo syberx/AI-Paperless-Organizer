@@ -367,24 +367,7 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
 
                     candidate_set_lower = {t.lower(): t for t in candidate_tags}
 
-                    # Strict models: enum constrains output to only valid tag names
-                    # (avoids heavy grammar for well-behaved models like qwen/llama)
-                    if self._use_strict_schemas:
-                        tags_schema = {
-                            "type": "object",
-                            "required": ["tags"],
-                            "properties": {
-                                "tags": {
-                                    "type": "array",
-                                    "items": {"type": "string", "enum": candidate_tags},
-                                    "minItems": 0,
-                                    "maxItems": tags_max,
-                                },
-                            },
-                            "additionalProperties": False,
-                        }
-                    else:
-                        tags_schema = _SCHEMA_TAGS
+                    tags_schema = _SCHEMA_TAGS
 
                     tag_response = await self._call_ollama(tag_prompt, "", max_tokens=200, json_schema=tags_schema)
                     total_calls += 1
@@ -399,17 +382,18 @@ class OllamaMultiCallProvider(BaseClassifierProvider):
                     elif isinstance(tag_data, list):
                         raw_tags = tag_data
 
-                    # Post-processing: keep only tags that actually exist in candidate list
                     valid_tags = []
                     for t in raw_tags:
-                        if not isinstance(t, str):
+                        if not isinstance(t, str) or not t.strip():
                             continue
+                        t = t.strip()
                         if t in candidate_tags:
                             valid_tags.append(t)
                         elif t.lower() in candidate_set_lower:
                             valid_tags.append(candidate_set_lower[t.lower()])
                         else:
-                            logger.warning(f"Tag '{t}' not in candidate list – discarded")
+                            logger.info(f"Tag '{t}' is NEW (not in existing tags)")
+                            valid_tags.append(t)
 
                     result.tags = valid_tags
                     logger.info(f"Tags call result: {result.tags} (raw: {raw_tags})")

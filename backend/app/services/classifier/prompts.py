@@ -72,7 +72,8 @@ RULES_TAGS = """TAG-REGELN:
 - Tags beschreiben das THEMA/den ZWECK des Dokuments -- worum geht es inhaltlich?
 - VERBOTEN: Firmennamen, Personennamen, Dokumenttyp-Woerter (Rechnung, Lieferschein...), AGB/Rechtstexte
 - GUT: Branche (Bau, Energie, KFZ), Lebensbereich (Gesundheit, Haushalt, Kinder), Kostenart (Versicherung, Kredit)
-- Nur Tags aus der angegebenen Liste verwenden -- keine neuen erfinden
+- Bevorzuge Tags aus der verfuegbaren Liste
+- Wenn KEIN passender Tag in der Liste existiert, darfst du EINEN neuen kurzen Tag vorschlagen (z.B. "Fotografie", "Haustier")
 - Lieber weniger aber treffende Tags als viele ungenaue"""
 
 RULES_DOCTYPE = """DOKUMENTTYP-REGELN:
@@ -185,9 +186,11 @@ Antworte NUR mit dem JSON, kein anderer Text."""
 
 
 SYSTEM_PROMPT_OLLAMA_TAGS = """Waehle aus der folgenden Tag-Liste die passenden Tags fuer das beschriebene Dokument.
-Waehle 2-5 Tags. Nutze NUR Tags aus dieser Liste:
+Waehle 2-5 Tags. Bevorzuge Tags aus dieser Liste:
 
 {available_tags}
+
+Falls KEIN passender Tag in der Liste existiert, darfst du EINEN neuen kurzen Tag vorschlagen.
 
 Dokument-Zusammenfassung: {summary}
 

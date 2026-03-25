@@ -111,7 +111,7 @@ CLASSIFICATION_RESULT_SCHEMA = {
         "tags": {
             "type": "array",
             "items": {"type": "string"},
-            "description": "List of tag names to assign (only from search_tags results)"
+            "description": "List of tag names to assign. Prefer existing tags from search_tags, but you may suggest one new tag if nothing fits."
         },
         "correspondent": {
             "type": ["string", "null"],
