@@ -27,7 +27,8 @@ import {
   Clock,
   Github,
   Heart,
-  Coffee
+  Coffee,
+  Search
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
@@ -69,6 +70,7 @@ const baseNavigation: NavItem[] = [
   },
   { name: 'Prompts', href: '/prompts', icon: MessageSquare, alwaysShow: true },
   { name: 'Einstellungen', href: '/settings', icon: Settings, alwaysShow: true },
+  { name: 'Dokumenten-Chat', href: '/rag-chat', icon: Search, alwaysShow: true },
   { name: 'OCR', href: '/ocr', icon: ScanLine, alwaysShow: true },
   { name: 'Debug', href: '/debug', icon: Bug, alwaysShow: false, requiresDebug: true },
 ]

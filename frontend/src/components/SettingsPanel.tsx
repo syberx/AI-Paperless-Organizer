@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Save, Check, X, Eye, EyeOff, TestTube, Loader2, ChevronDown, ChevronUp, Cpu, Lock, Bug, Trash2, Ban } from 'lucide-react'
+import { Save, Check, X, Eye, EyeOff, TestTube, Loader2, ChevronDown, ChevronUp, Cpu, Lock, Bug, Trash2, Ban, Key, Copy, Power, Code2 } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
 
@@ -57,10 +57,18 @@ export default function SettingsPanel() {
   const [loadingIgnored, setLoadingIgnored] = useState(false)
   const [removingIgnored, setRemovingIgnored] = useState<number | null>(null)
 
+  // API Keys
+  const [apiKeys, setApiKeys] = useState<api.ApiKeyInfo[]>([])
+  const [newKeyName, setNewKeyName] = useState('')
+  const [generatedKey, setGeneratedKey] = useState<string | null>(null)
+  const [generatingKey, setGeneratingKey] = useState(false)
+  const [deletingKeyId, setDeletingKeyId] = useState<number | null>(null)
+
   useEffect(() => {
     loadSettings()
     loadAppSettings()
     loadIgnoredItems()
+    loadApiKeys()
   }, [])
   
   const loadIgnoredItems = async () => {
@@ -84,6 +92,51 @@ export default function SettingsPanel() {
       console.error('Failed to remove ignored item:', e)
     } finally {
       setRemovingIgnored(null)
+    }
+  }
+
+  const loadApiKeys = async () => {
+    try {
+      const keys = await api.listApiKeys()
+      setApiKeys(keys)
+    } catch (e) {
+      console.error('Failed to load API keys:', e)
+    }
+  }
+
+  const handleGenerateKey = async () => {
+    if (!newKeyName.trim()) return
+    setGeneratingKey(true)
+    try {
+      const result = await api.generateApiKey(newKeyName.trim())
+      setGeneratedKey(result.key)
+      setNewKeyName('')
+      loadApiKeys()
+    } catch (e) {
+      console.error('Failed to generate key:', e)
+    } finally {
+      setGeneratingKey(false)
+    }
+  }
+
+  const handleDeleteKey = async (id: number) => {
+    setDeletingKeyId(id)
+    try {
+      await api.deleteApiKey(id)
+      loadApiKeys()
+    } catch (e) {
+      console.error('Failed to delete key:', e)
+    } finally {
+      setDeletingKeyId(null)
+    }
+  }
+
+  const handleToggleKey = async (id: number) => {
+    try {
+      await api.toggleApiKey(id)
+      loadApiKeys()
+    } catch (e) {
+      console.error('Failed to toggle key:', e)
     }
   }
 
@@ -917,6 +970,192 @@ export default function SettingsPanel() {
             ))}
           </div>
         )}
+      </div>
+
+      {/* Externe API */}
+      <div className="card p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <Code2 className="w-6 h-6 text-primary-400" />
+          <h2 className="text-xl font-semibold text-surface-100">Externe API (RAG Chat)</h2>
+        </div>
+
+        <p className="text-sm text-surface-400 mb-4">
+          Binde den Dokumenten-Chat in deine eigene Software ein. Generiere einen API-Key und nutze die REST-API,
+          um per Chat Dokumente zu finden und Fragen zu beantworten.
+        </p>
+
+        {/* API Key generieren */}
+        <div className="border border-surface-600 rounded-lg p-4 mb-4">
+          <h3 className="text-sm font-semibold text-surface-200 mb-3 flex items-center gap-2">
+            <Key className="w-4 h-4 text-primary-400" />
+            API-Keys verwalten
+          </h3>
+
+          <div className="flex gap-2 mb-3">
+            <input
+              type="text"
+              value={newKeyName}
+              onChange={(e) => setNewKeyName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleGenerateKey()}
+              placeholder="Name fuer den Key (z.B. 'Mein ERP-System')"
+              className="flex-1 px-3 py-2 bg-surface-700 border border-surface-600 rounded-lg text-sm text-surface-100 placeholder-surface-500"
+            />
+            <button
+              onClick={handleGenerateKey}
+              disabled={!newKeyName.trim() || generatingKey}
+              className="btn btn-primary flex items-center gap-2"
+            >
+              {generatingKey ? <Loader2 className="w-4 h-4 animate-spin" /> : <Key className="w-4 h-4" />}
+              Key generieren
+            </button>
+          </div>
+
+          {generatedKey && (
+            <div className="bg-green-900/30 border border-green-700 rounded-lg p-3 mb-3">
+              <div className="text-sm font-medium text-green-300 mb-1">Neuer API-Key erstellt:</div>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 bg-surface-800 px-3 py-2 rounded border border-green-700 text-sm font-mono text-green-300 break-all">
+                  {generatedKey}
+                </code>
+                <button
+                  onClick={() => { navigator.clipboard.writeText(generatedKey); }}
+                  className="p-2 text-green-400 hover:bg-green-900/50 rounded"
+                  title="Kopieren"
+                >
+                  <Copy className="w-4 h-4" />
+                </button>
+              </div>
+              <p className="text-xs text-green-400 mt-1">
+                Speichere diesen Key jetzt! Er wird nicht erneut angezeigt.
+              </p>
+            </div>
+          )}
+
+          {apiKeys.length > 0 && (
+            <div className="space-y-2">
+              {apiKeys.map((k) => (
+                <div key={k.id} className="flex items-center justify-between bg-surface-700/50 rounded-lg px-3 py-2">
+                  <div className="flex items-center gap-3">
+                    <Key className={clsx('w-4 h-4', k.is_active ? 'text-green-400' : 'text-surface-500')} />
+                    <div>
+                      <div className="text-sm font-medium text-surface-100">{k.name}</div>
+                      <div className="text-xs text-surface-400">
+                        {k.key_prefix}... | Erstellt: {k.created_at ? new Date(k.created_at).toLocaleDateString('de-DE') : '-'}
+                        {k.last_used_at && <> | Zuletzt: {new Date(k.last_used_at).toLocaleDateString('de-DE')}</>}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => handleToggleKey(k.id)}
+                      className={clsx('p-1.5 rounded', k.is_active ? 'text-green-400 hover:bg-surface-600' : 'text-surface-500 hover:bg-surface-600')}
+                      title={k.is_active ? 'Deaktivieren' : 'Aktivieren'}
+                    >
+                      <Power className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteKey(k.id)}
+                      disabled={deletingKeyId === k.id}
+                      className="p-1.5 text-red-400 hover:text-red-300 hover:bg-surface-600 rounded"
+                      title="Loeschen"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* API Dokumentation */}
+        <div className="border border-surface-600 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-surface-200 flex items-center gap-2">
+              <Code2 className="w-4 h-4 text-primary-400" />
+              API-Dokumentation
+            </h3>
+            <a
+              href="/docs"
+              target="_blank"
+              rel="noopener"
+              className="btn btn-primary flex items-center gap-2 text-sm"
+            >
+              <TestTube className="w-4 h-4" />
+              Swagger UI oeffnen
+            </a>
+          </div>
+
+          <div className="space-y-4 text-sm">
+            <div>
+              <h4 className="font-medium text-surface-100 mb-1">Was kann die API?</h4>
+              <ul className="list-disc list-inside text-surface-400 space-y-1">
+                <li><strong className="text-surface-200">Chat</strong> - Stelle Fragen zu deinen Dokumenten, die KI antwortet mit Quellenangaben</li>
+                <li><strong className="text-surface-200">Suche</strong> - Semantische Dokumentensuche (findet Bedeutung, nicht nur Stichworte)</li>
+                <li><strong className="text-surface-200">Sessions</strong> - Chat-Verlaeufe werden gespeichert und koennen abgerufen werden</li>
+              </ul>
+            </div>
+
+            <div>
+              <h4 className="font-medium text-surface-100 mb-1">Authentifizierung</h4>
+              <p className="text-surface-400 mb-2">Sende den API-Key als Bearer-Token im Authorization-Header:</p>
+              <pre className="bg-surface-900 text-green-400 rounded-lg p-3 overflow-x-auto text-xs">
+{`Authorization: Bearer po_dein_api_key_hier`}</pre>
+            </div>
+
+            <div>
+              <h4 className="font-medium text-surface-100 mb-1">Chat-Endpunkt (SSE Streaming)</h4>
+              <pre className="bg-surface-900 text-green-400 rounded-lg p-3 overflow-x-auto text-xs">
+{`POST /api/rag/chat
+Content-Type: application/json
+Authorization: Bearer po_dein_api_key
+
+{
+  "question": "Welche Rechnungen habe ich von Vodafone?",
+  "session_id": null,
+  "filters": {
+    "correspondent_id": null,
+    "document_type_id": null,
+    "tags": null
+  }
+}`}</pre>
+              <p className="text-surface-500 mt-1">Antwort: Server-Sent Events (SSE) mit Token-Stream und Quellenangaben.</p>
+            </div>
+
+            <div>
+              <h4 className="font-medium text-surface-100 mb-1">Such-Endpunkt</h4>
+              <pre className="bg-surface-900 text-green-400 rounded-lg p-3 overflow-x-auto text-xs">
+{`POST /api/rag/search
+Content-Type: application/json
+Authorization: Bearer po_dein_api_key
+
+{
+  "query": "Mietvertrag",
+  "limit": 5
+}`}</pre>
+              <p className="text-surface-500 mt-1">Antwort: JSON mit relevanten Dokumenten, Scores und Snippets.</p>
+            </div>
+
+            <div>
+              <h4 className="font-medium text-surface-100 mb-1">Weitere Endpunkte</h4>
+              <div className="bg-surface-700/50 rounded-lg p-3 space-y-1 text-xs font-mono text-surface-200">
+                <div><span className="text-blue-400">GET</span> /api/rag/sessions - Alle Chat-Sessions auflisten</div>
+                <div><span className="text-blue-400">GET</span> /api/rag/sessions/:id - Einzelne Session mit Nachrichten</div>
+                <div><span className="text-red-400">DELETE</span> /api/rag/sessions/:id - Session loeschen</div>
+                <div><span className="text-green-400">POST</span> /api/rag/index/start - Indexierung starten</div>
+                <div><span className="text-blue-400">GET</span> /api/rag/index/status - Indexierungsstatus</div>
+                <div><span className="text-blue-400">GET</span> /api/rag/config - RAG-Konfiguration</div>
+              </div>
+            </div>
+
+            <div className="bg-primary-900/30 border border-primary-700 rounded-lg p-3">
+              <p className="text-primary-300 text-xs">
+                <strong>Tipp:</strong> In der Swagger UI kannst du alle Endpunkte direkt im Browser testen.
+                Klicke auf einen Endpunkt, dann auf "Try it out", fuege deinen API-Key ein und sende die Anfrage.
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )

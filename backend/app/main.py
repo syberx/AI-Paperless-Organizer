@@ -12,7 +12,7 @@ logging.basicConfig(
     format="%(levelname)s %(name)s: %(message)s",
     stream=sys.stdout,
 )
-from app.routers import paperless, correspondents, tags, document_types, settings, llm, debug, statistics, ignored_items, ocr, cleanup, classifier
+from app.routers import paperless, correspondents, tags, document_types, settings, llm, debug, statistics, ignored_items, ocr, cleanup, classifier, rag, api_keys
 from app.routers.ocr import ocr_settings, get_ocr_service
 from app.services.ocr_service import watchdog_state
 from app.services.paperless_client import PaperlessClient
@@ -66,6 +66,19 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logging.getLogger(__name__).error(f"Auto-classify auto-start failed: {e}")
 
+    # Reset stale RAG indexing status from previous run
+    try:
+        from app.models.rag import RagIndexingState
+        async with async_session() as db_sess:
+            result = await db_sess.execute(sa_select(RagIndexingState).where(RagIndexingState.id == 1))
+            rag_state = result.scalar_one_or_none()
+            if rag_state and rag_state.status == "indexing":
+                rag_state.status = "idle"
+                await db_sess.commit()
+                logging.getLogger(__name__).info("Reset stale RAG indexing status to 'idle'")
+    except Exception as e:
+        logging.getLogger(__name__).error(f"RAG status reset failed: {e}")
+
     yield
     # Shutdown: stop auto-classify + watchdog gracefully
     try:
@@ -113,6 +126,8 @@ app.include_router(ignored_items.router, prefix="/api/ignored-items", tags=["Ign
 app.include_router(ocr.router, prefix="/api/ocr", tags=["OCR"])
 app.include_router(cleanup.router, prefix="/api/cleanup", tags=["Cleanup"])
 app.include_router(classifier.router, prefix="/api/classifier", tags=["Classifier"])
+app.include_router(rag.router, prefix="/api/rag", tags=["RAG"])
+app.include_router(api_keys.router, prefix="/api/api-keys", tags=["API Keys"])
 
 
 @app.get("/api/health")

@@ -101,6 +101,28 @@ class LLMProviderService:
             "description": "Günstigstes Claude",
             "provider": "anthropic"
         },
+        # Mistral AI Models
+        "mistral-small-latest": {
+            "context": 32000,
+            "input_price": 0.10,
+            "output_price": 0.30,
+            "description": "Schnell & günstig (Mistral API)",
+            "provider": "mistral"
+        },
+        "mistral-medium-latest": {
+            "context": 32000,
+            "input_price": 2.70,
+            "output_price": 8.10,
+            "description": "Ausgewogen (Mistral API)",
+            "provider": "mistral"
+        },
+        "mistral-large-latest": {
+            "context": 128000,
+            "input_price": 2.00,
+            "output_price": 6.00,
+            "description": "Stärkstes Mistral-Modell",
+            "provider": "mistral"
+        },
         # Ollama / Local Models
         "llama3.2": {
             "context": 128000,
@@ -162,6 +184,8 @@ class LLMProviderService:
         "anthropic": 190000,   # Claude models have huge context
         "azure": 7000,         # Conservative
         "ollama": 7000,        # Conservative
+        "mistral": 30000,      # Mistral API models
+        "openrouter": 30000,   # Depends on routed model
     }
     
     @classmethod
@@ -227,6 +251,10 @@ class LLMProviderService:
             return await self._complete_azure(prompt, model_override)
         elif self.provider.name == "ollama":
             return await self._complete_ollama(prompt, model_override)
+        elif self.provider.name == "mistral":
+            return await self._complete_mistral(prompt, model_override)
+        elif self.provider.name == "openrouter":
+            return await self._complete_openrouter(prompt, model_override)
         else:
             raise ValueError(f"Unknown provider: {self.provider.name}")
     
@@ -276,6 +304,51 @@ class LLMProviderService:
             api_key=self.provider.api_key,
             api_version="2024-02-15-preview",
             azure_endpoint=self.provider.api_base_url
+        )
+        
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "Du bist ein hilfreicher Assistent für Dokumentenmanagement. Antworte immer mit vollständigem, validem JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.2,
+            max_tokens=16384
+        )
+        
+        return response.choices[0].message.content
+    
+    async def _complete_mistral(self, prompt: str, model_override: str = None) -> str:
+        """Complete using Mistral AI API (OpenAI-compatible)."""
+        from openai import AsyncOpenAI
+        
+        model = model_override or self.provider.model or "mistral-small-latest"
+        client = AsyncOpenAI(
+            api_key=self.provider.api_key,
+            base_url="https://api.mistral.ai/v1",
+        )
+        
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "Du bist ein hilfreicher Assistent für Dokumentenmanagement. Antworte immer mit vollständigem, validem JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.2,
+            max_tokens=16384
+        )
+        
+        return response.choices[0].message.content
+    
+    async def _complete_openrouter(self, prompt: str, model_override: str = None) -> str:
+        """Complete using OpenRouter API (OpenAI-compatible)."""
+        from openai import AsyncOpenAI
+        
+        model = model_override or self.provider.model or "mistralai/mistral-small-2603"
+        client = AsyncOpenAI(
+            api_key=self.provider.api_key,
+            base_url="https://openrouter.ai/api/v1",
+            default_headers={"HTTP-Referer": "https://github.com/syberx/AI-Paperless-Organizer"},
         )
         
         response = await client.chat.completions.create(

@@ -77,6 +77,14 @@ backend/data/failed_ocr_debug.png
 *.sqlite
 *.sqlite3
 
+# RAG Index-Daten (werden zur Laufzeit generiert)
+backend/data/chromadb/
+backend/data/bm25_index.pkl
+backend/data/bm25_corpus.json
+
+# Backups
+backup_*/
+
 # Aber: Behalte das data Verzeichnis
 !backend/data/.gitkeep
 

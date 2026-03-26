@@ -7,6 +7,7 @@ from app.models.classifier import (
     ClassifierConfig, StoragePathProfile, CustomFieldMapping, ClassificationHistory
 )
 from app.models.ocr import OcrPageResult
+from app.models.rag import RagConfig, RagChatSession, RagChatMessage, RagIndexingState, ApiKey
 
 __all__ = [
     "PaperlessSettings",
@@ -25,5 +26,10 @@ __all__ = [
     "CustomFieldMapping",
     "ClassificationHistory",
     "OcrPageResult",
+    "RagConfig",
+    "RagChatSession",
+    "RagChatMessage",
+    "RagIndexingState",
+    "ApiKey",
 ]
 

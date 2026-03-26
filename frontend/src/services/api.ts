@@ -1173,3 +1173,35 @@ export const refreshClassifierCache = () =>
   fetchJson<{ refreshed: boolean; tags: number; correspondents: number; document_types: number; storage_paths: number }>(
     '/classifier/refresh-cache', { method: 'POST' }
   )
+
+// --- API Keys ---
+export interface ApiKeyInfo {
+  id: number
+  name: string
+  key_prefix: string
+  is_active: boolean
+  created_at: string | null
+  last_used_at: string | null
+}
+
+export interface GeneratedKey {
+  id: number
+  name: string
+  key: string
+  key_prefix: string
+  message: string
+}
+
+export const generateApiKey = (name: string) =>
+  fetchJson<GeneratedKey>('/api-keys/generate', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  })
+
+export const listApiKeys = () => fetchJson<ApiKeyInfo[]>('/api-keys/list')
+
+export const deleteApiKey = (id: number) =>
+  fetchJson<{ deleted: boolean }>(`/api-keys/${id}`, { method: 'DELETE' })
+
+export const toggleApiKey = (id: number) =>
+  fetchJson<{ id: number; is_active: boolean }>(`/api-keys/${id}/toggle`, { method: 'PUT' })
