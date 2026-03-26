@@ -177,7 +177,39 @@ class Indexer:
                 state.error_message = str(e)
                 await db.commit()
 
+    async def _fetch_metadata_maps(self, client) -> tuple[dict, dict, dict, dict]:
+        """Fetch lookup maps for tags, correspondents, document types, storage paths."""
+        tags_map, corr_map, type_map, path_map = {}, {}, {}, {}
+        try:
+            r = await client._request("GET", "/tags/", params={"page_size": 10000})
+            for t in (r or {}).get("results", []):
+                tags_map[t["id"]] = t.get("name", "")
+        except Exception as e:
+            logger.warning(f"Could not fetch tags: {e}")
+        try:
+            r = await client._request("GET", "/correspondents/", params={"page_size": 10000})
+            for c in (r or {}).get("results", []):
+                corr_map[c["id"]] = c.get("name", "")
+        except Exception as e:
+            logger.warning(f"Could not fetch correspondents: {e}")
+        try:
+            r = await client._request("GET", "/document_types/", params={"page_size": 10000})
+            for t in (r or {}).get("results", []):
+                type_map[t["id"]] = t.get("name", "")
+        except Exception as e:
+            logger.warning(f"Could not fetch document types: {e}")
+        try:
+            r = await client._request("GET", "/storage_paths/", params={"page_size": 10000})
+            for p in (r or {}).get("results", []):
+                path_map[p["id"]] = p.get("path", "") or p.get("name", "")
+        except Exception as e:
+            logger.warning(f"Could not fetch storage paths: {e}")
+        logger.info(f"Metadata maps: {len(tags_map)} tags, {len(corr_map)} correspondents, {len(type_map)} types, {len(path_map)} paths")
+        return tags_map, corr_map, type_map, path_map
+
     async def _fetch_all_documents(self, client) -> list:
+        tags_map, corr_map, type_map, path_map = await self._fetch_metadata_maps(client)
+
         documents = []
         page = 1
         max_retries = 3
@@ -189,16 +221,22 @@ class Indexer:
                     if not result or not result.get("results"):
                         return documents
                     for doc in result["results"]:
+                        corr_id = doc.get("correspondent")
+                        type_id = doc.get("document_type")
+                        path_id = doc.get("storage_path")
+                        tag_ids = doc.get("tags", [])
                         documents.append({
                             "id": doc["id"],
                             "title": doc.get("title", ""),
                             "content": doc.get("content", ""),
-                            "correspondent": doc.get("correspondent"),
-                            "correspondent_name": "",
-                            "document_type": doc.get("document_type"),
-                            "document_type_name": "",
-                            "tags": doc.get("tags", []),
-                            "tag_names": [],
+                            "correspondent": corr_id,
+                            "correspondent_name": corr_map.get(corr_id, "") if corr_id else "",
+                            "document_type": type_id,
+                            "document_type_name": type_map.get(type_id, "") if type_id else "",
+                            "tags": tag_ids,
+                            "tag_names": [tags_map.get(t, "") for t in tag_ids if tags_map.get(t, "")],
+                            "storage_path": path_id,
+                            "storage_path_name": path_map.get(path_id, "") if path_id else "",
                             "created": doc.get("created", ""),
                             "added": doc.get("added", ""),
                         })

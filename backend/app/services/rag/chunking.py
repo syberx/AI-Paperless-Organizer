@@ -12,6 +12,30 @@ class ChunkingService:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
 
+    @staticmethod
+    def _build_metadata_header(document: Dict[str, Any]) -> str:
+        """Build a searchable metadata header prepended to every chunk."""
+        parts = []
+        title = document.get("title", "").strip()
+        if title:
+            parts.append(f"Titel: {title}")
+        corr = document.get("correspondent_name", "").strip()
+        if corr:
+            parts.append(f"Korrespondent: {corr}")
+        doc_type = document.get("document_type_name", "").strip()
+        if doc_type:
+            parts.append(f"Dokumententyp: {doc_type}")
+        tag_names = [t for t in document.get("tag_names", []) if t.strip()]
+        if tag_names:
+            parts.append(f"Tags: {', '.join(tag_names)}")
+        storage = document.get("storage_path_name", "").strip()
+        if storage:
+            parts.append(f"Speicherpfad: {storage}")
+        created = document.get("created", "").strip()
+        if created:
+            parts.append(f"Datum: {created[:10]}")
+        return "\n".join(parts)
+
     def chunk_document(self, document: Dict[str, Any]) -> List[Dict[str, Any]]:
         content = document.get("content", "") or ""
         if not content.strip():
@@ -27,16 +51,25 @@ class ChunkingService:
             "document_type_name": document.get("document_type_name", ""),
             "tags": document.get("tags", []),
             "tag_names": document.get("tag_names", []),
+            "storage_path": document.get("storage_path", None),
+            "storage_path_name": document.get("storage_path_name", ""),
             "created_date": document.get("created", ""),
             "added_date": document.get("added", ""),
         }
 
+        header = self._build_metadata_header(document)
         text_chunks = self._split_text(content)
         chunks = []
         for i, text in enumerate(text_chunks):
+            # Only first chunk gets full header; subsequent chunks get title only to save tokens
+            if i == 0:
+                chunk_text = f"{header}\n\n{text}" if header else text
+            else:
+                title_line = f"Titel: {document.get('title', '')}\n" if document.get("title") else ""
+                chunk_text = f"{title_line}{text}" if title_line else text
             chunk = {
                 "id": f"doc{doc_id}_chunk{i}",
-                "text": text,
+                "text": chunk_text,
                 "metadata": {**metadata, "chunk_index": i, "total_chunks": len(text_chunks)},
             }
             chunks.append(chunk)
