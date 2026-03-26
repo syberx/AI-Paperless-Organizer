@@ -117,8 +117,11 @@ class SearchEngine:
         if os.path.exists(bm25_path):
             try:
                 with open(bm25_path, "rb") as f:
-                    self._bm25, self._corpus_chunks = pickle.load(f)
-                logger.info(f"BM25 index loaded: {len(self._corpus_chunks)} chunks")
+                    loaded = pickle.load(f)
+                _, self._corpus_chunks = loaded
+                # Always rebuild BM25 from raw corpus so stopword changes take effect
+                self._rebuild_bm25()
+                logger.info(f"BM25 index loaded + rebuilt: {len(self._corpus_chunks)} chunks")
             except Exception as e:
                 logger.warning(f"Could not load BM25 index: {e}")
 
@@ -126,13 +129,41 @@ class SearchEngine:
     def _tokenize(text: str) -> List[str]:
         import re
         tokens = re.findall(r'\w+', text.lower())
-        stopwords = {"der", "die", "das", "und", "oder", "in", "von", "zu", "mit",
-                     "auf", "für", "ist", "im", "den", "des", "ein", "eine", "einer",
-                     "einem", "es", "an", "als", "auch", "aus", "bei", "nach", "nicht",
-                     "noch", "nur", "über", "um", "wie", "wird", "sich", "werden",
-                     "the", "a", "an", "and", "or", "in", "of", "to", "with", "on",
-                     "for", "is", "at", "by", "from", "not", "but", "are", "was", "be"}
-        return [t for t in tokens if t not in stopwords and len(t) > 1]
+        stopwords = {
+            # Deutsche Artikel
+            "der", "die", "das", "dem", "den", "des",
+            # Deutsche Konjunktionen / Partikeln
+            "und", "oder", "aber", "doch", "denn", "wenn", "weil", "dass", "ob",
+            "also", "noch", "nur", "schon", "ja", "nein", "doch", "mal", "eben",
+            # Deutsche Präpositionen
+            "in", "von", "zu", "mit", "auf", "für", "an", "bei", "nach", "über",
+            "um", "aus", "durch", "gegen", "ohne", "unter", "vor", "zwischen",
+            "im", "am", "zum", "zur", "beim",
+            # Deutsche Pronomen / Possessivpronomen
+            "ich", "du", "er", "sie", "es", "wir", "ihr",
+            "mein", "meine", "meiner", "meinem", "meines",
+            "dein", "deine", "deiner", "deinem", "deines",
+            "sein", "seine", "seiner", "seinem", "seines",
+            "ihr", "ihre", "ihrer", "ihrem", "ihres",
+            "unser", "unsere", "unserer", "unserem", "unseres",
+            "euer", "eure", "eurer", "eurem", "eures",
+            "dieser", "diese", "dieses", "diesem", "diesen",
+            "jeder", "jede", "jedes", "jedem", "jeden",
+            "kein", "keine", "keiner", "keinem", "keines",
+            # Deutsche Hilfsverben / häufige Verben
+            "ist", "war", "wird", "wurde", "worden", "sein", "haben", "hatte",
+            "sind", "waren", "werden", "hat", "wird", "sei", "wäre", "hätte",
+            "kann", "konnte", "darf", "soll", "will", "muss", "mag",
+            # Sonstiges
+            "als", "wie", "so", "da", "hier", "dort", "nicht", "sich",
+            "auch", "noch", "schon", "sehr", "mehr", "viel", "alle",
+            "eine", "einer", "einem", "eines", "ein",
+            # Englische Stopwörter
+            "the", "a", "and", "or", "in", "of", "to", "with", "on",
+            "for", "is", "at", "by", "from", "not", "but", "are", "was", "be",
+            "this", "that", "it", "as", "an",
+        }
+        return [t for t in tokens if t not in stopwords and len(t) > 2]
 
     async def hybrid_search(
         self,
@@ -229,7 +260,7 @@ class SearchEngine:
 
     def _rrf_merge(
         self, semantic: List[Dict], bm25: List[Dict], limit: int,
-        k: int = 20, bm25_boost: float = 3.0
+        k: int = 20, bm25_boost: float = 2.0
     ) -> List[SearchResult]:
         """Weighted Reciprocal Rank Fusion at document level.
         BM25 gets a higher weight (bm25_boost) because keyword matches
