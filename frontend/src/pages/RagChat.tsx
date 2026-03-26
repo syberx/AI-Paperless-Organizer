@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Send, Plus, Trash2, MessageSquare, Database, Loader2,
   Search, Settings2, RefreshCw, FileText, ChevronRight,
-  AlertCircle, CheckCircle2, ExternalLink,
+  AlertCircle, CheckCircle2, ExternalLink, Award,
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as ragApi from '../services/ragApi'
@@ -15,6 +15,13 @@ interface LocalMessage {
   isStreaming?: boolean
   statusMessage?: string
 }
+
+function scoreColor(score: number): string {
+  if (score >= 0.85) return 'bg-primary-600/20 text-primary-400 border border-primary-500/40'
+  if (score >= 0.65) return 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+  return 'bg-surface-600/40 text-surface-400 border border-surface-500/40'
+}
+
 
 export default function RagChat() {
   const [sessions, setSessions] = useState<ragApi.ChatSession[]>([])
@@ -222,18 +229,18 @@ export default function RagChat() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] -m-6 -mt-2">
+    <div className="flex h-[calc(100vh-4rem)] -m-6 -mt-2 bg-surface-900">
       {/* Sidebar */}
       <div
         className={clsx(
-          'bg-white border-r border-gray-200 flex flex-col transition-all duration-200',
+          'bg-surface-900 border-r border-surface-700/50 flex flex-col transition-all duration-200',
           sidebarOpen ? 'w-72' : 'w-0 overflow-hidden'
         )}
       >
-        <div className="p-3 border-b border-gray-200">
+        <div className="p-3 border-b border-surface-700/50">
           <button
             onClick={startNewChat}
-            className="w-full flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+            className="w-full flex items-center gap-2 px-3 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-colors text-sm font-medium"
           >
             <Plus className="w-4 h-4" />
             Neuer Chat
@@ -242,7 +249,7 @@ export default function RagChat() {
 
         <div className="flex-1 overflow-y-auto">
           {sessions.length === 0 ? (
-            <div className="p-4 text-sm text-gray-500 text-center">
+            <div className="p-4 text-sm text-surface-500 text-center">
               Noch keine Chats vorhanden
             </div>
           ) : (
@@ -250,15 +257,15 @@ export default function RagChat() {
               <div
                 key={session.id}
                 className={clsx(
-                  'group flex items-center gap-2 px-3 py-2.5 cursor-pointer border-b border-gray-100 hover:bg-gray-50',
-                  activeSessionId === session.id && 'bg-blue-50 border-l-2 border-l-blue-600'
+                  'group flex items-center gap-2 px-3 py-2.5 cursor-pointer border-b border-surface-800 hover:bg-surface-800',
+                  activeSessionId === session.id && 'bg-surface-800 border-l-2 border-l-primary-500'
                 )}
                 onClick={() => loadSession(session.id)}
               >
-                <MessageSquare className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                <MessageSquare className="w-4 h-4 text-surface-500 flex-shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-black truncate">{session.title}</div>
-                  <div className="text-xs text-gray-500">
+                  <div className="text-sm font-medium text-surface-100 truncate">{session.title}</div>
+                  <div className="text-xs text-surface-500">
                     {session.message_count} Nachrichten
                   </div>
                 </div>
@@ -267,7 +274,7 @@ export default function RagChat() {
                     e.stopPropagation()
                     deleteChat(session.id)
                   }}
-                  className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500 transition-all"
+                  className="opacity-0 group-hover:opacity-100 p-1 text-surface-500 hover:text-red-400 transition-all"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -277,14 +284,14 @@ export default function RagChat() {
         </div>
 
         {/* Index Status */}
-        <div className="p-3 border-t border-gray-200 bg-gray-50">
+        <div className="p-3 border-t border-surface-700/50 bg-surface-950/50">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-medium text-black">Index</span>
+            <span className="text-xs font-semibold text-surface-400 uppercase tracking-wider">Index</span>
             <div className="flex gap-1">
               <button
                 onClick={() => startIndex(false)}
                 disabled={indexStatus?.status === 'indexing'}
-                className="p-1 text-gray-500 hover:text-blue-600 disabled:opacity-50"
+                className="p-1 text-surface-500 hover:text-primary-400 disabled:opacity-40 transition-colors"
                 title="Neue Dokumente indexieren"
               >
                 <RefreshCw className={clsx('w-3.5 h-3.5', indexStatus?.status === 'indexing' && 'animate-spin')} />
@@ -292,7 +299,7 @@ export default function RagChat() {
               <button
                 onClick={() => startIndex(true)}
                 disabled={indexStatus?.status === 'indexing'}
-                className="p-1 text-gray-500 hover:text-orange-600 disabled:opacity-50"
+                className="p-1 text-surface-500 hover:text-amber-400 disabled:opacity-40 transition-colors"
                 title="Komplett neu indexieren"
               >
                 <Database className="w-3.5 h-3.5" />
@@ -300,28 +307,28 @@ export default function RagChat() {
             </div>
           </div>
           {indexStatus && (
-            <div className="text-xs text-gray-600 space-y-0.5">
+            <div className="text-xs text-surface-400 space-y-0.5">
               <div className="flex items-center gap-1">
                 {indexStatus.status === 'indexing' ? (
-                  <Loader2 className="w-3 h-3 animate-spin text-blue-500" />
+                  <Loader2 className="w-3 h-3 animate-spin text-primary-400" />
                 ) : indexStatus.status === 'completed' ? (
-                  <CheckCircle2 className="w-3 h-3 text-green-500" />
+                  <CheckCircle2 className="w-3 h-3 text-primary-400" />
                 ) : indexStatus.status === 'error' ? (
-                  <AlertCircle className="w-3 h-3 text-red-500" />
+                  <AlertCircle className="w-3 h-3 text-red-400" />
                 ) : (
-                  <Database className="w-3 h-3 text-gray-400" />
+                  <Database className="w-3 h-3 text-surface-500" />
                 )}
-                <span className="text-black">
+                <span className="text-surface-300">
                   {indexStatus.indexed_documents}/{indexStatus.total_documents} Dokumente
                 </span>
               </div>
               {indexStatus.chunks_in_index > 0 && (
-                <div className="text-gray-500">{indexStatus.chunks_in_index} Chunks im Index</div>
+                <div className="text-surface-500">{indexStatus.chunks_in_index} Chunks im Index</div>
               )}
               {indexStatus.status === 'indexing' && (
-                <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1">
+                <div className="w-full bg-surface-700 rounded-full h-1.5 mt-1">
                   <div
-                    className="bg-blue-600 h-1.5 rounded-full transition-all"
+                    className="bg-primary-500 h-1.5 rounded-full transition-all"
                     style={{
                       width: `${indexStatus.total_documents > 0 ? (indexStatus.indexed_documents / indexStatus.total_documents) * 100 : 0}%`,
                     }}
@@ -334,17 +341,17 @@ export default function RagChat() {
       </div>
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col bg-gray-50">
+      <div className="flex-1 flex flex-col bg-surface-900">
         {/* Top bar */}
-        <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between">
+        <div className="bg-surface-800/80 backdrop-blur border-b border-surface-700/50 px-4 py-2 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="p-1.5 text-gray-500 hover:text-black rounded-lg hover:bg-gray-100"
+              className="p-1.5 text-surface-400 hover:text-surface-100 rounded-lg hover:bg-surface-700/50 transition-colors"
             >
               <ChevronRight className={clsx('w-4 h-4 transition-transform', sidebarOpen && 'rotate-180')} />
             </button>
-            <h2 className="text-sm font-semibold text-black">
+            <h2 className="text-sm font-semibold text-surface-100 font-display">
               RAG Dokumenten-Chat
             </h2>
           </div>
@@ -352,7 +359,7 @@ export default function RagChat() {
             onClick={() => setShowSettings(!showSettings)}
             className={clsx(
               'p-1.5 rounded-lg transition-colors',
-              showSettings ? 'text-blue-600 bg-blue-50' : 'text-gray-500 hover:text-black hover:bg-gray-100'
+              showSettings ? 'text-primary-400 bg-primary-500/10' : 'text-surface-400 hover:text-surface-100 hover:bg-surface-700/50'
             )}
           >
             <Settings2 className="w-4 h-4" />
@@ -361,30 +368,30 @@ export default function RagChat() {
 
         {/* Settings Panel (collapsible) */}
         {showSettings && config && (
-          <div className="bg-white border-b border-gray-200 p-4">
+          <div className="bg-surface-800/60 border-b border-surface-700/50 p-4">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
               <div>
-                <label className="block text-xs font-medium text-black mb-1">Embedding-Modell</label>
+                <label className="block text-xs font-medium text-surface-400 mb-1">Embedding-Modell</label>
                 <input
                   type="text"
                   value={config.embedding_model}
                   onChange={(e) => setConfig({ ...config, embedding_model: e.target.value })}
                   onBlur={() => saveConfig({ embedding_model: config.embedding_model })}
-                  className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm text-black"
+                  className="w-full px-2 py-1.5 bg-surface-700 border border-surface-600 rounded text-sm text-surface-100 focus:outline-none focus:border-primary-500"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-black mb-1">Chat-Modell</label>
+                <label className="block text-xs font-medium text-surface-400 mb-1">Chat-Modell</label>
                 <input
                   type="text"
                   value={config.chat_model}
                   onChange={(e) => setConfig({ ...config, chat_model: e.target.value })}
                   onBlur={() => saveConfig({ chat_model: config.chat_model })}
-                  className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm text-black"
+                  className="w-full px-2 py-1.5 bg-surface-700 border border-surface-600 rounded text-sm text-surface-100 focus:outline-none focus:border-primary-500"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-black mb-1">BM25 Gewicht</label>
+                <label className="block text-xs font-medium text-surface-400 mb-1">BM25 Gewicht</label>
                 <input
                   type="number"
                   step="0.1"
@@ -393,11 +400,11 @@ export default function RagChat() {
                   value={config.bm25_weight}
                   onChange={(e) => setConfig({ ...config, bm25_weight: parseFloat(e.target.value) })}
                   onBlur={() => saveConfig({ bm25_weight: config.bm25_weight })}
-                  className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm text-black"
+                  className="w-full px-2 py-1.5 bg-surface-700 border border-surface-600 rounded text-sm text-surface-100 focus:outline-none focus:border-primary-500"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-black mb-1">Max. Quellen</label>
+                <label className="block text-xs font-medium text-surface-400 mb-1">Max. Quellen</label>
                 <input
                   type="number"
                   min="1"
@@ -405,7 +412,7 @@ export default function RagChat() {
                   value={config.max_sources}
                   onChange={(e) => setConfig({ ...config, max_sources: parseInt(e.target.value) })}
                   onBlur={() => saveConfig({ max_sources: config.max_sources })}
-                  className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm text-black"
+                  className="w-full px-2 py-1.5 bg-surface-700 border border-surface-600 rounded text-sm text-surface-100 focus:outline-none focus:border-primary-500"
                 />
               </div>
             </div>
@@ -416,27 +423,29 @@ export default function RagChat() {
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
           {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center">
-              <Search className="w-12 h-12 text-gray-300 mb-4" />
-              <h3 className="text-lg font-semibold text-black mb-2">Dokumenten-Chat</h3>
-              <p className="text-sm text-gray-500 max-w-md">
+              <div className="w-16 h-16 rounded-2xl bg-surface-800 border border-surface-700/50 flex items-center justify-center mb-4">
+                <Search className="w-7 h-7 text-primary-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-surface-100 mb-2 font-display">Dokumenten-Chat</h3>
+              <p className="text-sm text-surface-400 max-w-md">
                 Stelle Fragen zu deinen Dokumenten. Der KI-Assistent durchsucht alle indexierten
                 Dokumente und gibt dir Antworten mit Quellenangaben.
               </p>
               {!indexStatusLoaded ? (
-                <div className="mt-4 flex items-center gap-2 text-sm text-gray-400">
+                <div className="mt-4 flex items-center gap-2 text-sm text-surface-500">
                   <Loader2 className="w-4 h-4 animate-spin" />
                   Index-Status wird geladen...
                 </div>
               ) : indexStatus && indexStatus.indexed_documents === 0 && indexStatus.status !== 'indexing' ? (
                 <button
                   onClick={() => startIndex(false)}
-                  className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm flex items-center gap-2"
+                  className="mt-4 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-sm flex items-center gap-2 transition-colors"
                 >
                   <Database className="w-4 h-4" />
                   Dokumente jetzt indexieren
                 </button>
               ) : indexStatus && indexStatus.status === 'indexing' ? (
-                <div className="mt-4 text-sm text-blue-600 flex items-center gap-2">
+                <div className="mt-4 text-sm text-primary-400 flex items-center gap-2">
                   <Loader2 className="w-4 h-4 animate-spin" />
                   Indexierung läuft ({indexStatus.indexed_documents}/{indexStatus.total_documents})...
                 </div>
@@ -450,37 +459,73 @@ export default function RagChat() {
               >
                 <div
                   className={clsx(
-                    'max-w-[80%] rounded-2xl px-4 py-3',
+                    'max-w-[82%] rounded-2xl px-4 py-3',
                     msg.role === 'user'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-white border border-gray-200 text-black'
+                      ? 'bg-primary-600 text-white'
+                      : 'bg-surface-800 border border-surface-700/50 text-surface-100'
                   )}
                 >
                   <div className="text-sm whitespace-pre-wrap">{msg.content}</div>
                   {msg.isStreaming && !msg.content && (
-                    <div className="flex items-center gap-1.5 text-gray-400">
+                    <div className="flex items-center gap-1.5 text-surface-400">
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
                       <span className="text-xs">{msg.statusMessage || 'Suche relevante Dokumente...'}</span>
                     </div>
                   )}
+
+                  {/* Sources */}
                   {msg.sources && msg.sources.length > 0 && (
-                    <div className="mt-3 pt-2 border-t border-gray-100">
-                      <div className="text-xs font-medium text-gray-500 mb-1.5">Quellen:</div>
-                      <div className="space-y-1">
-                        {msg.sources.map((src) => (
+                    <div className="mt-3 pt-3 border-t border-surface-700/50">
+                      <div className="flex items-center gap-1.5 mb-2">
+                        <FileText className="w-3.5 h-3.5 text-surface-400" />
+                        <span className="text-xs font-semibold text-surface-400 uppercase tracking-wider">
+                          Quellen ({msg.sources.length})
+                        </span>
+                      </div>
+                      <div className="space-y-1.5">
+                        {msg.sources.map((src, idx) => (
                           <a
                             key={src.index}
                             href={paperlessUrl ? `${paperlessUrl}/documents/${src.document_id}/details` : '#'}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="flex items-start gap-1.5 text-xs text-gray-600 bg-gray-50 rounded px-2 py-1 hover:bg-blue-50 hover:text-blue-700 transition-colors cursor-pointer group"
+                            className={clsx(
+                              'flex items-center gap-2 rounded-lg px-2.5 py-2 transition-all group',
+                              idx === 0
+                                ? 'bg-primary-500/10 border border-primary-500/30 hover:bg-primary-500/20'
+                                : 'bg-surface-700/40 border border-surface-600/30 hover:bg-surface-700/70'
+                            )}
                           >
-                            <FileText className="w-3 h-3 mt-0.5 text-blue-500 flex-shrink-0" />
-                            <div className="flex-1 min-w-0">
-                              <span className="font-medium text-black group-hover:text-blue-700">[{src.index}] {src.title}</span>
-                              <span className="text-gray-400 ml-1">(#{src.document_id}, Score: {src.score.toFixed(2)})</span>
+                            {/* Rank badge */}
+                            <div className={clsx(
+                              'flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold',
+                              idx === 0
+                                ? 'bg-primary-500 text-white'
+                                : 'bg-surface-600 text-surface-300'
+                            )}>
+                              {idx === 0 ? <Award className="w-3 h-3" /> : src.index}
                             </div>
-                            <ExternalLink className="w-3 h-3 mt-0.5 text-gray-300 group-hover:text-blue-500 flex-shrink-0" />
+
+                            {/* Title */}
+                            <div className="flex-1 min-w-0">
+                              <span className={clsx(
+                                'text-xs font-medium truncate block',
+                                idx === 0 ? 'text-primary-300 group-hover:text-primary-200' : 'text-surface-200 group-hover:text-surface-100'
+                              )}>
+                                {src.title}
+                              </span>
+                              <span className="text-xs text-surface-500">#{src.document_id}</span>
+                            </div>
+
+                            {/* Score badge */}
+                            <div className={clsx(
+                              'flex-shrink-0 px-1.5 py-0.5 rounded text-xs font-medium',
+                              scoreColor(src.score)
+                            )}>
+                              {(src.score * 100).toFixed(0)}%
+                            </div>
+
+                            <ExternalLink className="w-3 h-3 text-surface-500 group-hover:text-surface-300 flex-shrink-0 transition-colors" />
                           </a>
                         ))}
                       </div>
@@ -494,7 +539,7 @@ export default function RagChat() {
         </div>
 
         {/* Input */}
-        <div className="bg-white border-t border-gray-200 p-4">
+        <div className="bg-surface-800/80 backdrop-blur border-t border-surface-700/50 p-4">
           <div className="flex items-end gap-2 max-w-4xl mx-auto">
             <textarea
               ref={inputRef}
@@ -503,7 +548,7 @@ export default function RagChat() {
               onKeyDown={handleKeyDown}
               placeholder="Stelle eine Frage zu deinen Dokumenten..."
               rows={1}
-              className="flex-1 resize-none px-4 py-2.5 border border-gray-300 rounded-xl text-sm text-black focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="flex-1 resize-none px-4 py-2.5 bg-surface-700 border border-surface-600 rounded-xl text-sm text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-colors"
               style={{ minHeight: '42px', maxHeight: '120px' }}
               onInput={(e) => {
                 const target = e.target as HTMLTextAreaElement
@@ -514,7 +559,7 @@ export default function RagChat() {
             <button
               onClick={handleSend}
               disabled={!input.trim() || isLoading}
-              className="p-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="p-2.5 bg-primary-600 text-white rounded-xl hover:bg-primary-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               {isLoading ? (
                 <Loader2 className="w-5 h-5 animate-spin" />

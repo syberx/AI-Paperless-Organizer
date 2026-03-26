@@ -229,7 +229,7 @@ class SearchEngine:
 
     def _rrf_merge(
         self, semantic: List[Dict], bm25: List[Dict], limit: int,
-        k: int = 20, bm25_boost: float = 2.0
+        k: int = 20, bm25_boost: float = 3.0
     ) -> List[SearchResult]:
         """Weighted Reciprocal Rank Fusion at document level.
         BM25 gets a higher weight (bm25_boost) because keyword matches
