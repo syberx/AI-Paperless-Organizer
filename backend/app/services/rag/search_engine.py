@@ -141,16 +141,17 @@ class SearchEngine:
         limit: int = 5,
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[SearchResult]:
-        semantic_results = self._semantic_search(query_embedding, limit * 3, filters)
-        bm25_results = self._bm25_search(query, limit * 3)
+        fetch_k = limit * 6
+        semantic_results = self._semantic_search(query_embedding, fetch_k, filters)
+        bm25_results = self._bm25_search(query, fetch_k)
 
         if semantic_results and len(semantic_results) >= 2:
             top_scores = [r["score"] for r in semantic_results[:limit]]
             if top_scores and (max(top_scores) > 0.99 or (max(top_scores) - min(top_scores) < 0.001)):
-                logger.warning(f"Semantic search returned suspicious scores (top={max(top_scores):.4f}, range={max(top_scores)-min(top_scores):.6f}) - using BM25 only")
+                logger.warning(f"Semantic scores suspicious (top={max(top_scores):.4f}) - using BM25 only")
                 semantic_results = []
 
-        merged = self._merge_results(semantic_results, bm25_results, limit)
+        merged = self._rrf_merge(semantic_results, bm25_results, limit)
         return merged
 
     def _semantic_search(
@@ -213,35 +214,51 @@ class SearchEngine:
             })
         return items
 
-    def _merge_results(
-        self, semantic: List[Dict], bm25: List[Dict], limit: int
+    @staticmethod
+    def _dedup_by_document(results: List[Dict]) -> List[Dict]:
+        """Keep only the best chunk per document_id, preserving rank order."""
+        seen = set()
+        deduped = []
+        for item in results:
+            doc_id = item.get("metadata", {}).get("document_id", 0)
+            if doc_id in seen:
+                continue
+            seen.add(doc_id)
+            deduped.append(item)
+        return deduped
+
+    def _rrf_merge(
+        self, semantic: List[Dict], bm25: List[Dict], limit: int,
+        k: int = 20, bm25_boost: float = 2.0
     ) -> List[SearchResult]:
-        combined: Dict[str, Dict] = {}
+        """Weighted Reciprocal Rank Fusion at document level.
+        BM25 gets a higher weight (bm25_boost) because keyword matches
+        are more reliable for specific factual queries in German documents."""
+        sem_dedup = self._dedup_by_document(semantic)
+        bm25_dedup = self._dedup_by_document(bm25)
 
-        for item in semantic:
-            cid = item["chunk_id"]
-            combined[cid] = {
-                **item,
-                "final_score": item["score"] * self.semantic_weight,
-            }
+        doc_data: Dict[int, Dict] = {}
+        doc_scores: Dict[int, float] = {}
 
-        for item in bm25:
-            cid = item["chunk_id"]
-            if cid in combined:
-                combined[cid]["final_score"] += item["score"] * self.bm25_weight
-            else:
-                combined[cid] = {
-                    **item,
-                    "final_score": item["score"] * self.bm25_weight,
-                }
+        for rank, item in enumerate(sem_dedup):
+            doc_id = item.get("metadata", {}).get("document_id", 0)
+            doc_scores[doc_id] = doc_scores.get(doc_id, 0) + 1.0 / (k + rank + 1)
+            if doc_id not in doc_data:
+                doc_data[doc_id] = item
 
-        sorted_results = sorted(combined.values(), key=lambda x: x["final_score"], reverse=True)
+        for rank, item in enumerate(bm25_dedup):
+            doc_id = item.get("metadata", {}).get("document_id", 0)
+            doc_scores[doc_id] = doc_scores.get(doc_id, 0) + bm25_boost / (k + rank + 1)
+            if doc_id not in doc_data or item["score"] > doc_data.get(doc_id, {}).get("score", 0):
+                doc_data[doc_id] = item
 
-        seen_docs = set()
+        sorted_docs = sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)
+        max_rrf = max(s for _, s in sorted_docs) if sorted_docs else 1.0
+
         results: List[SearchResult] = []
-        for item in sorted_results:
+        for doc_id, rrf_score in sorted_docs[:limit]:
+            item = doc_data[doc_id]
             meta = item.get("metadata", {})
-            doc_id = meta.get("document_id", 0)
             if isinstance(doc_id, str):
                 try:
                     doc_id = int(doc_id)
@@ -252,13 +269,10 @@ class SearchEngine:
                 document_id=doc_id,
                 title=str(meta.get("title", "")),
                 snippet=item.get("text", "")[:500],
-                score=item["final_score"],
+                score=round(rrf_score / max_rrf, 4),
                 metadata=meta,
                 chunk_id=item.get("chunk_id", ""),
             ))
-
-            if len(results) >= limit:
-                break
 
         return results
 
