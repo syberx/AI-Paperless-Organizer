@@ -453,85 +453,76 @@ export default function RagChat() {
             </div>
           ) : (
             messages.map((msg, i) => (
-              <div
-                key={i}
-                className={clsx('flex', msg.role === 'user' ? 'justify-end' : 'justify-start')}
-              >
-                <div
-                  className={clsx(
-                    'max-w-[82%] rounded-2xl px-4 py-3',
-                    msg.role === 'user'
-                      ? 'bg-primary-600 text-white'
-                      : 'bg-surface-800 border border-surface-700/50 text-surface-100'
-                  )}
-                >
-                  <div className="text-sm whitespace-pre-wrap">{msg.content}</div>
-                  {msg.isStreaming && !msg.content && (
-                    <div className="flex items-center gap-1.5 text-surface-400">
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span className="text-xs">{msg.statusMessage || 'Suche relevante Dokumente...'}</span>
-                    </div>
-                  )}
+              <div key={i} className={clsx('flex', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
+                {msg.role === 'user' ? (
+                  /* User bubble */
+                  <div className="max-w-[75%] bg-primary-600 text-white rounded-2xl px-4 py-3 text-sm whitespace-pre-wrap">
+                    {msg.content}
+                  </div>
+                ) : (
+                  /* Assistant response – full width, no bubble */
+                  <div className="w-full max-w-3xl space-y-3">
 
-                  {/* Sources */}
-                  {msg.sources && msg.sources.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-surface-700/50">
-                      <div className="flex items-center gap-1.5 mb-2">
-                        <FileText className="w-3.5 h-3.5 text-surface-400" />
-                        <span className="text-xs font-semibold text-surface-400 uppercase tracking-wider">
-                          Quellen ({msg.sources.length})
-                        </span>
-                      </div>
-                      <div className="space-y-1.5">
-                        {msg.sources.map((src, idx) => (
-                          <a
-                            key={src.index}
-                            href={paperlessUrl ? `${paperlessUrl}/documents/${src.document_id}/details` : '#'}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className={clsx(
-                              'flex items-center gap-2 rounded-lg px-2.5 py-2 transition-all group',
-                              idx === 0
-                                ? 'bg-primary-500/10 border border-primary-500/30 hover:bg-primary-500/20'
-                                : 'bg-surface-700/40 border border-surface-600/30 hover:bg-surface-700/70'
-                            )}
-                          >
-                            {/* Rank badge */}
-                            <div className={clsx(
-                              'flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold',
-                              idx === 0
-                                ? 'bg-primary-500 text-white'
-                                : 'bg-surface-600 text-surface-300'
-                            )}>
-                              {idx === 0 ? <Award className="w-3 h-3" /> : src.index}
-                            </div>
-
-                            {/* Title */}
-                            <div className="flex-1 min-w-0">
+                    {/* Sources FIRST – compact chips */}
+                    {msg.sources && msg.sources.length > 0 && (
+                      <div>
+                        <div className="flex items-center gap-1.5 mb-2">
+                          <FileText className="w-3.5 h-3.5 text-surface-500" />
+                          <span className="text-xs font-semibold text-surface-500 uppercase tracking-wider">
+                            {msg.sources.length} Quellen
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {msg.sources.map((src, idx) => (
+                            <a
+                              key={src.index}
+                              href={paperlessUrl ? `${paperlessUrl}/documents/${src.document_id}/details` : '#'}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={`${src.title} — Score: ${(src.score * 100).toFixed(0)}%`}
+                              className={clsx(
+                                'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all group border',
+                                idx === 0
+                                  ? 'bg-primary-500/15 border-primary-500/40 text-primary-300 hover:bg-primary-500/25'
+                                  : 'bg-surface-700/50 border-surface-600/40 text-surface-300 hover:bg-surface-700 hover:text-surface-100'
+                              )}
+                            >
                               <span className={clsx(
-                                'text-xs font-medium truncate block',
-                                idx === 0 ? 'text-primary-300 group-hover:text-primary-200' : 'text-surface-200 group-hover:text-surface-100'
+                                'w-4 h-4 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0',
+                                idx === 0 ? 'bg-primary-500 text-white' : 'bg-surface-600 text-surface-400'
                               )}>
-                                {src.title}
+                                {idx === 0 ? <Award className="w-2.5 h-2.5" /> : src.index}
                               </span>
-                              <span className="text-xs text-surface-500">#{src.document_id}</span>
-                            </div>
-
-                            {/* Score badge */}
-                            <div className={clsx(
-                              'flex-shrink-0 px-1.5 py-0.5 rounded text-xs font-medium',
-                              scoreColor(src.score)
-                            )}>
-                              {(src.score * 100).toFixed(0)}%
-                            </div>
-
-                            <ExternalLink className="w-3 h-3 text-surface-500 group-hover:text-surface-300 flex-shrink-0 transition-colors" />
-                          </a>
-                        ))}
+                              <span className="truncate max-w-[180px]">{src.title}</span>
+                              <span className={clsx(
+                                'flex-shrink-0 font-semibold',
+                                scoreColor(src.score).split(' ').find(c => c.startsWith('text-')) || 'text-surface-400'
+                              )}>
+                                {(src.score * 100).toFixed(0)}%
+                              </span>
+                              <ExternalLink className="w-2.5 h-2.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </a>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </div>
+                    )}
+
+                    {/* Loading indicator */}
+                    {msg.isStreaming && !msg.content && (
+                      <div className="flex items-center gap-1.5 text-surface-400 pl-1">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span className="text-xs">{msg.statusMessage || 'Suche relevante Dokumente...'}</span>
+                      </div>
+                    )}
+
+                    {/* Answer text */}
+                    {msg.content && (
+                      <div className="bg-surface-800 border border-surface-700/50 rounded-2xl px-4 py-3 text-sm text-surface-100 whitespace-pre-wrap leading-relaxed">
+                        {msg.content}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))
           )}
