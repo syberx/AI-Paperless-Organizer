@@ -20,7 +20,7 @@ class RagConfig(Base):
     chunk_overlap = Column(Integer, default=50)
     bm25_weight = Column(Float, default=0.3)
     semantic_weight = Column(Float, default=0.7)
-    max_sources = Column(Integer, default=5)
+    max_sources = Column(Integer, default=8)
     max_context_tokens = Column(Integer, default=4000)
     chat_model_provider = Column(String(100), default="ollama")
     chat_model = Column(String(200), default="qwen3.5:4b")

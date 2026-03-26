@@ -102,8 +102,17 @@ class RAGService:
             db.add(user_msg)
             await db.commit()
 
-        # Retrieve relevant documents
-        search_results = await self.search(question, limit=config.max_sources, filters=filters)
+        # Retrieve relevant documents (fetch extra, then apply score cutoff)
+        fetch_limit = config.max_sources + 3
+        raw_results = await self.search(question, limit=fetch_limit, filters=filters)
+
+        # Score cutoff: drop results below 40% of the top score
+        if raw_results:
+            top_score = raw_results[0].score
+            cutoff = top_score * 0.40
+            search_results = [r for r in raw_results if r.score >= cutoff][:config.max_sources]
+        else:
+            search_results = []
 
         context_parts = []
         sources = []
