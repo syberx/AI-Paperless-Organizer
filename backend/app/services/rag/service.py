@@ -55,8 +55,6 @@ class RAGService:
     ) -> List[SearchResult]:
         await self.initialize()
         config = await self._get_config()
-        self.search_engine.bm25_weight = config.bm25_weight
-        self.search_engine.semantic_weight = config.semantic_weight
 
         embed_service = await self._get_embedding_service(config)
         query_embeddings = await embed_service.generate([query])
@@ -192,6 +190,7 @@ class RAGService:
                 yield token
 
     async def _stream_ollama(self, config: RagConfig, messages: list) -> AsyncGenerator[str, None]:
+        import asyncio
         url = f"{config.ollama_base_url}/api/chat"
         payload = {
             "model": config.chat_model,
@@ -199,24 +198,38 @@ class RAGService:
             "stream": True,
             "think": False,
         }
-        try:
-            async with httpx.AsyncClient(timeout=300.0) as client:
-                async with client.stream("POST", url, json=payload) as resp:
-                    resp.raise_for_status()
-                    async for line in resp.aiter_lines():
-                        if line.strip():
-                            try:
-                                data = json.loads(line)
-                                content = data.get("message", {}).get("content", "")
-                                if content:
-                                    yield content
-                                if data.get("done"):
-                                    break
-                            except json.JSONDecodeError:
-                                continue
-        except Exception as e:
-            logger.error(f"Ollama streaming error: {e}")
-            yield f"\n\n[Fehler: {e}]"
+
+        for attempt in range(3):
+            try:
+                if attempt > 0:
+                    logger.info(f"Ollama chat retry {attempt+1}/3 for {config.chat_model}")
+                    await asyncio.sleep(3)
+
+                async with httpx.AsyncClient(timeout=300.0) as client:
+                    async with client.stream("POST", url, json=payload) as resp:
+                        resp.raise_for_status()
+                        async for line in resp.aiter_lines():
+                            if line.strip():
+                                try:
+                                    data = json.loads(line)
+                                    content = data.get("message", {}).get("content", "")
+                                    if content:
+                                        yield content
+                                    if data.get("done"):
+                                        break
+                                except json.JSONDecodeError:
+                                    continue
+                return
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 500 and attempt < 2:
+                    logger.warning(f"Ollama 500 error (attempt {attempt+1}), retrying after model swap...")
+                    continue
+                logger.error(f"Ollama streaming error: {e}")
+                yield f"\n\n[Fehler: Ollama-Modell '{config.chat_model}' konnte nicht geladen werden. Bitte versuche es erneut.]"
+            except Exception as e:
+                logger.error(f"Ollama streaming error: {e}")
+                yield f"\n\n[Fehler: {e}]"
+                return
 
     async def _stream_openai(self, config: RagConfig, messages: list) -> AsyncGenerator[str, None]:
         try:
