@@ -147,7 +147,15 @@ class OpenAIToolCallingProvider(BaseClassifierProvider):
                 choice = response.choices[0]
 
                 if choice.finish_reason == "tool_calls" and choice.message.tool_calls:
-                    messages.append(choice.message.model_dump())
+                    # Only keep standard fields – Mistral/OpenRouter reject OpenAI-only
+                    # extras like 'refusal', 'annotations', 'audio', 'function_call'
+                    raw = choice.message.model_dump(exclude_none=True)
+                    clean_msg: Dict[str, Any] = {"role": raw["role"]}
+                    if raw.get("content"):
+                        clean_msg["content"] = raw["content"]
+                    if raw.get("tool_calls"):
+                        clean_msg["tool_calls"] = raw["tool_calls"]
+                    messages.append(clean_msg)
 
                     for tool_call in choice.message.tool_calls:
                         total_tool_calls += 1
