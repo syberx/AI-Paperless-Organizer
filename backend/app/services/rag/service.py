@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import AsyncGenerator, Optional, Dict, Any, List
+from typing import AsyncGenerator, Optional, Dict, Any, List, Tuple
 
 import httpx
 from sqlalchemy import select as sa_select, func as sa_func, delete as sa_delete
@@ -107,11 +107,35 @@ class RAGService:
         fetch_limit = max(config.max_sources * 4, 30)
         raw_results = await self.search(question, limit=fetch_limit, filters=filters)
 
-        # Cross-encoder reranking: re-read (query, chunk) pairs for true relevance
+        # Cross-encoder reranking: re-read (query, chunk) pairs for true relevance.
+        # For each candidate document, we concatenate ALL its chunks that were
+        # returned by hybrid search – giving the cross-encoder full context so it
+        # can see e.g. "Hans-Peter Wilms" AND "Geburtsdatum 17.03.1956" even when
+        # they are in different chunks of the same document.
         if len(raw_results) > 1:
             reranker = RerankService()
+
+            # Group extra candidate chunks by document (from BM25 corpus)
+            se = self.search_engine
+            doc_all_chunks: Dict[int, str] = {}
+            for r in raw_results:
+                doc_id = r.document_id
+                if doc_id not in doc_all_chunks:
+                    # Collect all BM25 chunks for this document and concatenate
+                    chunks = [
+                        c["text"] for c in se._corpus_chunks
+                        if c.get("metadata", {}).get("document_id") == doc_id
+                    ]
+                    # Use first 3000 chars across all chunks for cross-encoder
+                    combined = " [...] ".join(chunks)[:3000]
+                    doc_all_chunks[doc_id] = combined
+
             result_dicts = [
-                {"snippet": r.snippet, "title": r.title, "_result": r}
+                {
+                    "snippet": doc_all_chunks.get(r.document_id, r.snippet),
+                    "title": r.title,
+                    "_result": r,
+                }
                 for r in raw_results
             ]
             reranked_dicts = reranker.rerank(question, result_dicts)

@@ -328,7 +328,7 @@ class SearchEngine:
             results.append(SearchResult(
                 document_id=doc_id,
                 title=str(meta.get("title", "")),
-                snippet=item.get("text", "")[:500],
+                snippet=item.get("text", "")[:1500],
                 score=round(rrf_score / max_rrf, 4),
                 metadata=meta,
                 chunk_id=item.get("chunk_id", ""),
