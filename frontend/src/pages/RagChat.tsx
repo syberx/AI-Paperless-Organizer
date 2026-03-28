@@ -12,6 +12,7 @@ interface LocalMessage {
   role: 'user' | 'assistant'
   content: string
   sources?: ragApi.ChatSource[]
+  citedSources?: number[]   // source.index values actually cited by the LLM
   isStreaming?: boolean
   statusMessage?: string
 }
@@ -160,6 +161,16 @@ export default function RagChat() {
             const last = updated[updated.length - 1]
             if (last && last.role === 'assistant') {
               updated[updated.length - 1] = { ...last, content: last.content + token }
+            }
+            return updated
+          })
+        },
+        onCitations: (cited) => {
+          setMessages((prev) => {
+            const updated = [...prev]
+            const last = updated[updated.length - 1]
+            if (last && last.role === 'assistant') {
+              updated[updated.length - 1] = { ...last, citedSources: cited }
             }
             return updated
           })
@@ -471,38 +482,51 @@ export default function RagChat() {
                           <span className="text-xs font-semibold text-surface-500 uppercase tracking-wider">
                             {msg.sources.length} Quellen
                           </span>
+                          {msg.citedSources && msg.citedSources.length > 0 && (
+                            <span className="text-xs text-primary-400 ml-1">
+                              · {msg.citedSources.length} verwendet
+                            </span>
+                          )}
                         </div>
                         <div className="flex flex-wrap gap-1.5">
-                          {msg.sources.map((src, idx) => (
-                            <a
-                              key={src.index}
-                              href={paperlessUrl ? `${paperlessUrl}/documents/${src.document_id}/details` : '#'}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              title={`${src.title} — Score: ${(src.score * 100).toFixed(0)}%`}
-                              className={clsx(
-                                'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all group border',
-                                idx === 0
-                                  ? 'bg-primary-500/15 border-primary-500/40 text-primary-300 hover:bg-primary-500/25'
-                                  : 'bg-surface-700/50 border-surface-600/40 text-surface-300 hover:bg-surface-700 hover:text-surface-100'
-                              )}
-                            >
-                              <span className={clsx(
-                                'w-4 h-4 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0',
-                                idx === 0 ? 'bg-primary-500 text-white' : 'bg-surface-600 text-surface-400'
-                              )}>
-                                {idx === 0 ? <Award className="w-2.5 h-2.5" /> : src.index}
-                              </span>
-                              <span className="truncate max-w-[180px]">{src.title}</span>
-                              <span className={clsx(
-                                'flex-shrink-0 font-semibold',
-                                scoreColor(src.score).split(' ').find(c => c.startsWith('text-')) || 'text-surface-400'
-                              )}>
-                                {(src.score * 100).toFixed(0)}%
-                              </span>
-                              <ExternalLink className="w-2.5 h-2.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
-                            </a>
-                          ))}
+                          {msg.sources.map((src) => {
+                            // A source is "cited" if the LLM used [N] notation for it.
+                            // Fall back to highlighting rank #1 if no citations were parsed.
+                            const hasCitationData = msg.citedSources !== undefined
+                            const isCited = hasCitationData
+                              ? msg.citedSources!.includes(src.index)
+                              : src.index === 1
+                            return (
+                              <a
+                                key={src.index}
+                                href={paperlessUrl ? `${paperlessUrl}/documents/${src.document_id}/details` : '#'}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={`${src.title} — Score: ${(src.score * 100).toFixed(0)}% ${isCited ? '· Vom KI verwendet' : ''}`}
+                                className={clsx(
+                                  'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all group border',
+                                  isCited
+                                    ? 'bg-primary-500/15 border-primary-500/40 text-primary-300 hover:bg-primary-500/25'
+                                    : 'bg-surface-700/50 border-surface-600/40 text-surface-300 hover:bg-surface-700 hover:text-surface-100'
+                                )}
+                              >
+                                <span className={clsx(
+                                  'w-4 h-4 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0',
+                                  isCited ? 'bg-primary-500 text-white' : 'bg-surface-600 text-surface-400'
+                                )}>
+                                  {isCited ? <Award className="w-2.5 h-2.5" /> : src.index}
+                                </span>
+                                <span className="truncate max-w-[180px]">{src.title}</span>
+                                <span className={clsx(
+                                  'flex-shrink-0 font-semibold',
+                                  scoreColor(src.score).split(' ').find(c => c.startsWith('text-')) || 'text-surface-400'
+                                )}>
+                                  {(src.score * 100).toFixed(0)}%
+                                </span>
+                                <ExternalLink className="w-2.5 h-2.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                              </a>
+                            )
+                          })}
                         </div>
                       </div>
                     )}

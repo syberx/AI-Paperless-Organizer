@@ -143,6 +143,7 @@ export interface StreamCallbacks {
   onSources?: (sources: ChatSource[]) => void
   onStatus?: (message: string) => void
   onToken?: (token: string) => void
+  onCitations?: (cited: number[]) => void
   onError?: (error: string) => void
   onDone?: () => void
 }
@@ -199,6 +200,9 @@ export function streamChat(
                 break
               case 'token':
                 callbacks.onToken?.(data.content)
+                break
+              case 'citations':
+                callbacks.onCitations?.(data.cited ?? [])
                 break
               case 'error':
                 callbacks.onError?.(data.message)

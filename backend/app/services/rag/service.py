@@ -156,7 +156,7 @@ class RAGService:
             user_content = (
                 f"Kontext aus den Dokumenten:\n\n{context}\n\n---\n\nFrage: {question}\n\n"
                 f"Beantworte die Frage basierend auf dem Kontext. "
-                f"Nenne die relevanten Quellen in deiner Antwort."
+                f"Zitiere die verwendeten Quellen mit [1], [2] usw. direkt in deiner Antwort."
             )
         messages.append({"role": "user", "content": user_content})
 
@@ -173,10 +173,18 @@ class RAGService:
             yield json.dumps({"type": "status", "message": "Generiere Antwort..."})
 
         # Stream LLM response
+        import re as _re
         full_response = ""
         async for token in self._stream_llm(config, messages):
             full_response += token
             yield json.dumps({"type": "token", "content": token})
+
+        # Extract cited source indices from the response (e.g. [1], [2])
+        cited_indices = sorted(set(
+            int(m) for m in _re.findall(r'\[(\d+)\]', full_response)
+            if 1 <= int(m) <= len(sources)
+        ))
+        yield json.dumps({"type": "citations", "cited": cited_indices})
 
         # Save assistant message
         async with async_session() as db:
