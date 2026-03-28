@@ -173,7 +173,8 @@ class SearchEngine:
         limit: int = 5,
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[SearchResult]:
-        fetch_k = limit * 6
+        # Fetch more candidates for better recall; BM25 uses doc-level aggregation internally
+        fetch_k = limit * 10
         semantic_results = self._semantic_search(query_embedding, fetch_k, filters)
         bm25_results = self._bm25_search(query, fetch_k)
 
@@ -222,6 +223,9 @@ class SearchEngine:
         return items
 
     def _bm25_search(self, query: str, limit: int) -> List[Dict[str, Any]]:
+        """BM25 search with document-level score aggregation.
+        Sums the top-3 chunk scores per document so that documents where
+        multiple chunks partially match outrank documents with a single lucky chunk."""
         if not self._bm25 or not self._corpus_chunks:
             return []
 
@@ -230,17 +234,39 @@ class SearchEngine:
             return []
 
         scores = self._bm25.get_scores(tokens)
-        top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:limit]
+        max_raw = max(scores) if max(scores) > 0 else 1
 
-        items = []
-        max_score = max(scores) if max(scores) > 0 else 1
-        for idx in top_indices:
-            if scores[idx] <= 0:
+        # Aggregate at document level: collect all chunk scores per doc
+        doc_buckets: Dict[int, Dict] = {}
+        for idx, raw_score in enumerate(scores):
+            if raw_score <= 0:
                 continue
             chunk = self._corpus_chunks[idx]
+            doc_id = chunk["metadata"].get("document_id", 0)
+            if doc_id not in doc_buckets:
+                doc_buckets[doc_id] = {"chunk_scores": [], "best_chunk": None, "best_raw": -1}
+            doc_buckets[doc_id]["chunk_scores"].append(raw_score)
+            if raw_score > doc_buckets[doc_id]["best_raw"]:
+                doc_buckets[doc_id]["best_raw"] = raw_score
+                doc_buckets[doc_id]["best_chunk"] = chunk
+
+        # Score = sum of top-3 chunks (normalized by max_raw so scores stay comparable)
+        doc_agg = {}
+        for doc_id, data in doc_buckets.items():
+            top3 = sorted(data["chunk_scores"], reverse=True)[:3]
+            doc_agg[doc_id] = {
+                "score": sum(top3) / max_raw,
+                "chunk": data["best_chunk"],
+            }
+
+        sorted_docs = sorted(doc_agg.items(), key=lambda x: x[1]["score"], reverse=True)[:limit]
+
+        items = []
+        for doc_id, data in sorted_docs:
+            chunk = data["chunk"]
             items.append({
                 "chunk_id": chunk["id"],
-                "score": scores[idx] / max_score,
+                "score": data["score"],
                 "text": chunk["text"],
                 "metadata": chunk["metadata"],
             })
@@ -266,8 +292,10 @@ class SearchEngine:
         """Weighted Reciprocal Rank Fusion at document level.
         BM25 gets a higher weight (bm25_boost) because keyword matches
         are more reliable for specific factual queries in German documents."""
+        # Semantic results still need dedup (chunk-level from ChromaDB)
         sem_dedup = self._dedup_by_document(semantic)
-        bm25_dedup = self._dedup_by_document(bm25)
+        # BM25 results are already aggregated at document level
+        bm25_dedup = bm25
 
         doc_data: Dict[int, Dict] = {}
         doc_scores: Dict[int, float] = {}
