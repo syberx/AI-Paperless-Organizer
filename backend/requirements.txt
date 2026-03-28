@@ -34,3 +34,6 @@ rank-bm25==0.2.2
 nltk==3.9.1
 tiktoken==0.9.0
 
+# RAG - Cross-Encoder Reranking (local, no GPU required)
+sentence-transformers>=3.0.0
+

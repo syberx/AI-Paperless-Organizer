@@ -9,6 +9,7 @@ from app.models.rag import RagConfig, RagChatSession, RagChatMessage
 from app.services.rag.embedding_service import EmbeddingService
 from app.services.rag.search_engine import SearchEngine, SearchResult
 from app.services.rag.indexer import Indexer
+from app.services.rag.rerank_service import RerankService
 from app.services import ollama_lock
 
 logger = logging.getLogger(__name__)
@@ -102,14 +103,31 @@ class RAGService:
             db.add(user_msg)
             await db.commit()
 
-        # Retrieve relevant documents (fetch extra, then apply score cutoff)
-        fetch_limit = config.max_sources + 3
+        # Retrieve a larger candidate pool, then cross-encoder rerank + cutoff
+        fetch_limit = max(config.max_sources * 4, 30)
         raw_results = await self.search(question, limit=fetch_limit, filters=filters)
 
-        # Score cutoff: drop results below 40% of the top score
+        # Cross-encoder reranking: re-read (query, chunk) pairs for true relevance
+        if len(raw_results) > 1:
+            reranker = RerankService()
+            result_dicts = [
+                {"snippet": r.snippet, "title": r.title, "_result": r}
+                for r in raw_results
+            ]
+            reranked_dicts = reranker.rerank(question, result_dicts)
+            raw_results = [d["_result"] for d in reranked_dicts]
+            # Normalise scores so front-end still sees 0–1 range
+            if reranked_dicts and "rerank_score" in reranked_dicts[0]:
+                max_rs = max(d["rerank_score"] for d in reranked_dicts)
+                min_rs = min(d["rerank_score"] for d in reranked_dicts)
+                spread = max_rs - min_rs if max_rs != min_rs else 1.0
+                for d in reranked_dicts:
+                    d["_result"].score = round((d["rerank_score"] - min_rs) / spread, 4)
+
+        # Score cutoff: drop results below 30% of the top score after reranking
         if raw_results:
             top_score = raw_results[0].score
-            cutoff = top_score * 0.40
+            cutoff = top_score * 0.30
             search_results = [r for r in raw_results if r.score >= cutoff][:config.max_sources]
         else:
             search_results = []
