@@ -103,9 +103,35 @@ class RAGService:
             db.add(user_msg)
             await db.commit()
 
+        # Load recent chat history BEFORE searching so we can enrich short queries
+        chat_history = []
+        async with async_session() as db:
+            result = await db.execute(
+                sa_select(RagChatMessage)
+                .where(RagChatMessage.session_id == session_id)
+                .order_by(RagChatMessage.created_at.desc())
+                .limit(10)
+            )
+            history_msgs = list(reversed(result.scalars().all()))
+            for msg in history_msgs[:-1]:  # exclude current user message
+                chat_history.append({"role": msg.role, "content": msg.content})
+
+        # Conversational query enrichment: short follow-up questions (≤ 6 words) often
+        # reference the previous exchange. Prepend the last user message so the retrieval
+        # engine has the full context (e.g. "Und wo?" + "Wann wurde Leon getauft?" →
+        # effective search: "Wann wurde Leon getauft? Und wo?")
+        search_question = question
+        if len(question.split()) <= 6 and chat_history:
+            last_user = next(
+                (m["content"] for m in reversed(chat_history) if m["role"] == "user"), ""
+            )
+            if last_user:
+                search_question = f"{last_user} {question}"
+                logger.info(f"Query enriched for search: '{question}' → '{search_question}'")
+
         # Retrieve a larger candidate pool, then cross-encoder rerank + cutoff
         fetch_limit = max(config.max_sources * 4, 30)
-        raw_results = await self.search(question, limit=fetch_limit, filters=filters)
+        raw_results = await self.search(search_question, limit=fetch_limit, filters=filters)
 
         # Build multi-chunk combined texts per document.
         # Used for BOTH cross-encoder reranking AND LLM context so that related facts
@@ -114,7 +140,7 @@ class RAGService:
         # Strategy: always include chunk 0 (document header/identity) + all chunks
         # that contain at least one query token, up to a max of 4000 chars total.
         se = self.search_engine
-        query_tokens = set(se._tokenize(question))
+        query_tokens = set(se._tokenize(search_question))
         doc_all_chunks: Dict[int, str] = {}
         for r in raw_results:
             if r.document_id not in doc_all_chunks:
@@ -186,19 +212,6 @@ class RAGService:
                 "snippet": result.snippet[:200],
             })
         context = "\n---\n".join(context_parts)
-
-        # Load recent chat history for context
-        chat_history = []
-        async with async_session() as db:
-            result = await db.execute(
-                sa_select(RagChatMessage)
-                .where(RagChatMessage.session_id == session_id)
-                .order_by(RagChatMessage.created_at.desc())
-                .limit(10)
-            )
-            history_msgs = list(reversed(result.scalars().all()))
-            for msg in history_msgs[:-1]:  # exclude current user message
-                chat_history.append({"role": msg.role, "content": msg.content})
 
         # Build prompt
         system_prompt = config.chat_system_prompt or (
