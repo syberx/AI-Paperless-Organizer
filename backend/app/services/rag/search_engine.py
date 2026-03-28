@@ -163,7 +163,8 @@ class SearchEngine:
             "for", "is", "at", "by", "from", "not", "but", "are", "was", "be",
             "this", "that", "it", "as", "an",
         }
-        return [t for t in tokens if t not in stopwords and len(t) > 2]
+        # Keep 3+ char words; also keep 2+ digit numbers (so "17", "03" in dates survive)
+        return [t for t in tokens if t not in stopwords and (len(t) > 2 or (len(t) >= 2 and t.isdigit()))]
 
     async def hybrid_search(
         self,
