@@ -194,15 +194,74 @@ class RAGService:
             search_results = []
 
         # Build LLM context using the same multi-chunk combined text used for reranking.
-        # This ensures the LLM sees the full document context (name, dates, etc.)
-        # even when they are spread across different chunks.
-        # doc_all_chunks was already computed during reranking; fall back to snippet if missing.
+        # Additionally, extract key structured facts (dates, names, IDs) from the text
+        # and prepend them explicitly so the LLM finds them even in OCR table layouts.
+        import re as _re
+
+        # Name word: allows hyphenated first names like "Hans-Peter"
+        _NAME_WORD = r'[A-Z\xc4\xd6\xdc][a-zA-Z\xe4\xf6\xfc\xc4\xd6\xdc\xdf\-]+'
+        # Non-newline whitespace (spaces/tabs only, not line breaks)
+        _WS = r'[^\S\n]+'
+
+        def _extract_facts(text: str) -> str:
+            """Extract key facts and build explicit person→attribute sentences."""
+            facts = []
+
+            # Find addressee (use non-newline whitespace to avoid capturing address lines)
+            addressees = []
+            for m in _re.finditer(
+                r'(?:Herrn?|Frau)' + _WS + r'(' + _NAME_WORD + r'(?:' + _WS + _NAME_WORD + r')+)', text
+            ):
+                addressees.append(m.group(1).strip())
+
+            # Birth dates: "Geburtsdatum 17.03.1956" or "Geburtsdatum: 17.03.1956"
+            birthdates = []
+            for m in _re.finditer(r'Geburtsdatum\s*:?\s*(\d{1,2}[.\-/]\d{1,2}[.\-/]\d{4})', text, _re.IGNORECASE):
+                birthdates.append(m.group(1))
+
+            # Build person-attributed sentences
+            if birthdates:
+                primary_person = addressees[0] if addressees else None
+                for date in birthdates[:2]:
+                    if primary_person:
+                        facts.append(f"Geburtsdatum von {primary_person}: {date}")
+                    else:
+                        facts.append(f"Geburtsdatum: {date}")
+            elif addressees:
+                facts.append(f"Adressat: {addressees[0]}")
+
+            # Tax IDs
+            for m in _re.finditer(r'Steuernummer\s*:?\s*(\d[\d/\s]{5,20})', text, _re.IGNORECASE):
+                facts.append(f"Steuernummer: {m.group(1).strip()}")
+            # IBAN (partial)
+            for m in _re.finditer(r'IBAN[:\s-]+([A-Z]{2}\d{2}[\dA-Z ]{10,})', text):
+                facts.append(f"IBAN: {m.group(1)[:22].strip()}")
+
+            # Deduplicate
+            seen = set(); unique = []
+            for f in facts:
+                if f not in seen:
+                    seen.add(f); unique.append(f)
+            return ("📌 " + " | ".join(unique[:6]) + "\n\n") if unique else ""
+
         context_parts = []
         sources = []
         for i, result in enumerate(search_results):
             doc_context = doc_all_chunks.get(result.document_id, result.snippet)
+            facts_header = _extract_facts(doc_context)
+            # Top-3 sources: full context.
+            # Sources 4+: if facts were extracted, show ONLY the facts header (no body).
+            #   This avoids OCR noise from lower-ranked docs while keeping key facts visible.
+            # Sources 4+ without facts: show first 300 chars as fallback.
+            if i < 3:
+                doc_context_for_llm = doc_context
+            elif facts_header:
+                doc_context_for_llm = ""  # Facts header alone is sufficient
+            else:
+                doc_context_for_llm = doc_context[:300] + (" [...]" if len(doc_context) > 300 else "")
             context_parts.append(
-                f"[Quelle {i+1}: {result.title} (Dokument #{result.document_id})]\n{doc_context}\n"
+                f"[Quelle {i+1}: {result.title} (Dokument #{result.document_id})]\n"
+                f"{facts_header}{doc_context_for_llm}\n"
             )
             sources.append({
                 "index": i + 1,
@@ -227,7 +286,9 @@ class RAGService:
             user_content = (
                 f"Kontext aus den Dokumenten:\n\n{context}\n\n---\n\nFrage: {question}\n\n"
                 f"Beantworte die Frage basierend auf dem Kontext. "
-                f"Zitiere die verwendeten Quellen mit [1], [2] usw. direkt in deiner Antwort."
+                f"Zitiere die verwendeten Quellen mit ihrer Nummer aus dem Kontext: "
+                f"z.B. [3] für 'Quelle 3', [7] für 'Quelle 7'. "
+                f"Wenn du nach Fakten wie Geburtsdaten suchst, liste ALLE Fundstellen aus allen Quellen auf."
             )
         messages.append({"role": "user", "content": user_content})
 

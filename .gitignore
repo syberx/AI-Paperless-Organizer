@@ -82,6 +82,9 @@ backend/data/chromadb/
 backend/data/bm25_index.pkl
 backend/data/bm25_corpus.json
 
+# HuggingFace Model Cache (große ML-Modelle, werden zur Laufzeit heruntergeladen)
+backend/data/hf_cache/
+
 # Backups
 backup_*/
 
