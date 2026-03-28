@@ -156,11 +156,31 @@ class RAGService:
         else:
             search_results = []
 
+        # Build context: for each result, use the first chunk (document header/identity)
+        # PLUS the best-matching chunk. This ensures the LLM always knows WHO a piece
+        # of information belongs to, even when name and data are in different chunks.
+        se = self.search_engine
+        doc_first_chunk: Dict[int, str] = {}
+        for r in search_results:
+            if r.document_id not in doc_first_chunk:
+                first = next(
+                    (c["text"] for c in se._corpus_chunks
+                     if c.get("metadata", {}).get("document_id") == r.document_id),
+                    ""
+                )
+                doc_first_chunk[r.document_id] = first[:800]
+
         context_parts = []
         sources = []
         for i, result in enumerate(search_results):
+            first = doc_first_chunk.get(result.document_id, "")
+            # Only prepend first chunk if it's different from the best-match snippet
+            if first and first[:100] not in result.snippet[:100]:
+                doc_context = f"{first}\n...\n{result.snippet}"
+            else:
+                doc_context = result.snippet
             context_parts.append(
-                f"[Quelle {i+1}: {result.title} (Dokument #{result.document_id})]\n{result.snippet}\n"
+                f"[Quelle {i+1}: {result.title} (Dokument #{result.document_id})]\n{doc_context}\n"
             )
             sources.append({
                 "index": i + 1,
