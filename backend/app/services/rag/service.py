@@ -107,29 +107,40 @@ class RAGService:
         fetch_limit = max(config.max_sources * 4, 30)
         raw_results = await self.search(question, limit=fetch_limit, filters=filters)
 
-        # Cross-encoder reranking: re-read (query, chunk) pairs for true relevance.
-        # For each candidate document, we concatenate ALL its chunks that were
-        # returned by hybrid search – giving the cross-encoder full context so it
-        # can see e.g. "Hans-Peter Wilms" AND "Geburtsdatum 17.03.1956" even when
-        # they are in different chunks of the same document.
+        # Build multi-chunk combined texts per document.
+        # Used for BOTH cross-encoder reranking AND LLM context so that related facts
+        # spread across chunks (e.g. name in chunk 1, birthdate in chunk 3) are
+        # always visible together.
+        # Strategy: always include chunk 0 (document header/identity) + all chunks
+        # that contain at least one query token, up to a max of 4000 chars total.
+        se = self.search_engine
+        query_tokens = set(se._tokenize(question))
+        doc_all_chunks: Dict[int, str] = {}
+        for r in raw_results:
+            if r.document_id not in doc_all_chunks:
+                chunks = [
+                    c["text"] for c in se._corpus_chunks
+                    if c.get("metadata", {}).get("document_id") == r.document_id
+                ]
+                if not chunks:
+                    doc_all_chunks[r.document_id] = r.snippet
+                    continue
+                # Always take first chunk (document identity/header)
+                selected = [chunks[0]]
+                used_len = len(chunks[0])
+                # Add chunks that contain query tokens (skip first, already included)
+                for chunk in chunks[1:]:
+                    chunk_tokens = set(se._tokenize(chunk))
+                    if chunk_tokens & query_tokens:  # has at least one query token
+                        if used_len + len(chunk) > 6000:
+                            break
+                        selected.append(chunk)
+                        used_len += len(chunk)
+                doc_all_chunks[r.document_id] = " [...] ".join(selected)
+
+        # Cross-encoder reranking: re-read (query, full-document-text) pairs.
         if len(raw_results) > 1:
             reranker = RerankService()
-
-            # Group extra candidate chunks by document (from BM25 corpus)
-            se = self.search_engine
-            doc_all_chunks: Dict[int, str] = {}
-            for r in raw_results:
-                doc_id = r.document_id
-                if doc_id not in doc_all_chunks:
-                    # Collect all BM25 chunks for this document and concatenate
-                    chunks = [
-                        c["text"] for c in se._corpus_chunks
-                        if c.get("metadata", {}).get("document_id") == doc_id
-                    ]
-                    # Use first 3000 chars across all chunks for cross-encoder
-                    combined = " [...] ".join(chunks)[:3000]
-                    doc_all_chunks[doc_id] = combined
-
             result_dicts = [
                 {
                     "snippet": doc_all_chunks.get(r.document_id, r.snippet),
@@ -156,29 +167,14 @@ class RAGService:
         else:
             search_results = []
 
-        # Build context: for each result, use the first chunk (document header/identity)
-        # PLUS the best-matching chunk. This ensures the LLM always knows WHO a piece
-        # of information belongs to, even when name and data are in different chunks.
-        se = self.search_engine
-        doc_first_chunk: Dict[int, str] = {}
-        for r in search_results:
-            if r.document_id not in doc_first_chunk:
-                first = next(
-                    (c["text"] for c in se._corpus_chunks
-                     if c.get("metadata", {}).get("document_id") == r.document_id),
-                    ""
-                )
-                doc_first_chunk[r.document_id] = first[:800]
-
+        # Build LLM context using the same multi-chunk combined text used for reranking.
+        # This ensures the LLM sees the full document context (name, dates, etc.)
+        # even when they are spread across different chunks.
+        # doc_all_chunks was already computed during reranking; fall back to snippet if missing.
         context_parts = []
         sources = []
         for i, result in enumerate(search_results):
-            first = doc_first_chunk.get(result.document_id, "")
-            # Only prepend first chunk if it's different from the best-match snippet
-            if first and first[:100] not in result.snippet[:100]:
-                doc_context = f"{first}\n...\n{result.snippet}"
-            else:
-                doc_context = result.snippet
+            doc_context = doc_all_chunks.get(result.document_id, result.snippet)
             context_parts.append(
                 f"[Quelle {i+1}: {result.title} (Dokument #{result.document_id})]\n{doc_context}\n"
             )
