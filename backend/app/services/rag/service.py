@@ -117,17 +117,54 @@ class RAGService:
                 chat_history.append({"role": msg.role, "content": msg.content})
 
         # Conversational query enrichment: short follow-up questions (≤ 6 words) often
-        # reference the previous exchange. Prepend the last user message so the retrieval
-        # engine has the full context (e.g. "Und wo?" + "Wann wurde Leon getauft?" →
-        # effective search: "Wann wurde Leon getauft? Und wo?")
+        # reference a person/entity from the previous exchange.
+        # Instead of prepending the full previous question (which can confuse the retrieval
+        # with irrelevant query terms like "Geburtsdatum" when asking "Und wo wohnt er?"),
+        # we extract the key named entity (person/place) from the previous question and
+        # prepend only that.  E.g. "Wie ist das Geburtsdatum von Marcel Schelert?" +
+        # "Und wo wohnt er?" → search: "Marcel Schelert Und wo wohnt er?"
+        import re as _query_re
         search_question = question
         if len(question.split()) <= 6 and chat_history:
             last_user = next(
                 (m["content"] for m in reversed(chat_history) if m["role"] == "user"), ""
             )
             if last_user:
-                search_question = f"{last_user} {question}"
-                logger.info(f"Query enriched for search: '{question}' → '{search_question}'")
+                # Try to extract a proper-noun subject (name/entity) after prepositions
+                _NW = r'[A-Z\xc4\xd6\xdc][a-zA-Z\xe4\xf6\xfc\xc4\xd6\xdc\xdf\-]+'
+                subj_match = _query_re.search(
+                    r'(?:von|über|für|nach|bei|zu|mit|an)[^\S\n]+(' + _NW + r'(?:[^\S\n]+' + _NW + r')+)',
+                    last_user
+                )
+                if subj_match:
+                    subject = subj_match.group(1).strip()
+                    search_question = f"{subject} {question}"
+                    logger.info(f"Query enriched (entity): '{question}' → '{search_question}'")
+                else:
+                    # Fallback: prepend full previous question
+                    search_question = f"{last_user} {question}"
+                    logger.info(f"Query enriched (full): '{question}' → '{search_question}'")
+
+        # German verb→noun/document-type query expansion for better BM25 recall.
+        # German past participles (getauft, geboren...) don't match document nouns (Taufe, Geburt...)
+        # without stemming, so we expand them explicitly.
+        _EXPANSIONS = {
+            'getauft': 'taufe taufurkunde',
+            'getauft wurde': 'taufe taufurkunde',
+            'taufdatum': 'taufe taufurkunde',
+            'geboren': 'geburt geburtsurkunde',
+            'gestorben': 'tod sterbeurkunde',
+            'geheiratet': 'heirat heiratsurkunde hochzeit',
+            'verheiratet': 'heirat heiratsurkunde',
+            'geschieden': 'scheidung',
+            'gekündigt': 'kündigung',
+        }
+        _sq_lower = search_question.lower()
+        for verb, expansion in _EXPANSIONS.items():
+            if verb in _sq_lower:
+                search_question = f"{search_question} {expansion}"
+                logger.info(f"Query expanded: +'{expansion}'")
+                break
 
         # Retrieve a larger candidate pool, then cross-encoder rerank + cutoff
         fetch_limit = max(config.max_sources * 4, 30)
@@ -176,6 +213,22 @@ class RAGService:
                 for r in raw_results
             ]
             reranked_dicts = reranker.rerank(question, result_dicts)
+
+            # Title-match boost: the German cross-encoder (trained on MS MARCO web passages)
+            # penalises sparse OCR documents (e.g. Taufurkunden) vs. fluent-text documents.
+            # We correct for this by boosting documents whose TITLE closely matches the query.
+            # Formula: for each query token also found in the document title, add 0.15.
+            # This ensures "Taufurkunde Louna" scores above "Bescheid Kindergeld Louna" when
+            # the query asks about the Taufe.
+            sq_tokens = set(se._tokenize(search_question))
+            for d in reranked_dicts:
+                title_tokens = set(se._tokenize(d["_result"].title))
+                title_overlap = len(title_tokens & sq_tokens)
+                if title_overlap >= 2:
+                    d["rerank_score"] = d.get("rerank_score", 0) + 0.15 * title_overlap
+
+            # Re-sort after boost
+            reranked_dicts.sort(key=lambda x: x.get("rerank_score", 0), reverse=True)
             raw_results = [d["_result"] for d in reranked_dicts]
             # Normalise scores so front-end still sees 0–1 range
             if reranked_dicts and "rerank_score" in reranked_dicts[0]:
@@ -203,39 +256,48 @@ class RAGService:
         # Non-newline whitespace (spaces/tabs only, not line breaks)
         _WS = r'[^\S\n]+'
 
+        # Determine query intent to make fact extraction context-aware
+        _q_lower = search_question.lower()
+        _wants_birthdate = any(w in _q_lower for w in ['geburtsdatum', 'geboren', 'geburtstag', 'alter', 'geb.'])
+        _wants_address = any(w in _q_lower for w in ['adresse', 'wohnt', 'wohnort', 'wohnhaft', 'straße', 'ort', 'wohnadresse'])
+        _wants_tax = any(w in _q_lower for w in ['steuer', 'steuernummer', 'finanzamt', 'steuerpflichtig'])
+
         def _extract_facts(text: str) -> str:
-            """Extract key facts and build explicit person→attribute sentences."""
+            """Extract key facts query-aware – avoids extracting wrong facts for unrelated queries."""
             facts = []
 
-            # Find addressee (use non-newline whitespace to avoid capturing address lines)
+            # Find addressee (non-newline whitespace to avoid multi-line address captures)
             addressees = []
             for m in _re.finditer(
                 r'(?:Herrn?|Frau)' + _WS + r'(' + _NAME_WORD + r'(?:' + _WS + _NAME_WORD + r')+)', text
             ):
                 addressees.append(m.group(1).strip())
 
-            # Birth dates: "Geburtsdatum 17.03.1956" or "Geburtsdatum: 17.03.1956"
-            birthdates = []
-            for m in _re.finditer(r'Geburtsdatum\s*:?\s*(\d{1,2}[.\-/]\d{1,2}[.\-/]\d{4})', text, _re.IGNORECASE):
-                birthdates.append(m.group(1))
+            # Birth dates: only highlight when query is asking for birthdate/age.
+            # Avoids returning birthdate when the question is about baptism, address, etc.
+            if _wants_birthdate:
+                birthdates = []
+                for m in _re.finditer(r'Geburtsdatum\s*:?\s*(\d{1,2}[.\-/]\d{1,2}[.\-/]\d{4})', text, _re.IGNORECASE):
+                    birthdates.append(m.group(1))
+                if birthdates:
+                    primary_person = addressees[0] if addressees else None
+                    for date in birthdates[:2]:
+                        if primary_person:
+                            facts.append(f"Geburtsdatum von {primary_person}: {date}")
+                        else:
+                            facts.append(f"Geburtsdatum: {date}")
 
-            # Build person-attributed sentences
-            if birthdates:
-                primary_person = addressees[0] if addressees else None
-                for date in birthdates[:2]:
-                    if primary_person:
-                        facts.append(f"Geburtsdatum von {primary_person}: {date}")
-                    else:
-                        facts.append(f"Geburtsdatum: {date}")
-            elif addressees:
+            # Addressee: always useful if no other fact was found
+            if not facts and addressees:
                 facts.append(f"Adressat: {addressees[0]}")
 
-            # Tax IDs
-            for m in _re.finditer(r'Steuernummer\s*:?\s*(\d[\d/\s]{5,20})', text, _re.IGNORECASE):
-                facts.append(f"Steuernummer: {m.group(1).strip()}")
-            # IBAN (partial)
-            for m in _re.finditer(r'IBAN[:\s-]+([A-Z]{2}\d{2}[\dA-Z ]{10,})', text):
-                facts.append(f"IBAN: {m.group(1)[:22].strip()}")
+            # Tax IDs: only when querying about taxes
+            if _wants_tax:
+                for m in _re.finditer(r'Steuernummer\s*:?\s*(\d[\d/\s]{5,20})', text, _re.IGNORECASE):
+                    facts.append(f"Steuernummer: {m.group(1).strip()}")
+
+            # IBAN: only when explicitly relevant (not for every document)
+            # (skipped unless a future query type warrants it)
 
             # Deduplicate
             seen = set(); unique = []
