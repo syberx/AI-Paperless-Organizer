@@ -2365,6 +2365,108 @@ export default function DocumentClassifier() {
             </select>
           </div>
 
+          {/* Classification / Status Tags */}
+          <div className="card p-6">
+            <h2 className="text-lg font-semibold text-surface-100 mb-1">Status-Tags</h2>
+            <p className="text-xs text-surface-500 mb-4">
+              Optionale Tags, die automatisch in Paperless-ngx gesetzt werden (werden angelegt falls nicht vorhanden).
+            </p>
+            <div className="space-y-4">
+              {/* Klassifiziert */}
+              <div className="flex items-center gap-4 p-3 rounded-lg bg-surface-800/50">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="text-sm font-medium text-surface-200">Klassifiziert</span>
+                    <span className="text-xs text-surface-500">– wird gesetzt wenn Klassifizierung angewendet wird</span>
+                  </div>
+                  {config.classification_tag_enabled && (
+                    <input
+                      type="text"
+                      value={config.classification_tag_name ?? 'KI-klassifiziert'}
+                      onChange={e => setConfig({ ...config, classification_tag_name: e.target.value })}
+                      placeholder="KI-klassifiziert"
+                      className="input text-sm w-56 mt-1"
+                    />
+                  )}
+                </div>
+                <div
+                  onClick={() => setConfig({ ...config, classification_tag_enabled: !config.classification_tag_enabled })}
+                  className={clsx(
+                    'relative w-10 h-5 rounded-full transition-colors cursor-pointer shrink-0',
+                    config.classification_tag_enabled ? 'bg-primary-500' : 'bg-surface-600'
+                  )}
+                >
+                  <div className={clsx(
+                    'absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform',
+                    config.classification_tag_enabled ? 'translate-x-5' : 'translate-x-0.5'
+                  )} />
+                </div>
+              </div>
+
+              {/* Prüfen */}
+              <div className="flex items-center gap-4 p-3 rounded-lg bg-surface-800/50">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="text-sm font-medium text-surface-200">Prüfen</span>
+                    <span className="text-xs text-surface-500">– wird gesetzt wenn Dokument in die Prüf-Warteschlange kommt</span>
+                  </div>
+                  {config.review_tag_enabled && (
+                    <input
+                      type="text"
+                      value={config.review_tag_name ?? 'KI-prüfen'}
+                      onChange={e => setConfig({ ...config, review_tag_name: e.target.value })}
+                      placeholder="KI-prüfen"
+                      className="input text-sm w-56 mt-1"
+                    />
+                  )}
+                </div>
+                <div
+                  onClick={() => setConfig({ ...config, review_tag_enabled: !config.review_tag_enabled })}
+                  className={clsx(
+                    'relative w-10 h-5 rounded-full transition-colors cursor-pointer shrink-0',
+                    config.review_tag_enabled ? 'bg-primary-500' : 'bg-surface-600'
+                  )}
+                >
+                  <div className={clsx(
+                    'absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform',
+                    config.review_tag_enabled ? 'translate-x-5' : 'translate-x-0.5'
+                  )} />
+                </div>
+              </div>
+
+              {/* Tag-Ideen */}
+              <div className="flex items-center gap-4 p-3 rounded-lg bg-surface-800/50">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="text-sm font-medium text-surface-200">Tag-Ideen</span>
+                    <span className="text-xs text-surface-500">– wird gesetzt wenn die KI neue Tag-Vorschläge hat</span>
+                  </div>
+                  {config.tag_ideas_tag_enabled && (
+                    <input
+                      type="text"
+                      value={config.tag_ideas_tag_name ?? 'KI-tag-ideen'}
+                      onChange={e => setConfig({ ...config, tag_ideas_tag_name: e.target.value })}
+                      placeholder="KI-tag-ideen"
+                      className="input text-sm w-56 mt-1"
+                    />
+                  )}
+                </div>
+                <div
+                  onClick={() => setConfig({ ...config, tag_ideas_tag_enabled: !config.tag_ideas_tag_enabled })}
+                  className={clsx(
+                    'relative w-10 h-5 rounded-full transition-colors cursor-pointer shrink-0',
+                    config.tag_ideas_tag_enabled ? 'bg-primary-500' : 'bg-surface-600'
+                  )}
+                >
+                  <div className={clsx(
+                    'absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform',
+                    config.tag_ideas_tag_enabled ? 'translate-x-5' : 'translate-x-0.5'
+                  )} />
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Save */}
           <div className="flex justify-end">
             <button

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Send, Plus, Trash2, MessageSquare, Database, Loader2,
   Search, Settings2, RefreshCw, FileText, ChevronRight,
@@ -15,6 +15,48 @@ interface LocalMessage {
   citedSources?: number[]   // source.index values actually cited by the LLM
   isStreaming?: boolean
   statusMessage?: string
+}
+
+/** Render answer text with [N] citation references as clickable highlighted badges. */
+function renderAnswerWithCitations(
+  text: string,
+  sources: ragApi.ChatSource[],
+  paperlessUrl: string,
+): React.ReactNode {
+  const sourceMap = new Map(sources.map((s) => [s.index, s]))
+  // Split on [N] or [N,M,...] patterns
+  const parts = text.split(/(\[\d+(?:,\s*\d+)*\])/g)
+  return (
+    <span className="whitespace-pre-wrap">
+      {parts.map((part, i) => {
+        const m = part.match(/^\[(\d+(?:,\s*\d+)*)\]$/)
+        if (!m) return part
+        // Multiple refs like [3,4] or single [3]
+        const indices = m[1].split(',').map((n) => parseInt(n.trim()))
+        return (
+          <span key={i} className="inline-flex gap-0.5 mx-0.5 align-middle">
+            {indices.map((idx) => {
+              const src = sourceMap.get(idx)
+              if (!src) return <span key={idx} className="text-surface-400">[{idx}]</span>
+              const url = paperlessUrl ? `${paperlessUrl}/documents/${src.document_id}/details` : '#'
+              return (
+                <a
+                  key={idx}
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={`${src.title} (${(src.score * 100).toFixed(0)}% Relevanz) – In Paperless öffnen`}
+                  className="inline-flex items-center justify-center w-5 h-5 rounded bg-primary-500/20 border border-primary-500/50 text-primary-300 text-xs font-bold hover:bg-primary-500/40 hover:border-primary-400 transition-colors cursor-pointer"
+                >
+                  {idx}
+                </a>
+              )
+            })}
+          </span>
+        )
+      })}
+    </span>
+  )
 }
 
 function scoreColor(score: number): string {
@@ -427,6 +469,53 @@ export default function RagChat() {
                 />
               </div>
             </div>
+            {/* AI enhancements row */}
+            <div className="mt-3 flex flex-wrap gap-4 border-t border-surface-700/50 pt-3">
+              <label className="flex items-center gap-2 cursor-pointer group">
+                <div
+                  onClick={() => {
+                    const v = !config.query_rewrite_enabled
+                    setConfig({ ...config, query_rewrite_enabled: v })
+                    saveConfig({ query_rewrite_enabled: v })
+                  }}
+                  className={clsx(
+                    'relative w-8 h-4 rounded-full transition-colors',
+                    config.query_rewrite_enabled ? 'bg-primary-600' : 'bg-surface-600'
+                  )}
+                >
+                  <span className={clsx(
+                    'absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform',
+                    config.query_rewrite_enabled ? 'translate-x-4' : 'translate-x-0.5'
+                  )} />
+                </div>
+                <span className="text-xs text-surface-300 group-hover:text-surface-100 transition-colors">
+                  KI-Anfrage-Verbesserung
+                </span>
+                <span className="text-xs text-surface-500" title="LLM erweitert die Suchanfrage automatisch um Synonyme und Fachbegriffe für bessere Treffer">ⓘ</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer group">
+                <div
+                  onClick={() => {
+                    const v = !config.contextual_retrieval_enabled
+                    setConfig({ ...config, contextual_retrieval_enabled: v })
+                    saveConfig({ contextual_retrieval_enabled: v })
+                  }}
+                  className={clsx(
+                    'relative w-8 h-4 rounded-full transition-colors',
+                    config.contextual_retrieval_enabled ? 'bg-amber-600' : 'bg-surface-600'
+                  )}
+                >
+                  <span className={clsx(
+                    'absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform',
+                    config.contextual_retrieval_enabled ? 'translate-x-4' : 'translate-x-0.5'
+                  )} />
+                </div>
+                <span className="text-xs text-surface-300 group-hover:text-surface-100 transition-colors">
+                  Kontextueller Index
+                </span>
+                <span className="text-xs text-surface-500" title="LLM generiert Kontext-Header für kurze Dokumente beim Indexieren (benötigt Re-Index, erhöht Indexierungszeit)">ⓘ</span>
+              </label>
+            </div>
           </div>
         )}
 
@@ -539,10 +628,10 @@ export default function RagChat() {
                       </div>
                     )}
 
-                    {/* Answer text */}
+                    {/* Answer text – with inline citation badges [N] → clickable links */}
                     {msg.content && (
-                      <div className="bg-surface-800 border border-surface-700/50 rounded-2xl px-4 py-3 text-sm text-surface-100 whitespace-pre-wrap leading-relaxed">
-                        {msg.content}
+                      <div className="bg-surface-800 border border-surface-700/50 rounded-2xl px-4 py-3 text-sm text-surface-100 leading-relaxed">
+                        {renderAnswerWithCitations(msg.content, msg.sources ?? [], paperlessUrl)}
                       </div>
                     )}
                   </div>

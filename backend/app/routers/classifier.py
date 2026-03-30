@@ -58,6 +58,12 @@ class ClassifierConfigUpdate(BaseModel):
     auto_classify_enabled: Optional[bool] = None
     auto_classify_interval: Optional[int] = None
     auto_classify_mode: Optional[str] = None
+    classification_tag_enabled: Optional[bool] = None
+    classification_tag_name: Optional[str] = None
+    review_tag_enabled: Optional[bool] = None
+    review_tag_name: Optional[str] = None
+    tag_ideas_tag_enabled: Optional[bool] = None
+    tag_ideas_tag_name: Optional[str] = None
 
 
 class StoragePathProfileUpdate(BaseModel):

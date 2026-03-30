@@ -41,11 +41,20 @@ class SearchEngine:
         self._chroma_collection = None
         self._chroma_client = None
 
-    def init_chroma(self, persist_dir: str = ""):
+    def init_chroma(self, persist_dir: str = "", force: bool = False):
         import chromadb
         persist_path = persist_dir or os.path.join(DATA_DIR, "chromadb")
         os.makedirs(persist_path, exist_ok=True)
         self._chroma_client = chromadb.PersistentClient(path=persist_path)
+        if force:
+            # On force re-index: delete and recreate the collection + clear BM25 corpus
+            try:
+                self._chroma_client.delete_collection("paperless_documents")
+                logger.info("ChromaDB collection deleted for force re-index")
+            except Exception:
+                pass
+            self._corpus_chunks = []
+            logger.info("BM25 corpus cleared for force re-index")
         self._chroma_collection = self._chroma_client.get_or_create_collection(
             name="paperless_documents",
             metadata={"hnsw:space": "cosine"},
@@ -164,7 +173,17 @@ class SearchEngine:
             "this", "that", "it", "as", "an",
         }
         # Keep 3+ char words; also keep 2+ digit numbers (so "17", "03" in dates survive)
-        return [t for t in tokens if t not in stopwords and (len(t) > 2 or (len(t) >= 2 and t.isdigit()))]
+        filtered = [t for t in tokens if t not in stopwords and (len(t) > 2 or (len(t) >= 2 and t.isdigit()))]
+
+        # German Snowball stemming via PyStemmer – reduces inflected forms to their
+        # common stem so that e.g. "Rechnung" / "Rechnungen" / "Rechnungs" all match.
+        # Falls back gracefully to unstemmed tokens if PyStemmer is not installed.
+        try:
+            import Stemmer as _pystemmer  # PyStemmer package
+            _stemmer = _pystemmer.Stemmer("german")
+            return _stemmer.stemWords(filtered)
+        except ImportError:
+            return filtered
 
     async def hybrid_search(
         self,

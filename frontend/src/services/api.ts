@@ -871,6 +871,12 @@ export interface ClassifierConfig {
   auto_classify_enabled: boolean
   auto_classify_interval: number
   auto_classify_mode: string
+  classification_tag_enabled: boolean
+  classification_tag_name: string
+  review_tag_enabled: boolean
+  review_tag_name: string
+  tag_ideas_tag_enabled: boolean
+  tag_ideas_tag_name: string
 }
 
 export interface PaperlessTag {

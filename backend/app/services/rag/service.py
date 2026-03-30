@@ -116,55 +116,61 @@ class RAGService:
             for msg in history_msgs[:-1]:  # exclude current user message
                 chat_history.append({"role": msg.role, "content": msg.content})
 
-        # Conversational query enrichment: short follow-up questions (≤ 6 words) often
-        # reference a person/entity from the previous exchange.
-        # Instead of prepending the full previous question (which can confuse the retrieval
-        # with irrelevant query terms like "Geburtsdatum" when asking "Und wo wohnt er?"),
-        # we extract the key named entity (person/place) from the previous question and
-        # prepend only that.  E.g. "Wie ist das Geburtsdatum von Marcel Schelert?" +
-        # "Und wo wohnt er?" → search: "Marcel Schelert Und wo wohnt er?"
-        import re as _query_re
+        # --- Query Enrichment ---
+        # Two modes controlled by config:
+        #   query_rewrite_enabled=True  → LLM rewrites/expands the query (your idea!)
+        #   query_rewrite_enabled=False → legacy manual heuristics (fast, no LLM call)
         search_question = question
-        if len(question.split()) <= 6 and chat_history:
-            last_user = next(
-                (m["content"] for m in reversed(chat_history) if m["role"] == "user"), ""
-            )
-            if last_user:
-                # Try to extract a proper-noun subject (name/entity) after prepositions
-                _NW = r'[A-Z\xc4\xd6\xdc][a-zA-Z\xe4\xf6\xfc\xc4\xd6\xdc\xdf\-]+'
-                subj_match = _query_re.search(
-                    r'(?:von|über|für|nach|bei|zu|mit|an)[^\S\n]+(' + _NW + r'(?:[^\S\n]+' + _NW + r')+)',
-                    last_user
-                )
-                if subj_match:
-                    subject = subj_match.group(1).strip()
-                    search_question = f"{subject} {question}"
-                    logger.info(f"Query enriched (entity): '{question}' → '{search_question}'")
-                else:
-                    # Fallback: prepend full previous question
-                    search_question = f"{last_user} {question}"
-                    logger.info(f"Query enriched (full): '{question}' → '{search_question}'")
 
-        # German verb→noun/document-type query expansion for better BM25 recall.
-        # German past participles (getauft, geboren...) don't match document nouns (Taufe, Geburt...)
-        # without stemming, so we expand them explicitly.
-        _EXPANSIONS = {
-            'getauft': 'taufe taufurkunde',
-            'getauft wurde': 'taufe taufurkunde',
-            'taufdatum': 'taufe taufurkunde',
-            'geboren': 'geburt geburtsurkunde',
-            'gestorben': 'tod sterbeurkunde',
-            'geheiratet': 'heirat heiratsurkunde hochzeit',
-            'verheiratet': 'heirat heiratsurkunde',
-            'geschieden': 'scheidung',
-            'gekündigt': 'kündigung',
-        }
-        _sq_lower = search_question.lower()
-        for verb, expansion in _EXPANSIONS.items():
-            if verb in _sq_lower:
-                search_question = f"{search_question} {expansion}"
-                logger.info(f"Query expanded: +'{expansion}'")
-                break
+        if getattr(config, 'query_rewrite_enabled', True):
+            yield json.dumps({"type": "status", "message": "Analysiere Anfrage..."})
+            rewritten = await self._rewrite_query_llm(question, chat_history, config)
+            if rewritten and rewritten.strip().lower() != question.strip().lower():
+                logger.info(f"Query rewritten: '{question}' → '{rewritten}'")
+                # Combine original + rewritten:
+                # - original preserves exact terms for BM25 (names, IBANs, numbers)
+                # - rewritten adds document vocabulary for semantic + BM25 recall
+                search_question = f"{question} {rewritten}"
+            else:
+                search_question = question
+        else:
+            # Legacy manual enrichment (kept as fallback when LLM rewriting is disabled)
+            import re as _query_re
+            if len(question.split()) <= 6 and chat_history:
+                last_user = next(
+                    (m["content"] for m in reversed(chat_history) if m["role"] == "user"), ""
+                )
+                if last_user:
+                    _NW = r'[A-Z\xc4\xd6\xdc][a-zA-Z\xe4\xf6\xfc\xc4\xd6\xdc\xdf\-]+'
+                    subj_match = _query_re.search(
+                        r'(?:von|über|für|nach|bei|zu|mit|an)[^\S\n]+(' + _NW + r'(?:[^\S\n]+' + _NW + r')+)',
+                        last_user
+                    )
+                    if subj_match:
+                        subject = subj_match.group(1).strip()
+                        search_question = f"{subject} {question}"
+                        logger.info(f"Query enriched (entity): '{question}' → '{search_question}'")
+                    else:
+                        search_question = f"{last_user} {question}"
+                        logger.info(f"Query enriched (full): '{question}' → '{search_question}'")
+
+            _EXPANSIONS = {
+                'getauft': 'taufe taufurkunde',
+                'getauft wurde': 'taufe taufurkunde',
+                'taufdatum': 'taufe taufurkunde',
+                'geboren': 'geburt geburtsurkunde',
+                'gestorben': 'tod sterbeurkunde',
+                'geheiratet': 'heirat heiratsurkunde hochzeit',
+                'verheiratet': 'heirat heiratsurkunde',
+                'geschieden': 'scheidung',
+                'gekündigt': 'kündigung',
+            }
+            _sq_lower = search_question.lower()
+            for verb, expansion in _EXPANSIONS.items():
+                if verb in _sq_lower:
+                    search_question = f"{search_question} {expansion}"
+                    logger.info(f"Query expanded: +'{expansion}'")
+                    break
 
         # Retrieve a larger candidate pool, then cross-encoder rerank + cutoff
         fetch_limit = max(config.max_sources * 4, 30)
@@ -191,14 +197,23 @@ class RAGService:
                 # Always take first chunk (document identity/header)
                 selected = [chunks[0]]
                 used_len = len(chunks[0])
-                # Add chunks that contain query tokens (skip first, already included)
+                # Add chunks that contain query tokens (skip first, already included).
+                # Sort by token overlap descending so most relevant chunks get in first,
+                # then fill up to the char limit. This ensures that a key-fact chunk
+                # (e.g. "Geburtsdatum 17.03.1956" deep in a Versicherungsschein) is
+                # included even when earlier non-matching chunks would fill the budget.
+                scored = []
                 for chunk in chunks[1:]:
                     chunk_tokens = set(se._tokenize(chunk))
-                    if chunk_tokens & query_tokens:  # has at least one query token
-                        if used_len + len(chunk) > 6000:
-                            break
-                        selected.append(chunk)
-                        used_len += len(chunk)
+                    overlap = len(chunk_tokens & query_tokens)
+                    if overlap > 0:
+                        scored.append((overlap, chunk))
+                scored.sort(key=lambda x: x[0], reverse=True)
+                for _, chunk in scored:
+                    if used_len + len(chunk) > 6000:
+                        continue  # skip oversized chunks, but keep checking smaller ones
+                    selected.append(chunk)
+                    used_len += len(chunk)
                 doc_all_chunks[r.document_id] = " [...] ".join(selected)
 
         # Cross-encoder reranking: re-read (query, full-document-text) pairs.
@@ -226,6 +241,29 @@ class RAGService:
                 title_overlap = len(title_tokens & sq_tokens)
                 if title_overlap >= 2:
                     d["rerank_score"] = d.get("rerank_score", 0) + 0.15 * title_overlap
+
+            # Person-name boost: if the query contains a capitalized multi-word name
+            # (e.g. "Hans-Peter Wilms") and that name appears in the document's first
+            # identity chunk, strongly boost it. This prevents a Kaufvertrag that mentions
+            # *other* people from outranking the actual document addressed to the queried person.
+            import re as _re_boost
+            # Extract capitalized name sequences from the original question (not rewritten)
+            # Allow uppercase mid-word for hyphenated names like "Hans-Peter"
+            _name_candidates = _re_boost.findall(
+                r'[A-ZÄÖÜ][a-zA-ZäöüÄÖÜß\-]+(?:\s+[A-ZÄÖÜ][a-zA-ZäöüÄÖÜß\-]+)+', question
+            )
+            if _name_candidates:
+                for d in reranked_dicts:
+                    first_chunk_text = doc_all_chunks.get(d["_result"].document_id, "")
+                    # Use only the first part (identity chunk) for name matching
+                    first_chunk_head = first_chunk_text[:800].lower()
+                    for name in _name_candidates:
+                        name_parts = name.lower().split()
+                        # All parts of the name must appear in the first chunk head
+                        if all(part in first_chunk_head for part in name_parts):
+                            d["rerank_score"] = d.get("rerank_score", 0) + 0.5
+                            logger.info(f"Person-name boost for '{name}' → doc {d['_result'].document_id} ({d['_result'].title[:40]})")
+                            break
 
             # Re-sort after boost
             reranked_dicts.sort(key=lambda x: x.get("rerank_score", 0), reverse=True)
@@ -482,6 +520,86 @@ class RAGService:
             logger.error(f"OpenAI streaming error: {e}")
             yield f"\n\n[Fehler: {e}]"
 
+    # --- LLM Query Rewriting (your idea!) ---
+
+    async def _rewrite_query_llm(
+        self, question: str, chat_history: list, config: RagConfig
+    ) -> str:
+        """Rewrite/expand the user query using the LLM for better document retrieval.
+
+        The LLM adds synonyms, official German document names and relevant terminology.
+        Returns the expanded query string, or the original question on any error.
+        This is the user's core idea: let the AI understand the query before searching.
+        """
+        if not question.strip():
+            return question
+
+        # Build context hint from the most recent user message
+        history_context = ""
+        if chat_history:
+            last_user = next(
+                (m["content"] for m in reversed(chat_history) if m["role"] == "user"), ""
+            )
+            if last_user and last_user.strip() != question.strip():
+                history_context = f"\nKontext (vorherige Frage): {last_user[:200]}"
+
+        prompt = (
+            "Du bist Suchexperte für ein deutsches Dokumentenarchiv (Paperless-ngx). "
+            "Erweitere die Suchanfrage um Synonyme, offizielle Dokumentnamen und "
+            "relevante deutsche Fachbegriffe (z.B. 'getauft' → 'Taufurkunde Taufe Taufschein', "
+            "'geboren' → 'Geburtsurkunde Geburtsschein', 'Rechnung' → 'Rechnung Rechnungsnummer Betrag'). "
+            "Antworte NUR mit der erweiterten Suchanfrage, max. 25 Wörter, kein Erklärungstext."
+            f"{history_context}\n\n"
+            f"Anfrage: {question}"
+        )
+
+        try:
+            provider = getattr(config, 'chat_model_provider', 'ollama')
+            if provider == "openai":
+                return await self._rewrite_openai(prompt, config)
+            else:
+                return await self._rewrite_ollama(prompt, config)
+        except Exception as e:
+            logger.warning(f"Query rewrite failed, using original: {e}")
+            return question
+
+    async def _rewrite_ollama(self, prompt: str, config: RagConfig) -> str:
+        """Non-streaming Ollama call for query rewriting – fast, low token count."""
+        url = f"{config.ollama_base_url}/api/generate"
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.post(url, json={
+                "model": config.chat_model,
+                "prompt": prompt,
+                "stream": False,
+                "think": False,
+                "options": {"num_predict": 60, "temperature": 0.1},
+            })
+            resp.raise_for_status()
+            result = resp.json().get("response", "").strip()
+            # Strip any accidental thinking tags that some models emit
+            import re as _re
+            result = _re.sub(r'<think>.*?</think>', '', result, flags=_re.DOTALL).strip()
+            return result
+
+    async def _rewrite_openai(self, prompt: str, config: RagConfig) -> str:
+        """OpenAI call for query rewriting."""
+        from openai import AsyncOpenAI
+        from app.models import LLMProvider
+        async with async_session() as db:
+            result = await db.execute(
+                sa_select(LLMProvider).where(LLMProvider.name == "openai")
+            )
+            provider = result.scalar_one_or_none()
+            api_key = provider.api_key if provider else ""
+        client = AsyncOpenAI(api_key=api_key)
+        resp = await client.chat.completions.create(
+            model=config.chat_model or "gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=60,
+            temperature=0.1,
+        )
+        return resp.choices[0].message.content.strip() if resp.choices else ""
+
     # Session management
     async def get_sessions(self) -> list:
         async with async_session() as db:
@@ -564,6 +682,8 @@ class RAGService:
             "chat_system_prompt": config.chat_system_prompt,
             "auto_index_enabled": config.auto_index_enabled,
             "auto_index_interval": config.auto_index_interval,
+            "query_rewrite_enabled": getattr(config, 'query_rewrite_enabled', True),
+            "contextual_retrieval_enabled": getattr(config, 'contextual_retrieval_enabled', False),
         }
 
     async def update_config(self, updates: dict) -> dict:
@@ -579,7 +699,8 @@ class RAGService:
                 "chunk_size", "chunk_overlap", "bm25_weight", "semantic_weight",
                 "max_sources", "max_context_tokens", "chat_model_provider",
                 "chat_model", "chat_system_prompt", "auto_index_enabled",
-                "auto_index_interval",
+                "auto_index_interval", "query_rewrite_enabled",
+                "contextual_retrieval_enabled",
             }
             for key, value in updates.items():
                 if key in allowed and hasattr(config, key):

@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 from typing import Optional, Set
 
+import httpx
 from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +15,12 @@ from app.services.rag.chunking import ChunkingService
 from app.services.rag.search_engine import SearchEngine
 
 logger = logging.getLogger(__name__)
+
+# All documents get contextual retrieval when enabled – no length cap.
+# Previously this was limited to short docs only, but the real value is for
+# long documents where the person's name is in a different chunk than key facts
+# (e.g. birth date buried in "Tarifierungsmerkmale" of a Versicherungsschein).
+_CONTEXTUAL_RETRIEVAL_MAX_CONTENT_LEN = 999_999
 
 
 class Indexer:
@@ -78,7 +85,7 @@ class Indexer:
 
         try:
             client = await self._get_paperless_client()
-            self.search_engine.init_chroma()
+            self.search_engine.init_chroma(force=force)
 
             already_indexed: Set[int] = set()
             if not force:
@@ -123,6 +130,8 @@ class Indexer:
                 chunk_overlap=config.chunk_overlap,
             )
 
+            contextual_enabled = getattr(config, 'contextual_retrieval_enabled', False)
+
             batch_size = 50
             for i in range(0, len(documents), batch_size):
                 batch = documents[i:i + batch_size]
@@ -130,6 +139,34 @@ class Indexer:
                 try:
                     all_chunks = chunking_service.chunk_documents(batch)
                     chunk_count = len(all_chunks)
+
+                    # Contextual Retrieval (Anthropic approach, opt-in):
+                    # For short/sparse documents the LLM prepends a 1-2 sentence context
+                    # to each chunk so both BM25 and semantic search find it more easily.
+                    # Only applied to documents below the content-length threshold to
+                    # keep indexing time reasonable.
+                    if contextual_enabled and all_chunks:
+                        doc_map = {d["id"]: d for d in batch}
+                        # Count chunks per document to skip first chunk (already has metadata header)
+                        doc_chunk_counts: dict[int, int] = {}
+                        for chunk in all_chunks:
+                            doc_id = chunk["metadata"].get("document_id")
+                            doc_chunk_counts[doc_id] = doc_chunk_counts.get(doc_id, 0) + 1
+                        doc_chunk_seen: dict[int, int] = {}
+                        for chunk in all_chunks:
+                            doc_id = chunk["metadata"].get("document_id")
+                            doc_chunk_seen[doc_id] = doc_chunk_seen.get(doc_id, 0) + 1
+                            # Skip first chunk: it already has the metadata header with title/person
+                            if doc_chunk_counts.get(doc_id, 1) <= 1:
+                                continue  # single-chunk doc, metadata header is enough
+                            if doc_chunk_seen[doc_id] == 1:
+                                continue  # first chunk of multi-chunk doc, skip
+                            doc = doc_map.get(doc_id, {})
+                            content_len = len((doc.get("content") or "").strip())
+                            if content_len < _CONTEXTUAL_RETRIEVAL_MAX_CONTENT_LEN:
+                                ctx = await self._generate_chunk_context(doc, chunk["text"], config)
+                                if ctx:
+                                    chunk["text"] = ctx + chunk["text"]
 
                     if all_chunks:
                         texts = [c["text"] for c in all_chunks]
@@ -277,3 +314,50 @@ class Indexer:
     @property
     def is_indexing(self) -> bool:
         return self._indexing_task is not None and not self._indexing_task.done()
+
+    async def _generate_chunk_context(
+        self, doc: dict, chunk_text: str, config: RagConfig
+    ) -> str:
+        """Generate a short LLM context header for a chunk (Anthropic Contextual Retrieval).
+
+        Prepends 1-2 sentences explaining what this chunk is about within its document.
+        This dramatically improves retrieval for sparse OCR documents where the chunk
+        text alone gives too little signal for embedding or BM25.
+
+        Only called for short documents (content < _CONTEXTUAL_RETRIEVAL_MAX_CONTENT_LEN).
+        """
+        doc_info = (
+            f"Dokument: '{doc.get('title', '')}'"
+            + (f", Typ: {doc.get('document_type_name', '')}" if doc.get('document_type_name') else "")
+            + (f", Korrespondent: {doc.get('correspondent_name', '')}" if doc.get('correspondent_name') else "")
+            + (f", Datum: {(doc.get('created') or '')[:10]}" if doc.get('created') else "")
+        )
+        prompt = (
+            f"{doc_info}\n\n"
+            f"Textabschnitt:\n{chunk_text[:500]}\n\n"
+            "Schreibe 1-2 Sätze Kontext der erklärt:\n"
+            "- Zu welchem Dokument/Person dieser Abschnitt gehört\n"
+            "- Welche konkreten Fakten er enthält (Namen, Daten, Beträge, Kennzeichen)\n"
+            "- Für welche Suchanfragen er relevant ist\n"
+            "Nur der Kontext, keine Erklärungen, keine Einleitung wie 'Dieser Abschnitt...'."
+        )
+        try:
+            url = f"{config.ollama_base_url}/api/generate"
+            async with httpx.AsyncClient(timeout=25.0) as client:
+                resp = await client.post(url, json={
+                    "model": config.chat_model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "think": False,
+                    "options": {"num_predict": 80, "temperature": 0.1},
+                })
+                resp.raise_for_status()
+                import re as _re
+                context = resp.json().get("response", "").strip()
+                # Strip thinking tags some models emit even with think=False
+                context = _re.sub(r'<think>.*?</think>', '', context, flags=_re.DOTALL).strip()
+                if context:
+                    return f"[Kontext: {context}]\n\n"
+        except Exception as e:
+            logger.warning(f"Context generation failed for doc {doc.get('id')}: {e}")
+        return ""

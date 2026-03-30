@@ -143,3 +143,10 @@ scripts/
 *.temp
 .cache/
 debug-*.log
+
+# =========================
+# Claude Code / Agent Skills (lokal, nicht für Repo)
+# =========================
+CLAUDE.md
+.claude/
+.agents/

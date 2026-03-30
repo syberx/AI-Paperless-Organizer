@@ -71,6 +71,16 @@ async def _migrate_columns(conn):
         ("llm_providers", "vision_model", "TEXT DEFAULT ''"),
         # Job assignment in app_settings
         ("app_settings", "classifier_provider", "TEXT DEFAULT 'ollama'"),
+        # RAG: LLM Query Rewriting + Contextual Retrieval
+        ("rag_config", "query_rewrite_enabled", "BOOLEAN DEFAULT 1"),
+        ("rag_config", "contextual_retrieval_enabled", "BOOLEAN DEFAULT 0"),
+        # Classification Tag
+        ("classifier_config", "classification_tag_enabled", "BOOLEAN DEFAULT 0"),
+        ("classifier_config", "classification_tag_name", "TEXT DEFAULT 'KI-klassifiziert'"),
+        ("classifier_config", "review_tag_enabled", "BOOLEAN DEFAULT 0"),
+        ("classifier_config", "review_tag_name", "TEXT DEFAULT 'KI-prüfen'"),
+        ("classifier_config", "tag_ideas_tag_enabled", "BOOLEAN DEFAULT 0"),
+        ("classifier_config", "tag_ideas_tag_name", "TEXT DEFAULT 'KI-tag-ideen'"),
     ]
 
     for table, column, col_type in migrations:

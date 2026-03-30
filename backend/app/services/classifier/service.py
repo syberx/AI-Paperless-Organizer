@@ -868,6 +868,22 @@ class DocumentClassifierService:
             if tag_ids:
                 update_data["tags"] = tag_ids
 
+        # Classification Tag: if enabled, ensure the configured tag is on every classified document
+        if getattr(config, "classification_tag_enabled", False):
+            tag_name = (getattr(config, "classification_tag_name", None) or "KI-klassifiziert").strip()
+            if tag_name:
+                cls_tag = await self.paperless.get_or_create_tag(tag_name)
+                if cls_tag:
+                    current_tag_ids = list(update_data.get("tags") or [])
+                    if cls_tag["id"] not in current_tag_ids:
+                        if not current_tag_ids:
+                            # tags not yet fetched — load existing tags from document
+                            doc = await self.paperless.get_document(document_id)
+                            current_tag_ids = doc.get("tags", []) if doc else []
+                        current_tag_ids.append(cls_tag["id"])
+                        update_data["tags"] = current_tag_ids
+                        logger.info(f"Apply: added classification tag '{tag_name}' (id={cls_tag['id']}) to doc {document_id}")
+
         # Resolve correspondent
         if classification.get("correspondent"):
             corr = await self.paperless.get_or_create_correspondent(
@@ -996,6 +1012,7 @@ class DocumentClassifierService:
         """
         result = await self.classify_document(document_id)
         review_reason = self._needs_review(result)
+        config = await self.get_config()
 
         if result.error:
             return {"document_id": document_id, "action": "error", "reason": result.error}
@@ -1024,6 +1041,8 @@ class DocumentClassifierService:
             # Save tag ideas on the history entry
             if has_tag_ideas:
                 await self._save_tag_ideas(document_id, tag_ideas)
+                if getattr(config, "tag_ideas_tag_enabled", False):
+                    await self._add_status_tag(document_id, getattr(config, "tag_ideas_tag_name", None) or "KI-tag-ideen")
             return {
                 "document_id": document_id,
                 "action": "applied",
@@ -1049,11 +1068,17 @@ class DocumentClassifierService:
                     await self.db.commit()
             except Exception as e:
                 logger.warning(f"Could not mark as review: {e}")
+            if getattr(config, "review_tag_enabled", False):
+                await self._add_status_tag(document_id, getattr(config, "review_tag_name", None) or "KI-prüfen")
+            if has_tag_ideas and getattr(config, "tag_ideas_tag_enabled", False):
+                await self._add_status_tag(document_id, getattr(config, "tag_ideas_tag_name", None) or "KI-tag-ideen")
         else:
             # No review needed — auto-apply with existing tags only
             await self.apply_classification(document_id, apply_data)
             if has_tag_ideas:
                 await self._save_tag_ideas(document_id, tag_ideas)
+                if getattr(config, "tag_ideas_tag_enabled", False):
+                    await self._add_status_tag(document_id, getattr(config, "tag_ideas_tag_name", None) or "KI-tag-ideen")
             return {
                 "document_id": document_id,
                 "action": "applied",
@@ -1082,3 +1107,23 @@ class DocumentClassifierService:
                 await self.db.commit()
         except Exception as e:
             logger.warning(f"Could not save tag ideas for doc {document_id}: {e}")
+
+    async def _add_status_tag(self, document_id: int, tag_name: str):
+        """Append a single tag to a document in Paperless (creates the tag if missing)."""
+        try:
+            tag_name = tag_name.strip()
+            if not tag_name:
+                return
+            tag = await self.paperless.get_or_create_tag(tag_name)
+            if not tag:
+                return
+            doc = await self.paperless.get_document(document_id)
+            if not doc:
+                return
+            existing = list(doc.get("tags", []))
+            if tag["id"] not in existing:
+                existing.append(tag["id"])
+                await self.paperless.update_document(document_id, {"tags": existing})
+                logger.info(f"Status tag '{tag_name}' (id={tag['id']}) added to doc {document_id}")
+        except Exception as e:
+            logger.warning(f"Could not add status tag '{tag_name}' to doc {document_id}: {e}")

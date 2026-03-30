@@ -63,6 +63,8 @@ export interface RagConfig {
   chat_system_prompt: string
   auto_index_enabled: boolean
   auto_index_interval: number
+  query_rewrite_enabled: boolean
+  contextual_retrieval_enabled: boolean
 }
 
 export interface IndexStatus {

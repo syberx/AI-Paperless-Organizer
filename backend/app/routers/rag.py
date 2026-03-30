@@ -74,6 +74,8 @@ class ConfigUpdate(BaseModel):
     chat_system_prompt: Optional[str] = None
     auto_index_enabled: Optional[bool] = None
     auto_index_interval: Optional[int] = None
+    query_rewrite_enabled: Optional[bool] = None
+    contextual_retrieval_enabled: Optional[bool] = None
 
 
 # --- Chat Endpoints ---

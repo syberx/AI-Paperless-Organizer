@@ -27,6 +27,8 @@ class RagConfig(Base):
     chat_system_prompt = Column(Text, default="Du bist ein hilfreicher Assistent, der Fragen zu Dokumenten beantwortet. Antworte basierend auf dem bereitgestellten Kontext. Wenn du die Antwort nicht im Kontext findest, sage das ehrlich.")
     auto_index_enabled = Column(Boolean, default=False)
     auto_index_interval = Column(Integer, default=30)
+    query_rewrite_enabled = Column(Boolean, default=True)
+    contextual_retrieval_enabled = Column(Boolean, default=False)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

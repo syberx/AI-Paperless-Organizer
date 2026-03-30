@@ -91,6 +91,16 @@ class ClassifierConfig(Base):
     excluded_correspondent_ids = Column(JSON, default=[])
     excluded_document_type_ids = Column(JSON, default=[])
 
+    # Classification Tag: optional tag assigned to every classified document
+    classification_tag_enabled = Column(Boolean, default=False)
+    classification_tag_name = Column(String(200), default="KI-klassifiziert")
+    # Review Tag: optional tag assigned when document goes into review queue
+    review_tag_enabled = Column(Boolean, default=False)
+    review_tag_name = Column(String(200), default="KI-prüfen")
+    # Tag-Ideas Tag: optional tag assigned when AI suggests new tags (tag ideas)
+    tag_ideas_tag_enabled = Column(Boolean, default=False)
+    tag_ideas_tag_name = Column(String(200), default="KI-tag-ideen")
+
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
