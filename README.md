@@ -549,6 +549,31 @@ Wenn dir dieses Projekt gefällt und Zeit spart, kannst du mich unterstützen:
 
 ---
 
+## 💼 Professionelle KI-Beratung & Umsetzung
+
+> **ℹ️ Eigenwerbung** – Der Autor dieses Projekts bietet professionelle Dienstleistungen rund um KI-Automatisierung an.
+
+Wer dieses Tool nutzt, versteht bereits den Wert von KI-Automatisierung. **Stell dir vor, was das für dein gesamtes Unternehmen bedeuten könnte.**
+
+**Christian Wilms** entwickelt maßgeschneiderte KI-Systemlösungen für Unternehmen – DSGVO-konform, lokal oder hybrid, ohne Cloud-Zwang:
+
+| | |
+|---|---|
+| 🏢 **KI-Systemlösungen für Unternehmen** | Individuelle KI-Integration in bestehende Infrastruktur und Prozesse – abgestimmt auf die spezifischen Anforderungen deines Unternehmens, vollständig DSGVO-konform und On-Premise möglich |
+| 📄 **Paperless Organizer Setup & Anpassung** | Professionelle Einrichtung dieses Tools für dein Unternehmen oder Büro – mit maßgeschneiderten Klassifizierungsregeln, Speicherpfad-Profilen, Custom Fields und automatisierten Workflows |
+| 🔧 **Individuelle KI-Automatisierung** | Dokumentenverarbeitung, Prozessautomatisierung, LLM-Integration in vorhandene Systeme – entwickelt exakt für deine Abläufe, nicht von der Stange |
+
+<div align="center">
+
+**Interesse an einer Zusammenarbeit?**
+
+[![Web-Dienste](https://img.shields.io/badge/🌐_web--dienste.com-Mehr_erfahren-0ea5e9?style=for-the-badge)](https://web-dienste.com)
+[![E-Mail](https://img.shields.io/badge/✉️_info@web--dienste.com-Kontakt-0ea5e9?style=for-the-badge)](mailto:info@web-dienste.com)
+
+</div>
+
+---
+
 ## 📄 Lizenz
 
 Dieses Projekt ist unter der MIT-Lizenz lizenziert – siehe [LICENSE](LICENSE) für Details.
