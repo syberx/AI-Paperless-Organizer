@@ -28,7 +28,9 @@ import {
   Github,
   Heart,
   Coffee,
-  Search
+  Search,
+  Briefcase,
+  ExternalLink
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
@@ -559,6 +561,26 @@ export default function Layout({ children }: LayoutProps) {
             )
           })}
         </nav>
+
+        {/* KI-Beratung subtle link – hidden if user dismissed */}
+        {localStorage.getItem('ki_loesungen_hidden') !== 'true' && (
+          <div className="px-4 pb-2">
+            <Link
+              to="/ki-loesungen"
+              onClick={() => setSidebarOpen(false)}
+              className={clsx(
+                'flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-200 group',
+                location.pathname === '/ki-loesungen'
+                  ? 'bg-primary-600/20 text-primary-400 border border-primary-500/30'
+                  : 'text-surface-500 hover:text-primary-300 hover:bg-primary-500/10 border border-dashed border-surface-700/60 hover:border-primary-500/40'
+              )}
+            >
+              <Briefcase className="w-4 h-4 flex-shrink-0 group-hover:text-primary-400 transition-colors" />
+              <span className="text-sm font-medium flex-1">Individuelle KI-Lösungen</span>
+              <ExternalLink className="w-3 h-3 opacity-40 group-hover:opacity-80 transition-opacity" />
+            </Link>
+          </div>
+        )}
 
         {/* Footer */}
         <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-surface-700/50 space-y-2">

@@ -12,6 +12,7 @@ import OcrManager from './components/OcrManager'
 import CleanupManager from './components/CleanupManager'
 import DocumentClassifier from './components/DocumentClassifier'
 import RagChat from './pages/RagChat'
+import KiLoesungen from './pages/KiLoesungen'
 
 function App() {
   return (
@@ -29,6 +30,7 @@ function App() {
         <Route path="/prompts" element={<PromptEditor />} />
         <Route path="/rag-chat" element={<RagChat />} />
         <Route path="/debug" element={<DebugPanel />} />
+        <Route path="/ki-loesungen" element={<KiLoesungen />} />
       </Routes>
     </Layout>
   )
