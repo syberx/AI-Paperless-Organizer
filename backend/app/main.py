@@ -74,6 +74,18 @@ async def lifespan(app: FastAPI):
             rag_state = result.scalar_one_or_none()
             cfg_result = await db_sess.execute(sa_select(RagConfigModel).where(RagConfigModel.id == 1))
             rag_cfg = cfg_result.scalar_one_or_none()
+
+            # Auto-enable RAG for existing users who already have indexed data
+            if (
+                rag_cfg
+                and not getattr(rag_cfg, "rag_enabled", False)
+                and rag_state
+                and rag_state.indexed_documents > 0
+            ):
+                rag_cfg.rag_enabled = True
+                await db_sess.commit()
+                logging.getLogger(__name__).info("RAG: auto-enabled for existing user with indexed data")
+
             rag_active = rag_cfg and getattr(rag_cfg, "rag_enabled", False)
 
             if rag_state and rag_state.status == "indexing":
@@ -85,7 +97,7 @@ async def lifespan(app: FastAPI):
             if (
                 rag_active
                 and rag_state
-                and rag_state.status in ("idle", "error")
+                and rag_state.status in ("idle", "error", "indexing")
                 and rag_state.total_documents > 0
                 and rag_state.indexed_documents < rag_state.total_documents
             ):
