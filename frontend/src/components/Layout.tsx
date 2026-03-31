@@ -428,7 +428,7 @@ export default function Layout({ children }: LayoutProps) {
               <Link to="/rag-chat" className="block group">
                 <div className="flex items-center gap-2 text-sm">
                   <Loader2 className="w-4 h-4 text-violet-400 animate-spin flex-shrink-0" />
-                  <span className="text-violet-300 font-medium truncate">Dokumente indexieren</span>
+                  <span className="text-violet-300 font-medium truncate">Chat-Index wird aufgebaut</span>
                 </div>
                 {ragIndexStatus.total_documents > 0 && (
                   <div className="mt-1.5 ml-6">
