@@ -65,6 +65,7 @@ export interface RagConfig {
   auto_index_interval: number
   query_rewrite_enabled: boolean
   contextual_retrieval_enabled: boolean
+  rag_enabled: boolean
 }
 
 export interface IndexStatus {

@@ -74,6 +74,7 @@ async def _migrate_columns(conn):
         # RAG: LLM Query Rewriting + Contextual Retrieval
         ("rag_config", "query_rewrite_enabled", "BOOLEAN DEFAULT 1"),
         ("rag_config", "contextual_retrieval_enabled", "BOOLEAN DEFAULT 0"),
+        ("rag_config", "rag_enabled", "BOOLEAN DEFAULT 0"),
         # Classification Tag
         ("classifier_config", "classification_tag_enabled", "BOOLEAN DEFAULT 0"),
         ("classifier_config", "classification_tag_name", "TEXT DEFAULT 'KI-klassifiziert'"),

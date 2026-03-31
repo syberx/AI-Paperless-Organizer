@@ -411,11 +411,17 @@ class RAGService:
             full_response += token
             yield json.dumps({"type": "token", "content": token})
 
-        # Extract cited source indices from the response (e.g. [1], [2])
-        cited_indices = sorted(set(
-            int(m) for m in _re.findall(r'\[(\d+)\]', full_response)
-            if 1 <= int(m) <= len(sources)
-        ))
+        # Extract cited source indices — [N] notation AND "Quelle N" text references
+        cited_set: set[int] = set()
+        for m in _re.findall(r'\[(\d+)\]', full_response):
+            idx = int(m)
+            if 1 <= idx <= len(sources):
+                cited_set.add(idx)
+        for m in _re.findall(r'[Qq]uelle[n]?\s+(\d+)', full_response):
+            idx = int(m)
+            if 1 <= idx <= len(sources):
+                cited_set.add(idx)
+        cited_indices = sorted(cited_set)
         yield json.dumps({"type": "citations", "cited": cited_indices})
 
         # Save assistant message

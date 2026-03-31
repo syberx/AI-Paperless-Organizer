@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Send, Plus, Trash2, MessageSquare, Database, Loader2,
   Search, Settings2, RefreshCw, FileText, ChevronRight,
-  AlertCircle, CheckCircle2, ExternalLink, Award,
+  AlertCircle, CheckCircle2, ExternalLink, Award, Zap, ShieldAlert,
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as ragApi from '../services/ragApi'
@@ -279,6 +279,45 @@ export default function RagChat() {
     } catch (e) {
       console.error('Failed to save config:', e)
     }
+  }
+
+  // --- Activation gate (shown until user explicitly enables RAG) ---
+  if (indexStatusLoaded && config && config.rag_enabled === false) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="max-w-lg w-full space-y-5">
+          <div className="card p-8 text-center">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-700
+                            flex items-center justify-center shadow-lg shadow-primary-600/30">
+              <Search className="w-8 h-8 text-white" />
+            </div>
+            <h2 className="text-xl font-bold text-surface-100 mb-2">Dokumenten-Chat aktivieren</h2>
+            <p className="text-surface-400 text-sm mb-4 leading-relaxed">
+              Der Dokumenten-Chat durchsucht deine Paperless-Dokumente mit KI (RAG – Retrieval Augmented Generation).
+              Alle Dokumente werden einmalig lokal indexiert – das belegt CPU, RAM und Speicher.
+            </p>
+            <div className="flex items-start gap-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-left mb-6">
+              <ShieldAlert className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-300 leading-relaxed">
+                <strong>Ressourcenhinweis:</strong> Das Embedding-Modell (z.B. mxbai-embed-large) muss in Ollama geladen sein.
+                Die Erstindexierung kann je nach Dokumentenanzahl mehrere Minuten dauern.
+                Wer diese Funktion nicht braucht, sollte sie deaktiviert lassen.
+              </p>
+            </div>
+            <button
+              onClick={async () => {
+                await saveConfig({ rag_enabled: true })
+                setConfig(prev => prev ? { ...prev, rag_enabled: true } : prev)
+              }}
+              className="w-full btn btn-primary flex items-center justify-center gap-2 py-3"
+            >
+              <Zap className="w-4 h-4" />
+              Dokumenten-Chat aktivieren
+            </button>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -593,22 +632,24 @@ export default function RagChat() {
                                 rel="noopener noreferrer"
                                 title={`${src.title} — Score: ${(src.score * 100).toFixed(0)}% ${isCited ? '· Vom KI verwendet' : ''}`}
                                 className={clsx(
-                                  'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all group border',
+                                  'flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium transition-all group border',
                                   isCited
-                                    ? 'bg-primary-500/15 border-primary-500/40 text-primary-300 hover:bg-primary-500/25'
-                                    : 'bg-surface-700/50 border-surface-600/40 text-surface-300 hover:bg-surface-700 hover:text-surface-100'
+                                    ? 'bg-primary-500/25 border-primary-400/60 text-primary-200 hover:bg-primary-500/35 shadow-sm shadow-primary-500/20 ring-1 ring-primary-500/30'
+                                    : 'bg-surface-700/50 border-surface-600/40 text-surface-400 hover:bg-surface-700 hover:text-surface-200'
                                 )}
                               >
                                 <span className={clsx(
                                   'w-4 h-4 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0',
-                                  isCited ? 'bg-primary-500 text-white' : 'bg-surface-600 text-surface-400'
+                                  isCited ? 'bg-primary-500 text-white' : 'bg-surface-600 text-surface-500'
                                 )}>
                                   {isCited ? <Award className="w-2.5 h-2.5" /> : src.index}
                                 </span>
-                                <span className="truncate max-w-[180px]">{src.title}</span>
+                                <span className={clsx('truncate max-w-[180px]', isCited ? 'font-semibold' : '')}>
+                                  {src.title}
+                                </span>
                                 <span className={clsx(
-                                  'flex-shrink-0 font-semibold',
-                                  scoreColor(src.score).split(' ').find(c => c.startsWith('text-')) || 'text-surface-400'
+                                  'flex-shrink-0 font-bold',
+                                  isCited ? 'text-primary-300' : (scoreColor(src.score).split(' ').find(c => c.startsWith('text-')) || 'text-surface-500')
                                 )}>
                                   {(src.score * 100).toFixed(0)}%
                                 </span>

@@ -66,16 +66,34 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logging.getLogger(__name__).error(f"Auto-classify auto-start failed: {e}")
 
-    # Reset stale RAG indexing status from previous run
+    # Reset stale RAG indexing status + auto-resume incomplete indexing
     try:
-        from app.models.rag import RagIndexingState
+        from app.models.rag import RagIndexingState, RagConfig as RagConfigModel
         async with async_session() as db_sess:
             result = await db_sess.execute(sa_select(RagIndexingState).where(RagIndexingState.id == 1))
             rag_state = result.scalar_one_or_none()
+            cfg_result = await db_sess.execute(sa_select(RagConfigModel).where(RagConfigModel.id == 1))
+            rag_cfg = cfg_result.scalar_one_or_none()
+            rag_active = rag_cfg and getattr(rag_cfg, "rag_enabled", False)
+
             if rag_state and rag_state.status == "indexing":
                 rag_state.status = "idle"
                 await db_sess.commit()
                 logging.getLogger(__name__).info("Reset stale RAG indexing status to 'idle'")
+
+            # Auto-resume if indexing was incomplete and RAG is enabled
+            if (
+                rag_active
+                and rag_state
+                and rag_state.status in ("idle", "error")
+                and rag_state.total_documents > 0
+                and rag_state.indexed_documents < rag_state.total_documents
+            ):
+                from app.routers.rag import get_rag_service
+                asyncio.get_running_loop().create_task(get_rag_service().indexer.start_indexing(force=False))
+                logging.getLogger(__name__).info(
+                    f"RAG: auto-resuming indexing ({rag_state.indexed_documents}/{rag_state.total_documents} already done)"
+                )
     except Exception as e:
         logging.getLogger(__name__).error(f"RAG status reset failed: {e}")
 
