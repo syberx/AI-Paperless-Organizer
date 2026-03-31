@@ -150,3 +150,4 @@ debug-*.log
 CLAUDE.md
 .claude/
 .agents/
+skills-lock.json
