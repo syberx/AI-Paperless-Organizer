@@ -451,11 +451,15 @@ class RAGService:
     async def _stream_ollama(self, config: RagConfig, messages: list) -> AsyncGenerator[str, None]:
         import asyncio
         url = f"{config.ollama_base_url}/api/chat"
+        # num_ctx must be set explicitly – Ollama defaults to 2048 which is far too small
+        # for RAG contexts. Use at least 2× max_context_tokens to cover prompt overhead.
+        num_ctx = max(8192, (getattr(config, "max_context_tokens", 4000) or 4000) * 2)
         payload = {
             "model": config.chat_model,
             "messages": messages,
             "stream": True,
             "think": False,
+            "options": {"num_ctx": num_ctx},
         }
 
         acquired = await ollama_lock.acquire("rag_chat", timeout=120)
