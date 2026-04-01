@@ -6,6 +6,7 @@ services:
     container_name: paperless-organizer-backend
     ports:
       - "8081:8000"
+      - "53682:53683"  # rclone OAuth: host 53682 → container proxy 53683 → rclone 127.0.0.1:53682
     volumes:
       - ./backend/data:/app/data
     environment:

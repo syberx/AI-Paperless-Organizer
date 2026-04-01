@@ -69,6 +69,7 @@ Kennst du das? Deine **Paperless-ngx** Installation ist über die Zeit gewachsen
 | 🏆 **Modell-Benchmark** | Vergleicht lokal vs. Cloud – bis zu 4 Provider gleichzeitig |
 | 🧹 **Tag Cleanup Wizard** | 5-stufiger Assistent zur systematischen Tag-Bereinigung |
 | 🗑️ **Dokumente Aufräumen** | Findet und entfernt Junk-Dokumente (AGB, Impressum, etc.) |
+| ☁️ **Cloud Sync / Import** | Dokumente aus Google Drive, OneDrive, Dropbox, Nextcloud (WebDAV) oder lokalen Ordnern automatisch importieren |
 | 💾 **Analyse-Cache** | KI-Analysen speichern und kostenlos wieder laden |
 | 📊 **Statistiken** | Fortschritt, gesparte Zeit, letzte Aktivitäten |
 
@@ -244,6 +245,46 @@ Nicht zufrieden mit den KI-Vorschlägen? Passe die Prompts für jeden Bereich an
 - Metadaten-Bereinigung (Korrespondenten, Tags, Dokumententypen)
 - Klassifizierer (Titel, Tags, Korrespondent, Typ, Datum – je ein Prompt)
 - Systemweiter Kontext der KI
+
+---
+
+## ☁️ Cloud Sync / Import
+
+Dokumente automatisch aus Cloud-Speichern oder lokalen Ordnern in Paperless-ngx importieren – ohne manuelles Hochladen.
+
+### Unterstützte Quellen
+
+| Quelle | Verbindung | Auth nötig? |
+|--------|-----------|-------------|
+| **Google Drive** | Automatischer OAuth-Flow im Browser | Nur einmalig anmelden |
+| **OneDrive** | Automatischer OAuth-Flow im Browser | Nur einmalig anmelden |
+| **Dropbox** | Automatischer OAuth-Flow im Browser | Nur einmalig anmelden |
+| **Nextcloud / WebDAV** | URL + Benutzername/Passwort | Kein API-Key nötig |
+| **Lokaler Ordner** | Docker-Volume-Pfad | Kein Setup nötig |
+
+### Funktionen pro Quelle
+
+- **Ordner-Browser**: Ordner direkt durchsuchen und auswählen (Google Drive, OneDrive, WebDAV, lokal)
+- **Dateiname-Präfix**: z.B. `SCAN-` → Datei wird als `SCAN-rechnung.pdf` importiert
+- **Tags, Korrespondent, Dokumententyp**: Automatisch beim Import in Paperless zuweisen
+- **Nach Import**: Quelldatei behalten oder automatisch löschen
+- **Abruf-Intervall**: Pro Quelle konfigurierbar (z.B. alle 5 Minuten)
+- **Sync-Daemon**: Läuft im Hintergrund und prüft Quellen automatisch
+- **Import-Verlauf**: Alle importierten Dateien mit Status einsehen
+
+### Docker-Konfiguration
+
+Google Drive, OneDrive und Dropbox benötigen Port `53682` für den OAuth-Callback:
+
+```yaml
+# docker-compose.yml
+backend:
+  ports:
+    - "8081:8000"
+    - "53682:53683"  # rclone OAuth callback
+```
+
+Die Autorisierung erfolgt direkt im Browser – kein API-Key, kein Developer-Account, kein Terminal nötig.
 
 ---
 

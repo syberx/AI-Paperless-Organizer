@@ -12,7 +12,7 @@ logging.basicConfig(
     format="%(levelname)s %(name)s: %(message)s",
     stream=sys.stdout,
 )
-from app.routers import paperless, correspondents, tags, document_types, settings, llm, debug, statistics, ignored_items, ocr, cleanup, classifier, rag, api_keys
+from app.routers import paperless, correspondents, tags, document_types, settings, llm, debug, statistics, ignored_items, ocr, cleanup, classifier, rag, api_keys, cloud_import
 from app.routers.ocr import ocr_settings, get_ocr_service
 from app.services.ocr_service import watchdog_state
 from app.services.paperless_client import PaperlessClient
@@ -75,6 +75,12 @@ async def lifespan(app: FastAPI):
             cfg_result = await db_sess.execute(sa_select(RagConfigModel).where(RagConfigModel.id == 1))
             rag_cfg = cfg_result.scalar_one_or_none()
 
+            # Migrate away from mistral-nemo:12b — reset to documented default qwen3.5:4b
+            if rag_cfg and getattr(rag_cfg, "chat_model", "") == "mistral-nemo:12b":
+                rag_cfg.chat_model = "qwen3.5:4b"
+                await db_sess.commit()
+                logging.getLogger(__name__).info("RAG: migrated chat_model from mistral-nemo:12b to qwen3.5:4b")
+
             # Auto-enable RAG for existing users who already have indexed data
             if (
                 rag_cfg
@@ -109,12 +115,37 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logging.getLogger(__name__).error(f"RAG status reset failed: {e}")
 
+    # Auto-start cloud sync daemon if any sources are enabled
+    try:
+        from app.models.cloud_import import CloudSource
+        from app.services.cloud_import_service import _cloud_sync_state, cloud_sync_loop
+        async with async_session() as db_sess:
+            src_q = await db_sess.execute(
+                sa_select(CloudSource).where(CloudSource.enabled == True)
+            )
+            has_sources = src_q.scalars().first() is not None
+        if has_sources:
+            _cloud_sync_state["enabled"] = True
+            asyncio.get_running_loop().create_task(cloud_sync_loop())
+            logging.getLogger(__name__).info("Cloud sync daemon auto-started")
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Cloud sync auto-start failed: {e}")
+
     yield
-    # Shutdown: stop auto-classify + watchdog gracefully
+    # Shutdown: stop auto-classify + watchdog + cloud sync gracefully
     try:
         from app.routers.classifier import _auto_classify_state
         _auto_classify_state["enabled"] = False
         task = _auto_classify_state.get("task")
+        if task and not task.done():
+            task.cancel()
+    except Exception:
+        pass
+
+    try:
+        from app.services.cloud_import_service import _cloud_sync_state as _css
+        _css["enabled"] = False
+        task = _css.get("task")
         if task and not task.done():
             task.cancel()
     except Exception:
@@ -158,6 +189,7 @@ app.include_router(cleanup.router, prefix="/api/cleanup", tags=["Cleanup"])
 app.include_router(classifier.router, prefix="/api/classifier", tags=["Classifier"])
 app.include_router(rag.router, prefix="/api/rag", tags=["RAG"])
 app.include_router(api_keys.router, prefix="/api/api-keys", tags=["API Keys"])
+app.include_router(cloud_import.router, prefix="/api/cloud-import", tags=["Cloud Import"])
 
 
 @app.get("/api/health")

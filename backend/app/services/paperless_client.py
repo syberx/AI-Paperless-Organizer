@@ -557,6 +557,42 @@ class PaperlessClient:
                 return await self.update_document(document_id, {"tags": current_tags})
         return doc
 
+    async def upload_document(
+        self,
+        file_bytes: bytes,
+        filename: str,
+        correspondent_id: Optional[int] = None,
+        document_type_id: Optional[int] = None,
+        tag_ids: Optional[List[int]] = None,
+    ) -> str:
+        """Upload a document to Paperless via post_document. Returns task ID."""
+        if not self.base_url:
+            raise ValueError("Paperless-URL nicht konfiguriert")
+
+        url = f"{self.base_url}/api/documents/post_document/"
+
+        # Multipart: tags must be repeated fields, not a list in one field
+        files_payload = [("document", (filename, file_bytes, "application/octet-stream"))]
+        if tag_ids:
+            for tid in tag_ids:
+                files_payload.append(("tags", (None, str(tid))))
+
+        data: Dict = {}
+        if correspondent_id:
+            data["correspondent"] = str(correspondent_id)
+        if document_type_id:
+            data["document_type"] = str(document_type_id)
+
+        async with httpx.AsyncClient(timeout=120.0, verify=False) as client:
+            response = await client.post(
+                url,
+                headers={"Authorization": f"Token {self.api_token}"},
+                files=files_payload,
+                data=data,
+            )
+            response.raise_for_status()
+            return response.text  # returns task ID string
+
 
 async def get_paperless_client(db: AsyncSession = Depends(get_db)) -> PaperlessClient:
     """Dependency to get configured Paperless client."""

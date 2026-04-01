@@ -1012,7 +1012,7 @@ async def _auto_classify_loop():
 
     while _auto_classify_state["enabled"]:
         _auto_classify_state["last_run"] = time.strftime("%Y-%m-%dT%H:%M:%S")
-        _auto_classify_state["running"] = True
+        _auto_classify_state["running"] = False
 
         try:
             async with async_session() as db_sess:
@@ -1085,6 +1085,7 @@ async def _auto_classify_loop():
                                 continue
 
                         found_any = True
+                        _auto_classify_state["running"] = True
                         _auto_classify_state["current_doc"] = doc_id
 
                         try:
@@ -1107,6 +1108,8 @@ async def _auto_classify_loop():
                         finally:
                             if uses_ollama:
                                 ollama_release("classifier")
+                            _auto_classify_state["running"] = False
+                            _auto_classify_state["current_doc"] = None
 
                         await asyncio.sleep(2)
 

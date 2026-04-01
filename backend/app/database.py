@@ -26,7 +26,7 @@ class Base(DeclarativeBase):
 
 async def create_tables():
     """Create all database tables."""
-    from app.models import settings_model, merge_history, statistics, classifier, ocr, rag  # noqa: F401
+    from app.models import settings_model, merge_history, statistics, classifier, ocr, rag, cloud_import  # noqa: F401
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         # Lightweight migrations for new columns on existing tables
