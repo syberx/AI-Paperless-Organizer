@@ -172,6 +172,8 @@ class RAGService:
                     logger.info(f"Query expanded: +'{expansion}'")
                     break
 
+        yield json.dumps({"type": "status", "message": "Durchsuche Dokumente..."})
+
         # Retrieve a larger candidate pool, then cross-encoder rerank + cutoff
         fetch_limit = max(config.max_sources * 4, 30)
         raw_results = await self.search(search_question, limit=fetch_limit, filters=filters)
@@ -215,6 +217,8 @@ class RAGService:
                     selected.append(chunk)
                     used_len += len(chunk)
                 doc_all_chunks[r.document_id] = " [...] ".join(selected)
+
+        yield json.dumps({"type": "status", "message": "Sortiere Ergebnisse..."})
 
         # Cross-encoder reranking: re-read (query, full-document-text) pairs.
         if len(raw_results) > 1:
@@ -576,13 +580,13 @@ class RAGService:
     async def _rewrite_ollama(self, prompt: str, config: RagConfig) -> str:
         """Non-streaming Ollama call for query rewriting – fast, low token count."""
         url = f"{config.ollama_base_url}/api/generate"
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=8.0) as client:
             resp = await client.post(url, json={
                 "model": config.chat_model,
                 "prompt": prompt,
                 "stream": False,
                 "think": False,
-                "options": {"num_predict": 60, "temperature": 0.1},
+                "options": {"num_predict": 60, "temperature": 0.1, "num_ctx": 2048},
             })
             resp.raise_for_status()
             result = resp.json().get("response", "").strip()
