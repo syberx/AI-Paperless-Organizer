@@ -472,12 +472,14 @@ class RAGService:
             yield "\n\n[Ollama ist gerade belegt (Klassifizierung läuft). Bitte in 30 Sekunden erneut versuchen.]"
             return
 
+        _retry_sleeps = [8, 20, 40]  # Ollama needs time to swap models back after embedding
         try:
-            for attempt in range(3):
+            for attempt in range(len(_retry_sleeps) + 1):
                 try:
                     if attempt > 0:
-                        logger.info(f"Ollama chat retry {attempt+1}/3 for {config.chat_model}")
-                        await asyncio.sleep(3)
+                        sleep = _retry_sleeps[attempt - 1]
+                        logger.info(f"Ollama chat retry {attempt+1}/{len(_retry_sleeps)+1} for {config.chat_model}, waiting {sleep}s for model swap...")
+                        await asyncio.sleep(sleep)
 
                     async with httpx.AsyncClient(timeout=300.0) as client:
                         async with client.stream("POST", url, json=payload) as resp:
@@ -495,7 +497,7 @@ class RAGService:
                                         continue
                     return
                 except httpx.HTTPStatusError as e:
-                    if e.response.status_code == 500 and attempt < 2:
+                    if e.response.status_code == 500 and attempt < len(_retry_sleeps):
                         logger.warning(f"Ollama 500 error (attempt {attempt+1}), retrying after model swap...")
                         continue
                     logger.error(f"Ollama streaming error: {e}")
