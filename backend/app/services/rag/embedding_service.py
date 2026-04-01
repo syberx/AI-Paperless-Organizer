@@ -45,16 +45,22 @@ class EmbeddingService:
     # 512 tokens * ~1.5 chars/token for German OCR text ≈ 768 chars. Use 750 to be safe.
     _MAX_EMBED_CHARS = 750
 
+    # Per-request timeout for a single embed call. 30s is generous for CPU-only embed models.
+    # If Ollama is busy swapping models (OCR running), we retry with backoff instead of waiting.
+    _EMBED_TIMEOUT = 30.0
+    _EMBED_RETRY_SLEEPS = [5, 15, 30]  # seconds between retries when Ollama returns 500
+
     async def _ollama_embed(self, texts: List[str]) -> List[List[float]]:
         url = f"{self.ollama_base_url}/api/embed"
         all_embeddings: List[List[float]] = []
         batch_size = 50
 
-        async with httpx.AsyncClient(timeout=300.0) as client:
+        async with httpx.AsyncClient(timeout=self._EMBED_TIMEOUT) as client:
             for i in range(0, len(texts), batch_size):
                 batch = [t[:self._MAX_EMBED_CHARS] if len(t) > self._MAX_EMBED_CHARS else t
                          for t in texts[i:i + batch_size]]
-                for attempt in range(3):
+                max_attempts = len(self._EMBED_RETRY_SLEEPS) + 1
+                for attempt in range(max_attempts):
                     try:
                         resp = await client.post(url, json={
                             "model": self.model,
@@ -70,24 +76,22 @@ class EmbeddingService:
                             all_embeddings.extend(embeddings)
                             all_embeddings.extend([[0.0] * self.dim] * (len(batch) - len(embeddings)))
                         break
-                    except httpx.HTTPStatusError as e:
-                        body = ""
-                        try:
-                            body = e.response.text[:300]
-                        except Exception:
-                            pass
-                        if attempt < 2:
-                            logger.warning(f"Embedding batch {i} attempt {attempt+1} failed: {e} | response: {body}")
-                            await asyncio.sleep(2 ** attempt)
+                    except (httpx.HTTPStatusError, httpx.TimeoutException) as e:
+                        body = getattr(getattr(e, 'response', None), 'text', '')[:200] if hasattr(e, 'response') else ''
+                        if attempt < max_attempts - 1:
+                            sleep = self._EMBED_RETRY_SLEEPS[attempt]
+                            logger.warning(f"Embedding batch {i} attempt {attempt+1} failed (Ollama busy?), retry in {sleep}s: {e} {body}")
+                            await asyncio.sleep(sleep)
                         else:
-                            logger.error(f"Embedding batch {i} failed after 3 attempts: {e} | response: {body}")
+                            logger.error(f"Embedding batch {i} failed after {max_attempts} attempts: {e} {body}")
                             all_embeddings.extend([[0.0] * self.dim] * len(batch))
                     except Exception as e:
-                        if attempt < 2:
-                            logger.warning(f"Embedding batch {i} attempt {attempt+1} failed: {e}")
-                            await asyncio.sleep(2 ** attempt)
+                        if attempt < max_attempts - 1:
+                            sleep = self._EMBED_RETRY_SLEEPS[attempt]
+                            logger.warning(f"Embedding batch {i} attempt {attempt+1} failed, retry in {sleep}s: {e}")
+                            await asyncio.sleep(sleep)
                         else:
-                            logger.error(f"Embedding batch {i} failed after 3 attempts: {e}")
+                            logger.error(f"Embedding batch {i} failed after {max_attempts} attempts: {e}")
                             all_embeddings.extend([[0.0] * self.dim] * len(batch))
 
         return all_embeddings
