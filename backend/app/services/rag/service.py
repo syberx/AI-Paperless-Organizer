@@ -59,7 +59,18 @@ class RAGService:
         config = await self._get_config()
 
         embed_service = await self._get_embedding_service(config)
-        query_embeddings = await embed_service.generate([query])
+
+        # Use Ollama lock for query embedding so OCR doesn't block us indefinitely
+        if embed_service.provider == "ollama":
+            acquired = await ollama_lock.acquire("rag_embed", timeout=180)
+            try:
+                query_embeddings = await embed_service.generate([query])
+            finally:
+                if acquired:
+                    ollama_lock.release("rag_embed")
+        else:
+            query_embeddings = await embed_service.generate([query])
+
         if not query_embeddings or not query_embeddings[0]:
             return []
 
