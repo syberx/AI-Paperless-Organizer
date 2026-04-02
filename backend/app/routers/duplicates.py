@@ -9,9 +9,7 @@ from sqlalchemy import select, delete, and_
 
 from app.database import get_db
 from app.models.duplicates import DuplicateIgnore
-from app.models.settings_model import PaperlessSettings
 from app.services.duplicate_service import DuplicateService, get_scan_state, _scan_state
-from app.services.paperless_client import PaperlessClient
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -36,17 +34,10 @@ async def start_scan(body: ScanRequest, db: AsyncSession = Depends(get_db)):
     if _scan_state.get("running"):
         raise HTTPException(status_code=409, detail="Scan läuft bereits")
 
-    # Paperless-Verbindung aus DB laden
-    pl_q = await db.execute(select(PaperlessSettings).where(PaperlessSettings.id == 1))
-    pl_settings = pl_q.scalar_one_or_none()
-    if not pl_settings:
-        raise HTTPException(status_code=400, detail="Paperless-Einstellungen nicht konfiguriert")
-
-    client = PaperlessClient(base_url=pl_settings.url, api_token=pl_settings.api_token)
-    service = DuplicateService(client=client)
+    service = DuplicateService()
 
     asyncio.create_task(
-        service.run_scan(
+        service.scan_all(
             modes=body.modes,
             similarity_threshold=body.similarity_threshold,
         )
@@ -66,6 +57,17 @@ async def scan_status():
         "total": state.get("total", 0),
         "error": state.get("error"),
     }
+
+
+@router.post("/stop")
+async def stop_scan():
+    """Stoppt den laufenden Scan."""
+    state = get_scan_state()
+    if not state.get("running"):
+        return {"status": "not_running"}
+    _scan_state["cancel_requested"] = True
+    logger.info("Duplicate scan stop requested")
+    return {"status": "stopping"}
 
 
 @router.get("/results")

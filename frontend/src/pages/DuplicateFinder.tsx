@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Copy, Search, Loader2, CheckCircle2, AlertTriangle, ExternalLink,
-  EyeOff, FileText, Hash, Calculator, RefreshCw, Info,
+  EyeOff, FileText, Hash, Calculator, RefreshCw, Info, StopCircle,
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as api from '../services/api'
@@ -45,9 +45,6 @@ interface IndexStatus {
 type TabKey = 'exact' | 'similar' | 'invoices'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-const inputCls =
-  'w-full px-3 py-2 bg-surface-800 border border-surface-600 rounded-lg text-white text-sm focus:border-primary-500 focus:outline-none'
 
 function formatDate(iso: string): string {
   if (!iso) return '–'
@@ -151,8 +148,9 @@ export default function DuplicateFinder() {
   // ── Load results ─────────────────────────────────
   const loadResults = useCallback(async () => {
     try {
-      const r = await api.fetchJson<ScanResults>('/cleanup/duplicates/results')
-      setResults(r)
+      const raw = await api.fetchJson<{ groups: ScanResults }>('/cleanup/duplicates/results')
+      const r = raw.groups ?? raw
+      setResults(r as ScanResults)
       setIgnoredGroups(new Set())
       // Auto-select first tab with results
       if (r.exact.length > 0) setActiveTab('exact')
@@ -314,7 +312,7 @@ export default function DuplicateFinder() {
                 <Hash className="w-4 h-4 text-blue-400" />
                 <span className="text-surface-100 text-sm font-medium">Exakte Duplikate</span>
               </div>
-              <p className="text-surface-400 text-xs mt-1">Identische Dateien (Checksumme)</p>
+              <p className="text-surface-400 text-xs mt-1">Identische Dateien (Checksumme) · Sekunden</p>
             </div>
           </label>
 
@@ -340,7 +338,7 @@ export default function DuplicateFinder() {
                 <FileText className="w-4 h-4 text-purple-400" />
                 <span className="text-surface-100 text-sm font-medium">Ähnliche Dokumente</span>
               </div>
-              <p className="text-surface-400 text-xs mt-1">KI-Embeddings Vergleich</p>
+              <p className="text-surface-400 text-xs mt-1">KI-Embeddings Vergleich · ~1-2 Min.</p>
               {similarDisabled && (
                 <p className="text-amber-400/70 text-xs mt-1">RAG-Index benötigt</p>
               )}
@@ -366,42 +364,32 @@ export default function DuplicateFinder() {
                 <Calculator className="w-4 h-4 text-emerald-400" />
                 <span className="text-surface-100 text-sm font-medium">Doppelte Rechnungen</span>
               </div>
-              <p className="text-surface-400 text-xs mt-1">Gleiche Rechnungsnummer</p>
+              <p className="text-surface-400 text-xs mt-1">Gleiche Rechnungsnummer · <span className="text-amber-400">Sehr langsam (~3s/Dok, kann Stunden dauern)</span></p>
             </div>
           </label>
         </div>
 
         {/* Threshold-Slider */}
         {modeSimilar && !similarDisabled && (
-          <div className="space-y-2">
-            <label className="flex items-center justify-between text-sm">
-              <span className="text-surface-300">Ähnlichkeits-Schwelle</span>
-              <span className="text-primary-400 font-mono font-medium">{threshold}%</span>
-            </label>
-            <div className="flex items-center gap-4">
-              <input
-                type="range"
-                min={80}
-                max={100}
-                value={threshold}
-                onChange={(e) => setThreshold(Number(e.target.value))}
-                className="flex-1 accent-primary-500 h-2 bg-surface-700 rounded-full appearance-none cursor-pointer"
-              />
-              <input
-                type="number"
-                min={80}
-                max={100}
-                value={threshold}
-                onChange={(e) => {
-                  const v = Math.min(100, Math.max(80, Number(e.target.value)))
-                  setThreshold(v)
-                }}
-                className={clsx(inputCls, 'w-20 text-center')}
-              />
+          <div className="p-4 bg-surface-800/50 border border-surface-700/50 rounded-xl space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-surface-300 text-sm font-medium">Ähnlichkeits-Schwelle</span>
+              <span className="px-2.5 py-0.5 bg-primary-600/20 border border-primary-500/30 text-primary-400 font-mono font-medium text-sm rounded-lg">
+                {threshold}%
+              </span>
             </div>
-            <p className="text-surface-500 text-xs">
-              80% = mehr Treffer (auch entfernt ähnliche), 100% = nur fast identische Inhalte
-            </p>
+            <input
+              type="range"
+              min={80}
+              max={100}
+              value={threshold}
+              onChange={(e) => setThreshold(Number(e.target.value))}
+              className="w-full accent-primary-500 h-2 bg-surface-700 rounded-full appearance-none cursor-pointer"
+            />
+            <div className="flex justify-between text-xs text-surface-500">
+              <span>80% – mehr Treffer</span>
+              <span>100% – fast identisch</span>
+            </div>
           </div>
         )}
 
@@ -424,6 +412,20 @@ export default function DuplicateFinder() {
             )}
             {running ? 'Scan läuft...' : 'Scan starten'}
           </button>
+
+          {running && (
+            <button
+              onClick={async () => {
+                try {
+                  await api.fetchJson('/cleanup/duplicates/stop', { method: 'POST' })
+                } catch { /* ignore */ }
+              }}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-red-900/40 hover:bg-red-900/60 text-red-300 border border-red-800/40 transition-colors"
+            >
+              <StopCircle className="w-4 h-4" />
+              Abbrechen
+            </button>
+          )}
 
           {results && !running && (
             <button
@@ -448,9 +450,16 @@ export default function DuplicateFinder() {
         {running && status && (
           <div className="space-y-2">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-surface-300">{status.phase || 'Wird vorbereitet...'}</span>
+              <span className="text-surface-300">
+                {status.phase === 'exact' ? 'Prüfe Checksummen…'
+                  : status.phase === 'similar' ? 'Vergleiche Embeddings…'
+                  : status.phase === 'invoices' ? 'Extrahiere Rechnungsdaten…'
+                  : status.phase === 'done' ? 'Fertig'
+                  : status.phase === 'cancelled' ? 'Abgebrochen'
+                  : 'Wird vorbereitet…'}
+              </span>
               <span className="text-surface-400 font-mono">
-                {status.progress}/{status.total} ({progressPct}%)
+                {status.total > 0 ? `${status.progress}/${status.total} (${progressPct}%)` : '…'}
               </span>
             </div>
             <div className="w-full h-2 bg-surface-700 rounded-full overflow-hidden">

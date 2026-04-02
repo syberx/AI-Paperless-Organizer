@@ -2,7 +2,7 @@
 
 # 🤖 AI Paperless Organizer
 
-**Der intelligenteste Weg, Paperless-ngx zu organisieren – KI-Klassifizierung, Metadaten-Bereinigung & OCR in einem Tool**
+**Die All-in-One Erweiterung für Paperless-ngx – weit mehr als nur Klassifizierung**
 
 [![GitHub](https://img.shields.io/badge/GitHub-syberx%2FAI--Paperless--Organizer-blue?logo=github)](https://github.com/syberx/AI-Paperless-Organizer)
 [![Docker Hub](https://img.shields.io/badge/Docker%20Hub-webdienste%2Fai--paperless--organizer-blue?logo=docker)](https://hub.docker.com/r/webdienste/ai-paperless-organizer)
@@ -11,44 +11,33 @@
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20me-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/chriswilms)
 [![PayPal](https://img.shields.io/badge/PayPal-Donate-00457C?logo=paypal&logoColor=white)](https://www.paypal.com/paypalme/withmoney)
 
+**Klassifizieren · Bereinigen · OCR · Chat · Cloud-Import · Duplikate finden – alles in einem Tool**
+
 </div>
 
-> **⚠️ Frueher Betatest – Bitte vor der Nutzung IMMER ein vollstaendiges Paperless-ngx Backup erstellen!**
-> Dieses Projekt befindet sich in aktiver Entwicklung. Es werden Dokumente, Tags, Korrespondenten und Metadaten in Paperless-ngx veraendert. Fehler koennen vorkommen. **Keine Garantie, keine Haftung bei Datenverlust oder fehlerhaften Aenderungen.** Nutzung auf eigenes Risiko.
+> **⚠️ Betatest – Bitte vor der Nutzung IMMER ein vollständiges Paperless-ngx Backup erstellen!**
+> Aktive Entwicklung. Dokumente, Tags, Korrespondenten und Metadaten werden in Paperless-ngx verändert. **Keine Garantie, keine Haftung.** Nutzung auf eigenes Risiko.
 
 ---
 
-## 🚀 Warum AI Paperless Organizer?
+## Was kann das Tool?
 
-Es gibt andere Tools die Dokumente beim Import klassifizieren – aber sie lösen nicht das eigentliche Problem: **Was ist mit den Tausenden Dokumenten die bereits in deinem System schlummern?** Und was wenn die automatische Klassifizierung Fehler gemacht hat?
+Andere Tools wie Paperless-GPT oder Paperless-AI klassifizieren Dokumente beim Import. **AI Paperless Organizer geht deutlich weiter** – es ist eine vollständige Verwaltungs- und Optimierungssuite für Paperless-ngx:
 
-**AI Paperless Organizer** setzt den Fokus auf **Flexibilität, Tiefe und Kontrolle** – du entscheidest wie viel die KI alleine macht:
+| | Feature | Kurz |
+|---|---|---|
+| ✨ | **KI-Klassifizierer** | Titel, Tags, Korrespondent, Typ, Datum, Speicherpfad, Custom Fields – vollautomatisch oder manuell |
+| 🧠 | **Metadaten-Bereinigung** | Doppelte Korrespondenten, Tags, Dokumententypen finden & zusammenführen |
+| 🧹 | **Tag Cleanup Wizard** | 5-stufige systematische Tag-Bereinigung |
+| 📷 | **OCR (Ollama Vision)** | Bessere Texterkennung mit lokalen KI-Modellen, Watchdog, Batch-Verarbeitung |
+| 🏆 | **Modell-Benchmark** | Lokal vs. Cloud – bis zu 5 OCR-Modelle oder 4 LLM-Provider vergleichen |
+| 💬 | **Dokumenten-Chat (RAG)** | Fragen an dein Archiv stellen – mit Quellenangabe und Hybrid-Search |
+| ☁️ | **Cloud Sync / Import** | Google Drive, OneDrive, Dropbox, Nextcloud, lokale Ordner → automatisch in Paperless |
+| 🔍 | **Duplikate finden** | Exakte Duplikate, ähnliche Dokumente (KI), doppelte Rechnungen erkennen |
+| 🗑️ | **Dokumente aufräumen** | Junk-Dokumente (AGB, Impressum, etc.) finden und entfernen |
+| 📊 | **Dashboard & Statistiken** | Fortschritt, Aktivitäten, gesparte Zeit |
 
-- ⚡ **Drei Modi: Vollautomatisch, Halb-automatisch oder Manuell** – Lass die KI alles sofort anwenden, nur unsichere Ergebnisse zur Prüfung vorlegen, oder jeden Vorschlag selbst abnehmen. Du stellst ein was du willst.
-- 📂 **Speicherpfad-Profile** – Konfiguriere Personen-Profile (privat, geschäftlich, Kinder, Partner) mit Kontext-Beschreibung. Die KI ordnet Dokumente automatisch dem richtigen Ordner zu – inklusive Begründung.
-- 🔧 **Custom Fields** – Extrahiere beliebige Felder direkt aus dem Dokumentinhalt: IBAN, Rechnungsnummer, Betrag, Kundennummer, Vertragsnummer, ... vollständig konfigurierbar.
-- 🚫 **Feingranulare Ausschlüsse & Schutzmechanismen** – Geschützte Tags die nie entfernt werden, Dokumente mit bestimmten Tags/Korrespondenten komplett überspringen, einzelne Felder deaktivieren.
-- ✏️ **Prompts pro Feld anpassen** – Individuelle Anweisung für Titel, Tags, Korrespondent, Typ und Datum. Die KI macht genau was du ihr sagst.
-- 🏆 **Lokal vs. Cloud Benchmark** – Teste bis zu 4 LLM-Provider gleichzeitig auf demselben Dokument und finde heraus welches Modell für deine Dokumente am besten passt – ohne Bauchgefühl.
-- 🧹 **Metadaten-Bereinigung** – Nicht nur klassifizieren, sondern auch das bestehende Chaos aufräumen: doppelte Korrespondenten, unsinnige Tags, Dokumententyp-Duplikate zusammenführen.
-- 📷 **OCR mit Ollama Vision** – Bessere Texterkennung für Scans, mit Watchdog für automatische Verarbeitung neuer Dokumente.
-
-> 💡 **Kurz gesagt:** Vollautomatisch wenn du willst – mit voller Kontrolle wenn du sie brauchst.
-
----
-
-## 😫 Das Problem
-
-Kennst du das? Deine **Paperless-ngx** Installation ist über die Zeit gewachsen und jetzt hast du:
-
-- **Hunderte doppelte Korrespondenten**: "Telekom", "Deutsche Telekom", "Telekom GmbH", "DTAG"...
-- **Unzählige unsinnige Tags**: Tippfehler, Test-Tags, automatisch generierte Einträge von Paperless-AI oder Paperless-GPT
-- **Chaos bei Dokumententypen**: "Rechnung", "Invoice", "Rechnungen", "rechnung"...
-- **Tausende unklassifizierte Dokumente**: Fehlende Titel, Tags, Korrespondenten, falsche Speicherpfade
-
-**AI Paperless Organizer** löst das alles – in einem Tool, mit voller Kontrolle.
-
-## ✨ Die Lösung
+> 💡 **Kurz gesagt:** Alles was Paperless-ngx fehlt – vollautomatisch wenn du willst, mit voller Kontrolle wenn du sie brauchst.
 
 <div align="center">
 
@@ -59,19 +48,36 @@ Kennst du das? Deine **Paperless-ngx** Installation ist über die Zeit gewachsen
 
 ---
 
-## 🎯 Features im Überblick
+## 🚀 Warum AI Paperless Organizer?
 
-| Feature | Beschreibung |
-|---------|-------------|
-| ✨ **KI-Dokumenten-Klassifizierer** | Liest Dokumentinhalt, setzt Titel, Tags, Korrespondent, Typ, Speicherpfad, Custom Fields |
-| 🧠 **Metadaten-Bereinigung** | Findet & führt doppelte Korrespondenten, Tags, Dokumententypen zusammen |
-| 📷 **OCR mit Ollama Vision** | Bessere Texterkennung für Scans mit lokalen KI-Modellen |
-| 🏆 **Modell-Benchmark** | Vergleicht lokal vs. Cloud – bis zu 4 Provider gleichzeitig |
-| 🧹 **Tag Cleanup Wizard** | 5-stufiger Assistent zur systematischen Tag-Bereinigung |
-| 🗑️ **Dokumente Aufräumen** | Findet und entfernt Junk-Dokumente (AGB, Impressum, etc.) |
-| ☁️ **Cloud Sync / Import** | Dokumente aus Google Drive, OneDrive, Dropbox, Nextcloud (WebDAV) oder lokalen Ordnern automatisch importieren |
-| 💾 **Analyse-Cache** | KI-Analysen speichern und kostenlos wieder laden |
-| 📊 **Statistiken** | Fortschritt, gesparte Zeit, letzte Aktivitäten |
+Es gibt andere Tools die Dokumente beim Import klassifizieren – aber sie lösen nicht das eigentliche Problem: **Was ist mit den Tausenden Dokumenten die bereits in deinem System schlummern?** Und was wenn die automatische Klassifizierung Fehler gemacht hat?
+
+**AI Paperless Organizer** setzt den Fokus auf **Flexibilität, Tiefe und Kontrolle**:
+
+- ⚡ **Drei Modi: Vollautomatisch, Halb-automatisch oder Manuell** – du stellst ein was du willst
+- 📂 **Speicherpfad-Profile** – Personen-Profile mit Kontext, KI ordnet automatisch zu
+- 🔧 **Custom Fields** – IBAN, Rechnungsnummer, Betrag, Kundennummer, ... aus dem Inhalt extrahieren
+- 🚫 **Feingranulare Ausschlüsse** – Geschützte Tags, Ausschlusslisten, einzelne Felder deaktivieren
+- ✏️ **Prompts pro Feld** – Individuelle KI-Anweisungen für Titel, Tags, Korrespondent, Typ, Datum
+- 🏆 **Benchmark** – Bis zu 4 LLM-Provider gleichzeitig auf demselben Dokument testen
+- 💬 **Fragen stellen** – RAG-Chat mit Hybrid-Search durchsucht dein gesamtes Archiv
+- ☁️ **Cloud-Import** – Scans aus Google Drive, OneDrive oder Nextcloud automatisch importieren
+- 🔍 **Duplikate erkennen** – Checksummen, KI-Embeddings und Rechnungsnummern-Vergleich
+
+---
+
+## 😫 Das Problem
+
+Deine **Paperless-ngx** Installation ist gewachsen und jetzt hast du:
+
+- **Hunderte doppelte Korrespondenten**: "Telekom", "Deutsche Telekom", "Telekom GmbH", "DTAG"...
+- **Unsinnige Tags**: Tippfehler, Test-Tags, Einträge von Paperless-AI oder Paperless-GPT
+- **Chaos bei Dokumententypen**: "Rechnung", "Invoice", "Rechnungen", "rechnung"...
+- **Tausende unklassifizierte Dokumente**: Fehlende Titel, Tags, Korrespondenten, falsche Speicherpfade
+- **Keine Volltextsuche mit KI**: Du kannst nicht einfach fragen "Wann läuft mein Handyvertrag aus?"
+- **Kein Cloud-Import**: Scans vom Handy (Google Drive) manuell hochladen
+
+**AI Paperless Organizer** löst das alles – in einem Tool, mit voller Kontrolle.
 
 ---
 
@@ -81,6 +87,7 @@ Der Klassifizierer liest den **Inhalt** deiner Dokumente und befüllt automatisc
 
 <div align="center">
 
+<!-- TODO: Screenshot aktualisieren -->
 ![Dokumenten-Klassifizierer](docs/screenshots/classifier-main.png)
 *KI analysiert Dokumentinhalt und schlägt alle Metadaten vor*
 
@@ -121,6 +128,7 @@ Mit **"Anwenden & Weiter"** arbeitest du Dokumente im Fließband-Modus durch.
 
 <div align="center">
 
+<!-- TODO: Screenshot aktualisieren -->
 ![Klassifizierer Einstellungen](docs/screenshots/classifier-settings.png)
 *Feingranulare Konfiguration aller Klassifizierungs-Parameter*
 
@@ -153,6 +161,7 @@ Definiere beliebige Felder die aus Dokumenten extrahiert werden sollen:
 
 <div align="center">
 
+<!-- TODO: Screenshot aktualisieren -->
 ![Klassifizierer Verlauf](docs/screenshots/classifier-history.png)
 *Verlauf mit allen vorgenommenen Änderungen und Statistiken*
 
@@ -169,6 +178,7 @@ Weißt du nicht welches Modell für deine Dokumente am besten passt? Der integri
 
 <div align="center">
 
+<!-- TODO: Screenshot aktualisieren -->
 ![Klassifizierer Benchmark](docs/screenshots/classifier-benchmark.png)
 *Lokal vs. Cloud: Verschiedene LLM-Provider auf demselben Dokument vergleichen*
 
@@ -288,7 +298,47 @@ Die Autorisierung erfolgt direkt im Browser – kein API-Key, kein Developer-Acc
 
 ---
 
-## 🔍 OCR mit Ollama Vision
+## 💬 Dokumenten-Chat (RAG)
+
+Stelle Fragen an dein gesamtes Paperless-Archiv – die KI durchsucht alle Dokumente und antwortet mit Quellenangabe:
+
+- **Hybrid-Search**: BM25 + ChromaDB Semantic Search + Cross-Encoder Reranking
+- **Streaming-Antworten** mit Quellen-Attribution und Citation-Highlighting
+- **Query-Enrichment**: Kurze Folgefragen werden automatisch angereichert
+- **Deutsche Optimierung**: Cross-Encoder für deutsche Dokumente (mmarco-german)
+- **Fakten-Extraktion**: Geburtsdaten, Adressen, Steuernummern aus Chunks
+- **Session-Management**: Chats speichern und später fortsetzen
+- **Embedding**: Ollama (mxbai-embed-large) oder OpenAI
+
+<!-- TODO: Screenshot ergänzen -->
+
+> **Voraussetzung:** RAG muss unter Einstellungen aktiviert und der Index aufgebaut werden. Die Indexierung läuft im Hintergrund.
+
+---
+
+## 🔍 Duplikate finden
+
+Drei Erkennungsstufen unter **Aufräumen → Duplikate finden**:
+
+| Stufe | Methode | Dauer (~5000 Docs) |
+|---|---|---|
+| **Exakte Duplikate** | Checksum-Vergleich (identische Dateien) | Sekunden |
+| **Ähnliche Dokumente** | KI-Embedding-Vergleich (ChromaDB) | ~1-2 Minuten |
+| **Doppelte Rechnungen** | LLM extrahiert Rechnungsnr. + Betrag | Stunden (Background-Job) |
+
+- **Ähnlichkeits-Schwelle** konfigurierbar (80-100%)
+- **Ergebnisse als Gruppen** mit Direktlinks zu Paperless-ngx
+- **Ignore-Liste** für bestätigte Nicht-Duplikate
+- **Kein automatisches Löschen** – du prüfst und entscheidest selbst
+- **Stop-Button** für laufende Scans
+
+<!-- TODO: Screenshot ergänzen -->
+
+> **Voraussetzung:** Für "Ähnliche Dokumente" muss der RAG-Index aufgebaut sein. Exakte Duplikate funktionieren immer.
+
+---
+
+## 📷 OCR mit Ollama Vision
 
 Dokumente mit besserer OCR-Erkennung neu verarbeiten – powered by **Ollama Vision Models**:
 
@@ -512,35 +562,35 @@ docker-compose up -d --build
 ## 🏗️ Architektur
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Docker Compose                           │
-├──────────────────────────┬──────────────────────────────────────┤
-│   Frontend (React)       │         Backend (FastAPI)            │
-│   Port: 3001             │         Port: 8000                   │
-│                          │                                      │
-│   • Dashboard            │   • Paperless API Client             │
-│   • Korrespondenten      │   • LLM Provider (OpenAI, etc.)      │
-│   • Tags                 │   • Similarity Service               │
-│   • Dokumententypen      │   • Merge Service                    │
-│   • Tag Wizard           │   • OCR Service (Ollama Vision)      │
-│   • Klassifizierer       │   • Classifier Service               │
-│   • OCR Manager          │     ├─ OpenAI Tool-Calling           │
-│   • Aufräumen            │     └─ Ollama Multi-Call             │
-│   • Prompts              │   • Cleanup Service                  │
-│   • Einstellungen        │   • SQLite (Cache/History/Config)    │
-└──────────────────────────┴──────────────────────────────────────┘
-                           │               │
-                           ▼               ▼
-                 ┌─────────────┐   ┌─────────────┐
-                 │ Paperless   │   │   Ollama     │
-                 │    -ngx     │   │  (lokal)     │
-                 └─────────────┘   └─────────────┘
-                                         │
-                                         ▼
-                                ┌─────────────────┐
-                                │  Cloud LLMs     │
-                                │ (OpenAI, etc.)  │
-                                └─────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                          Docker Compose                              │
+├───────────────────────────┬──────────────────────────────────────────┤
+│   Frontend (React)        │         Backend (FastAPI)                │
+│   Port: 3001              │         Port: 8000                      │
+│                           │                                          │
+│   • Dashboard             │   • Paperless API Client                 │
+│   • KI-Klassifizierer     │   • LLM Provider (6 Anbieter)           │
+│   • Metadaten-Bereinigung │   • Classifier Service                   │
+│   • Tag Cleanup Wizard    │   • OCR Service (Ollama Vision)          │
+│   • OCR Manager           │   • RAG Service (ChromaDB + BM25)        │
+│   • Dokumenten-Chat (RAG) │   • Cloud Import Service (rclone)        │
+│   • Cloud Sync / Import   │   • Duplicate Detection Service          │
+│   • Duplikate finden      │   • Cleanup Service                      │
+│   • Aufräumen             │   • SQLite + ChromaDB                    │
+│   • Einstellungen         │   • OllamaLock (Ressourcen-Management)   │
+└───────────────────────────┴──────────────────────────────────────────┘
+             │                      │               │
+             ▼                      ▼               ▼
+   ┌──────────────────┐   ┌─────────────┐   ┌─────────────┐
+   │  Cloud-Dienste   │   │ Paperless   │   │   Ollama     │
+   │  Google Drive    │   │    -ngx     │   │  (lokal)     │
+   │  OneDrive        │   └─────────────┘   └─────────────┘
+   │  Dropbox         │                           │
+   │  Nextcloud       │                           ▼
+   └──────────────────┘                  ┌─────────────────┐
+                                         │  Cloud LLMs     │
+                                         │ (OpenAI, etc.)  │
+                                         └─────────────────┘
 ```
 
 ---
@@ -549,13 +599,14 @@ docker-compose up -d --build
 
 | Bereich | Technologie |
 |---------|-------------|
-| **Backend** | Python 3.11, FastAPI, SQLAlchemy, httpx |
+| **Backend** | Python 3.11, FastAPI, SQLAlchemy (async), httpx |
 | **Frontend** | React 18, TypeScript, Vite, TailwindCSS |
-| **Database** | SQLite (für Cache, History, Einstellungen) |
+| **Database** | SQLite + ChromaDB (RAG-Vektoren) + BM25-Index |
 | **Container** | Docker, Docker Compose |
-| **LLM (Bereinigung)** | OpenAI, Mistral, Anthropic, Azure, Ollama |
-| **LLM (Klassifizierer)** | OpenAI Tool-Calling, Mistral, Ollama Multi-Call |
+| **LLM** | OpenAI, Mistral, Anthropic, Azure, OpenRouter, Ollama |
 | **OCR** | Ollama Vision API (qwen3-vl, glm-ocr, minicpm-v, etc.) |
+| **RAG** | ChromaDB + BM25 Hybrid Search, sentence-transformers Cross-Encoder |
+| **Cloud-Import** | rclone (Google Drive, OneDrive, Dropbox), WebDAV, lokale Ordner |
 
 ---
 

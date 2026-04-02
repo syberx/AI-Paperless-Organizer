@@ -42,11 +42,16 @@ _scan_state: Dict = {
         "invoices": [], # [{"invoice_number": "...", "amount": "...", "documents": [...]}]
     },
     "error": None,
+    "cancel_requested": False,
 }
 
 
 def get_scan_state() -> Dict:
     return _scan_state
+
+
+def _is_cancelled() -> bool:
+    return _scan_state.get("cancel_requested", False)
 
 
 # ---------------------------------------------------------------------------
@@ -74,27 +79,40 @@ class DuplicateService:
         _scan_state["total"] = 0
         _scan_state["results"] = {"exact": [], "similar": [], "invoices": []}
         _scan_state["error"] = None
+        _scan_state["cancel_requested"] = False
 
         try:
-            # Build a PaperlessClient from DB settings
-            pl_client = await self._get_paperless_client()
+            # Build a PaperlessClient from DB settings (with retry)
+            pl_client = None
+            for attempt in range(3):
+                try:
+                    pl_client = await self._get_paperless_client()
+                    # Test connection
+                    await pl_client.test_connection()
+                    break
+                except Exception as e:
+                    logger.warning(f"Paperless connection attempt {attempt+1}/3 failed: {e}")
+                    if attempt < 2:
+                        await asyncio.sleep(5)
+            if pl_client is None:
+                raise ConnectionError("Paperless-ngx nicht erreichbar nach 3 Versuchen")
 
-            if "exact" in modes:
+            if "exact" in modes and not _is_cancelled():
                 _scan_state["phase"] = "exact"
                 _scan_state["progress"] = 0
                 _scan_state["results"]["exact"] = await self.scan_exact(pl_client)
 
-            if "similar" in modes:
+            if "similar" in modes and not _is_cancelled():
                 _scan_state["phase"] = "similar"
                 _scan_state["progress"] = 0
                 _scan_state["results"]["similar"] = await self.scan_similar(similarity_threshold)
 
-            if "invoices" in modes:
+            if "invoices" in modes and not _is_cancelled():
                 _scan_state["phase"] = "invoices"
                 _scan_state["progress"] = 0
                 _scan_state["results"]["invoices"] = await self.scan_invoices(pl_client)
 
-            _scan_state["phase"] = "done"
+            _scan_state["phase"] = "cancelled" if _is_cancelled() else "done"
             logger.info("Duplicate scan completed successfully")
 
         except Exception as e:
@@ -112,7 +130,27 @@ class DuplicateService:
         global _scan_state
 
         logger.info("Starting exact duplicate scan (checksum)")
-        documents = await pl_client.get_documents(page_size=100)
+
+        # Load documents with progress updates
+        documents = []
+        page = 1
+        while True:
+            result = await pl_client._request("GET", "/documents/", params={"page_size": 100, "page": page})
+            if not result:
+                break
+            if page == 1:
+                total_count = result.get("count", 0)
+                _scan_state["total"] = total_count
+                logger.info(f"Loading {total_count} documents for checksum scan...")
+            docs = result.get("results", [])
+            if not docs:
+                break
+            documents.extend(docs)
+            _scan_state["progress"] = len(documents)
+            if not result.get("next"):
+                break
+            page += 1
+
         _scan_state["total"] = len(documents)
         logger.info(f"Loaded {len(documents)} documents for checksum scan")
 
@@ -185,7 +223,7 @@ class DuplicateService:
         embeddings = all_data.get("embeddings", [])
         metadatas = all_data.get("metadatas", [])
 
-        if not ids or not embeddings:
+        if len(ids) == 0 or embeddings is None or len(embeddings) == 0:
             logger.info("No embeddings found in ChromaDB for similar scan")
             return []
 
@@ -207,53 +245,58 @@ class DuplicateService:
                     "chunk_id": ids[i],
                 }
 
-        for i, embedding in enumerate(embeddings):
-            _scan_state["progress"] = i + 1
-            doc_id_a = metadatas[i].get("document_id")
-            if doc_id_a is None:
-                continue
-            doc_id_a = int(doc_id_a)
+        # Batch query: process in chunks of 100 to avoid memory issues
+        batch_size = 100
+        total = len(embeddings)
+        for batch_start in range(0, total, batch_size):
+            batch_end = min(batch_start + batch_size, total)
+            batch_embeddings = list(embeddings[batch_start:batch_end])
+            batch_metadatas_slice = metadatas[batch_start:batch_end]
 
-            # Query for similar documents
+            _scan_state["progress"] = batch_end
+
             results = collection.query(
-                query_embeddings=[embedding],
+                query_embeddings=batch_embeddings,
                 n_results=min(6, len(ids)),
-                where={"chunk_index": 0},
             )
 
-            if not results or not results.get("ids") or not results["ids"][0]:
+            if not results or not results.get("ids"):
                 continue
 
-            result_ids = results["ids"][0]
-            distances = results["distances"][0] if results.get("distances") else []
-            result_metas = results["metadatas"][0] if results.get("metadatas") else []
-
-            for j, (rid, dist) in enumerate(zip(result_ids, distances)):
-                doc_id_b = result_metas[j].get("document_id") if j < len(result_metas) else None
-                if doc_id_b is None:
+            for i, (result_ids_row, distances_row) in enumerate(
+                zip(results["ids"], results.get("distances", []))
+            ):
+                doc_id_a = batch_metadatas_slice[i].get("document_id")
+                if doc_id_a is None:
                     continue
-                doc_id_b = int(doc_id_b)
+                doc_id_a = int(doc_id_a)
 
-                # Skip self-match
-                if doc_id_a == doc_id_b:
-                    continue
+                result_metas_row = results["metadatas"][i] if results.get("metadatas") else []
 
-                # Check distance threshold
-                if dist > distance_threshold:
-                    continue
+                for j, (rid, dist) in enumerate(zip(result_ids_row, distances_row)):
+                    doc_id_b = result_metas_row[j].get("document_id") if j < len(result_metas_row) else None
+                    if doc_id_b is None:
+                        continue
+                    doc_id_b = int(doc_id_b)
 
-                # Deduplicate pairs (A,B) == (B,A)
-                pair = (min(doc_id_a, doc_id_b), max(doc_id_a, doc_id_b))
-                if pair in seen_pairs:
-                    continue
-                seen_pairs.add(pair)
+                    if doc_id_a == doc_id_b:
+                        continue
+                    if dist > distance_threshold:
+                        continue
 
-                similarity = round(1.0 - dist, 4)
-                similar_pairs.append((doc_id_a, doc_id_b, similarity))
+                    pair = (min(doc_id_a, doc_id_b), max(doc_id_a, doc_id_b))
+                    if pair in seen_pairs:
+                        continue
+                    seen_pairs.add(pair)
 
-            # Yield control periodically
-            if i % 50 == 0:
-                await asyncio.sleep(0)
+                    similarity = round(1.0 - dist, 4)
+                    similar_pairs.append((doc_id_a, doc_id_b, similarity))
+
+            # Yield control + check cancellation between batches
+            await asyncio.sleep(0)
+            if _is_cancelled():
+                logger.info("Similar scan cancelled by user")
+                break
 
         # Group connected pairs into clusters
         clusters = self._cluster_pairs(similar_pairs)
@@ -394,6 +437,10 @@ class DuplicateService:
         extractions: Dict[int, Dict] = {}  # doc_id -> {invoice_number, amount}
 
         for i, doc in enumerate(invoice_docs):
+            if _is_cancelled():
+                logger.info("Invoice scan cancelled by user")
+                break
+
             _scan_state["progress"] = i + 1
             doc_id = doc["id"]
 
