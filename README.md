@@ -506,13 +506,13 @@ docker-compose up -d --build
 
 > 💡 **Empfehlung für lokale Klassifizierung:** **Ollama mit `qwen3:4b` oder `qwen3:8b`** liefert aktuell die besten Ergebnisse bei lokal laufenden Modellen. Qwen3 verwendet intern eine Reasoning-Chain (Thinking-Modus) bevor es antwortet – das macht einen deutlichen Qualitätsunterschied bei der Auswahl von Tags, Dokumententypen und Speicherpfaden gegenüber klassischen Modellen wie `mistral-nemo:12b`. Wer mehr RAM hat, kann auch `qwen3:14b` oder `qwen3:32b` ausprobieren – mehr Parameter + Reasoning = bessere Ergebnisse.
 
-### 3. Klassifizierer einrichten
+### 3. Loslegen
 
-1. Gehe zu **Klassifizierer** → **Einstellungen**
-2. LLM Provider und Modell wählen
-3. Felder aktivieren die klassifiziert werden sollen
-4. Optional: Speicherpfad-Profile für automatische Zuordnung anlegen
-5. Optional: Custom Fields definieren (IBAN, Rechnungsnummer, etc.)
+Die LLM-Zuweisung erfolgt zentral unter **Einstellungen** – dort wird einmalig konfiguriert welcher Provider für welche Aufgabe (Klassifizierung, OCR, RAG-Chat) genutzt wird. Danach:
+
+1. **Klassifizierer**: Felder aktivieren, optional Speicherpfad-Profile und Custom Fields anlegen
+2. **OCR**: Modell wählen, Watchdog aktivieren
+3. **RAG-Chat**: Aktivieren und Index aufbauen lassen
 
 ---
 
@@ -614,7 +614,6 @@ Beiträge sind willkommen!
 - 🐛 Bug Reports
 - 💡 Feature Requests
 - 🔌 Andere LLM Provider testen
-- 🌍 Übersetzungen
 
 ---
 
