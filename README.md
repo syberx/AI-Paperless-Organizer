@@ -13,6 +13,8 @@
 
 **Klassifizieren · Bereinigen · OCR · Chat · Cloud-Import · Duplikate finden – alles in einem Tool**
 
+![Dashboard](docs/screenshots/dashboard.png)
+
 </div>
 
 > **⚠️ Betatest – Bitte vor der Nutzung IMMER ein vollständiges Paperless-ngx Backup erstellen!**
@@ -38,13 +40,6 @@ Andere Tools wie Paperless-GPT oder Paperless-AI klassifizieren Dokumente beim I
 | 📊 | **Dashboard & Statistiken** | Fortschritt, Aktivitäten, gesparte Zeit |
 
 > 💡 **Kurz gesagt:** Alles was Paperless-ngx fehlt – vollautomatisch wenn du willst, mit voller Kontrolle wenn du sie brauchst.
-
-<div align="center">
-
-![Dashboard](docs/screenshots/dashboard1.png)
-*Dashboard mit Statistiken und Fortschritt*
-
-</div>
 
 ---
 
@@ -87,8 +82,7 @@ Der Klassifizierer liest den **Inhalt** deiner Dokumente und befüllt automatisc
 
 <div align="center">
 
-<!-- TODO: Screenshot aktualisieren -->
-![Dokumenten-Klassifizierer](docs/screenshots/classifier-main.png)
+![Dokumenten-Klassifizierer](docs/screenshots/Klassifizierer.png)
 *KI analysiert Dokumentinhalt und schlägt alle Metadaten vor*
 
 </div>
@@ -126,14 +120,6 @@ Mit **"Anwenden & Weiter"** arbeitest du Dokumente im Fließband-Modus durch.
 
 ### Konfigurierbare Einstellungen
 
-<div align="center">
-
-<!-- TODO: Screenshot aktualisieren -->
-![Klassifizierer Einstellungen](docs/screenshots/classifier-settings.png)
-*Feingranulare Konfiguration aller Klassifizierungs-Parameter*
-
-</div>
-
 - **Felder ein-/ausschalten**: Aktiviere nur was du brauchst (z.B. nur Titel + Datum)
 - **Tag-Verhalten**: Bestehende Tags erhalten oder ersetzen
 - **Korrespondenten-Kurzname**: Automatisch "Deutsche Telekom AG" → "Telekom" kürzen
@@ -159,14 +145,6 @@ Definiere beliebige Felder die aus Dokumenten extrahiert werden sollen:
 
 ### Klassifizierungs-Verlauf & Statistiken
 
-<div align="center">
-
-<!-- TODO: Screenshot aktualisieren -->
-![Klassifizierer Verlauf](docs/screenshots/classifier-history.png)
-*Verlauf mit allen vorgenommenen Änderungen und Statistiken*
-
-</div>
-
 Behalte den Überblick über alle klassifizierten Dokumente:
 - Vollständiger Verlauf mit vorher/nachher Vergleich
 - Statistiken: Dokumente/Tag, Feldabdeckung, häufigste Korrespondenten
@@ -175,14 +153,6 @@ Behalte den Überblick über alle klassifizierten Dokumente:
 ### Lokal vs. Cloud – Benchmark direkt im Tool
 
 Weißt du nicht welches Modell für deine Dokumente am besten passt? Der integrierte Benchmark beantwortet das:
-
-<div align="center">
-
-<!-- TODO: Screenshot aktualisieren -->
-![Klassifizierer Benchmark](docs/screenshots/classifier-benchmark.png)
-*Lokal vs. Cloud: Verschiedene LLM-Provider auf demselben Dokument vergleichen*
-
-</div>
 
 - **Bis zu 4 Provider gleichzeitig** auf demselben Dokument testen
 - **Lokal vs. Cloud direkt vergleichen**: z.B. `Ollama llama3.1` vs. `GPT-4o-mini` vs. `GPT-4o`
@@ -262,6 +232,16 @@ Nicht zufrieden mit den KI-Vorschlägen? Passe die Prompts für jeden Bereich an
 
 Dokumente automatisch aus Cloud-Speichern oder lokalen Ordnern in Paperless-ngx importieren – ohne manuelles Hochladen.
 
+<div align="center">
+
+![Cloud Import](docs/screenshots/Import-sync.png)
+*Cloud-Quellen verwalten – Google Drive, WebDAV, lokale Ordner*
+
+![Cloud Import Auswahl](docs/screenshots/Import-sync-auswahl.png)
+*Quelle hinzufügen mit automatischem OAuth-Flow*
+
+</div>
+
 ### Unterstützte Quellen
 
 | Quelle | Verbindung | Auth nötig? |
@@ -310,7 +290,12 @@ Stelle Fragen an dein gesamtes Paperless-Archiv – die KI durchsucht alle Dokum
 - **Session-Management**: Chats speichern und später fortsetzen
 - **Embedding**: Ollama (mxbai-embed-large) oder OpenAI
 
-<!-- TODO: Screenshot ergänzen -->
+<div align="center">
+
+![Dokumenten-Chat](docs/screenshots/dokumentenchat.png)
+*RAG-Chat mit Quellenangabe – "Wann war meine letzte IKEA Bestellung?"*
+
+</div>
 
 > **Voraussetzung:** RAG muss unter Einstellungen aktiviert und der Index aufgebaut werden. Die Indexierung läuft im Hintergrund.
 
@@ -332,7 +317,12 @@ Drei Erkennungsstufen unter **Aufräumen → Duplikate finden**:
 - **Kein automatisches Löschen** – du prüfst und entscheidest selbst
 - **Stop-Button** für laufende Scans
 
-<!-- TODO: Screenshot ergänzen -->
+<div align="center">
+
+![Duplikate finden](docs/screenshots/duplicate.png)
+*Duplikate erkennen – Checksumme, KI-Embeddings, Rechnungsnummern*
+
+</div>
 
 > **Voraussetzung:** Für "Ähnliche Dokumente" muss der RAG-Index aufgebaut sein. Exakte Duplikate funktionieren immer.
 
