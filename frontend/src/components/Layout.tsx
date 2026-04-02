@@ -69,6 +69,7 @@ const baseNavigation: NavItem[] = [
       { name: '2. Dokumententypen', href: '/document-types', icon: FileText },
       { name: '3. Tags', href: '/tags', icon: Tags },
       { name: 'Unerwünschte Dokumente', href: '/cleanup', icon: Ban },
+      { name: 'Duplikate finden', href: '/duplicates', icon: Search },
     ],
   },
   { name: 'Prompts', href: '/prompts', icon: MessageSquare, alwaysShow: true },

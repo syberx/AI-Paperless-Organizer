@@ -14,6 +14,7 @@ import DocumentClassifier from './components/DocumentClassifier'
 import RagChat from './pages/RagChat'
 import KiLoesungen from './pages/KiLoesungen'
 import CloudImport from './pages/CloudImport'
+import DuplicateFinder from './pages/DuplicateFinder'
 
 function App() {
   return (
@@ -33,6 +34,7 @@ function App() {
         <Route path="/debug" element={<DebugPanel />} />
         <Route path="/ki-loesungen" element={<KiLoesungen />} />
         <Route path="/cloud-import" element={<CloudImport />} />
+        <Route path="/duplicates" element={<DuplicateFinder />} />
       </Routes>
     </Layout>
   )
