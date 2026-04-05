@@ -702,17 +702,25 @@ async def get_document_preview(
     """Proxy document preview from Paperless. Auto-detects PDF vs image."""
     try:
         file_bytes = await client.get_document_preview_image(document_id)
-        
+
         if file_bytes[:4] == b'%PDF':
-            return Response(content=file_bytes, media_type="application/pdf")
+            media_type = "application/pdf"
         elif file_bytes[:4] == b'\x89PNG':
-            return Response(content=file_bytes, media_type="image/png")
+            media_type = "image/png"
         elif file_bytes[:2] == b'\xff\xd8':
-            return Response(content=file_bytes, media_type="image/jpeg")
+            media_type = "image/jpeg"
         elif file_bytes[:4] == b'RIFF':
-            return Response(content=file_bytes, media_type="image/webp")
+            media_type = "image/webp"
         else:
-            return Response(content=file_bytes, media_type="application/octet-stream")
+            media_type = "application/pdf"
+        return Response(
+            content=file_bytes,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": "inline",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
     except Exception as e:
         logger.error(f"Error getting preview for {document_id}: {e}")
         raise HTTPException(status_code=404, detail="Preview not found")

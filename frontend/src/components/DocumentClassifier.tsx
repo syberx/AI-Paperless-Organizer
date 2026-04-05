@@ -1153,12 +1153,25 @@ export default function DocumentClassifier() {
                   <FileText className="w-4 h-4" /> Dokument-Vorschau
                 </h3>
                 <div className="rounded-lg overflow-hidden bg-surface-900 border border-surface-700/50 flex-1 min-h-[600px]">
-                  <iframe
-                    src={api.getClassifierDocumentPreviewUrl(parseInt(documentId))}
+                  <object
+                    data={`${api.getClassifierDocumentPreviewUrl(parseInt(documentId))}#toolbar=0&navpanes=0&view=FitH`}
+                    type="application/pdf"
                     title={`Vorschau Dokument ${documentId}`}
                     className="w-full h-full min-h-[600px] border-0"
-                    style={{ background: '#1a1a2e' }}
-                  />
+                    style={{ background: '#fff' }}
+                  >
+                    <div className="flex flex-col items-center justify-center h-full gap-3 p-8">
+                      <p className="text-surface-400 text-sm">PDF-Vorschau nicht verfügbar.</p>
+                      <a
+                        href={api.getClassifierDocumentPreviewUrl(parseInt(documentId))}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-lg text-sm transition-colors"
+                      >
+                        PDF in neuem Tab öffnen
+                      </a>
+                    </div>
+                  </object>
                 </div>
               </div>
             </div>
@@ -2663,6 +2676,36 @@ export default function DocumentClassifier() {
                             style={{ width: `${pct}%` }}
                           />
                         </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                        <button
+                          onClick={async () => {
+                            try {
+                              await api.fetchJson('/classifier/tag-ideas/bulk-approve', {
+                                method: 'POST',
+                                body: JSON.stringify({ tag_name: tag.name }),
+                              })
+                              loadTagIdeas()
+                            } catch { /* ignore */ }
+                          }}
+                          className="px-2 py-1 rounded text-[11px] font-medium bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/30 transition-colors whitespace-nowrap"
+                        >
+                          Erstellen &amp; Zuweisen
+                        </button>
+                        <button
+                          onClick={async () => {
+                            try {
+                              await api.fetchJson('/classifier/tag-ideas/bulk-dismiss', {
+                                method: 'POST',
+                                body: JSON.stringify({ tag_name: tag.name }),
+                              })
+                              loadTagIdeas()
+                            } catch { /* ignore */ }
+                          }}
+                          className="px-2 py-1 rounded text-[11px] font-medium bg-surface-700 text-surface-400 hover:bg-surface-600 hover:text-surface-300 transition-colors"
+                        >
+                          Verwerfen
+                        </button>
                       </div>
                     </div>
                   )

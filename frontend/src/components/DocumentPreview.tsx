@@ -1,15 +1,16 @@
 import { useState } from 'react'
-import { ZoomIn, ZoomOut, RotateCcw, Eye } from 'lucide-react'
+import { ZoomIn, ZoomOut, RotateCcw, Eye, ExternalLink } from 'lucide-react'
 
 interface DocumentPreviewProps {
     documentId: number
     height?: string
+    previewUrl?: string
 }
 
 const ZOOM_STEPS = [50, 75, 100, 125, 150, 200, 250, 300]
 const DEFAULT_ZOOM_INDEX = 2
 
-export default function DocumentPreview({ documentId, height = '500px' }: DocumentPreviewProps) {
+export default function DocumentPreview({ documentId, height = '500px', previewUrl }: DocumentPreviewProps) {
     const [zoomIndex, setZoomIndex] = useState(DEFAULT_ZOOM_INDEX)
     const zoom = ZOOM_STEPS[zoomIndex]
     const scale = zoom / 100
@@ -17,6 +18,8 @@ export default function DocumentPreview({ documentId, height = '500px' }: Docume
     const zoomIn = () => setZoomIndex(i => Math.min(i + 1, ZOOM_STEPS.length - 1))
     const zoomOut = () => setZoomIndex(i => Math.max(i - 1, 0))
     const zoomReset = () => setZoomIndex(DEFAULT_ZOOM_INDEX)
+
+    const src = previewUrl || `/api/ocr/preview/${documentId}`
 
     return (
         <div>
@@ -56,6 +59,15 @@ export default function DocumentPreview({ documentId, height = '500px' }: Docume
                             <RotateCcw className="w-3.5 h-3.5" />
                         </button>
                     )}
+                    <a
+                        href={src}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-1 rounded hover:bg-surface-700 text-surface-500 hover:text-white transition-colors ml-1"
+                        title="In neuem Tab öffnen"
+                    >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
                 </div>
             </h4>
             <div
@@ -69,8 +81,9 @@ export default function DocumentPreview({ documentId, height = '500px' }: Docume
                         transformOrigin: '0 0',
                     }}
                 >
-                    <iframe
-                        src={`/api/ocr/preview/${documentId}#toolbar=0&navpanes=0`}
+                    <object
+                        data={`${src}#toolbar=0&navpanes=0&view=FitH`}
+                        type="application/pdf"
                         title="PDF Vorschau"
                         className="border-0 bg-white"
                         style={{
@@ -79,7 +92,23 @@ export default function DocumentPreview({ documentId, height = '500px' }: Docume
                             transform: `scale(${scale})`,
                             transformOrigin: '0 0',
                         }}
-                    />
+                    >
+                        {/* Fallback wenn Browser kein PDF im object rendert */}
+                        <div className="flex flex-col items-center justify-center h-full gap-4 p-8 bg-surface-800">
+                            <p className="text-surface-400 text-sm text-center">
+                                PDF-Vorschau wird von deinem Browser nicht unterstützt.
+                            </p>
+                            <a
+                                href={src}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-lg text-sm transition-colors"
+                            >
+                                <ExternalLink className="w-4 h-4" />
+                                PDF in neuem Tab öffnen
+                            </a>
+                        </div>
+                    </object>
                 </div>
             </div>
         </div>

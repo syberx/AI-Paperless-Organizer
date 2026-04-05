@@ -847,7 +847,25 @@ async def get_document_preview(
     from fastapi.responses import Response
     try:
         pdf_bytes = await client.get_document_preview_image(document_id)
-        return Response(content=pdf_bytes, media_type="application/pdf")
+        # Detect content type
+        if pdf_bytes[:4] == b'%PDF':
+            media_type = "application/pdf"
+        elif pdf_bytes[:4] == b'\x89PNG':
+            media_type = "image/png"
+        elif pdf_bytes[:2] == b'\xff\xd8':
+            media_type = "image/jpeg"
+        elif pdf_bytes[:4] == b'RIFF':
+            media_type = "image/webp"
+        else:
+            media_type = "application/pdf"
+        return Response(
+            content=pdf_bytes,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": "inline",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Preview not available: {str(e)}")
 
@@ -1487,3 +1505,88 @@ async def approve_all_tag_ideas(
 
     logger.info(f"All tag ideas approved for doc {entry.document_id}: {approved}")
     return {"status": "approved_all", "approved": approved}
+
+
+@router.post("/tag-ideas/bulk-approve")
+async def bulk_approve_tag_idea(
+    req: TagIdeaApproveRequest,
+    db: AsyncSession = Depends(get_db),
+    client: PaperlessClient = Depends(get_paperless_client),
+):
+    """Approve a specific tag across ALL documents that suggest it."""
+    import json as _json
+
+    tag_name = req.tag_name
+    q = await db.execute(select(ClassificationHistory).where(ClassificationHistory.tag_ideas != "[]"))
+    entries = q.scalars().all()
+
+    affected = 0
+    tag_obj = await client.get_or_create_tag(tag_name)
+    if not tag_obj:
+        raise HTTPException(status_code=500, detail=f"Tag '{tag_name}' konnte nicht erstellt werden")
+
+    for entry in entries:
+        ideas = entry.tag_ideas
+        if isinstance(ideas, str):
+            try:
+                ideas = _json.loads(ideas)
+            except Exception:
+                continue
+        if tag_name not in ideas:
+            continue
+
+        # Add tag to document
+        try:
+            doc = await client.get_document(entry.document_id)
+            if doc:
+                existing_tags = doc.get("tags", [])
+                if tag_obj["id"] not in existing_tags:
+                    existing_tags.append(tag_obj["id"])
+                    await client.update_document(entry.document_id, {"tags": existing_tags})
+        except Exception as e:
+            logger.warning(f"Failed to add tag to doc {entry.document_id}: {e}")
+
+        # Remove from ideas
+        ideas = [t for t in ideas if t != tag_name]
+        entry.tag_ideas = ideas
+        affected += 1
+
+    await db.commit()
+    from app.services.cache import get_cache
+    await get_cache().clear("paperless:")
+
+    logger.info(f"Bulk approved tag '{tag_name}' for {affected} documents")
+    return {"status": "bulk_approved", "tag_name": tag_name, "documents_affected": affected}
+
+
+@router.post("/tag-ideas/bulk-dismiss")
+async def bulk_dismiss_tag_idea(
+    req: TagIdeaApproveRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Dismiss a specific tag across ALL documents that suggest it."""
+    import json as _json
+
+    tag_name = req.tag_name
+    q = await db.execute(select(ClassificationHistory).where(ClassificationHistory.tag_ideas != "[]"))
+    entries = q.scalars().all()
+
+    affected = 0
+    for entry in entries:
+        ideas = entry.tag_ideas
+        if isinstance(ideas, str):
+            try:
+                ideas = _json.loads(ideas)
+            except Exception:
+                continue
+        if tag_name not in ideas:
+            continue
+
+        ideas = [t for t in ideas if t != tag_name]
+        entry.tag_ideas = ideas
+        affected += 1
+
+    await db.commit()
+
+    logger.info(f"Bulk dismissed tag '{tag_name}' from {affected} documents")
+    return {"status": "bulk_dismissed", "tag_name": tag_name, "documents_affected": affected}
