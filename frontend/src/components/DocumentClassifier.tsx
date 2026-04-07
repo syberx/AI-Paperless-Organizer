@@ -33,6 +33,7 @@ export default function DocumentClassifier() {
   const [editCreatedDate, setEditCreatedDate] = useState<string>('')
   const [editStoragePathId, setEditStoragePathId] = useState<number | null>(null)
   const [editCustomFields, setEditCustomFields] = useState<Record<string, string | null>>({})
+  const [disabledCustomFields, setDisabledCustomFields] = useState<Set<string>>(new Set())
   const [editExistingTags, setEditExistingTags] = useState<string[]>([])
   const [tagSearch, setTagSearch] = useState<string>('')
   const [corrSearch, setCorrSearch] = useState<string>('')
@@ -132,6 +133,7 @@ export default function DocumentClassifier() {
     setEditCustomFields(
       Object.fromEntries(Object.entries(res.custom_fields).map(([k, v]) => [k, v !== null ? String(v) : null]))
     )
+    setDisabledCustomFields(new Set())
     setTagSearch('')
     setCorrSearch('')
   }
@@ -195,7 +197,7 @@ export default function DocumentClassifier() {
         existing_storage_path_id: result.existing_storage_path_id,
         existing_storage_path_name: result.existing_storage_path_name,
         created_date: editCreatedDate || result.created_date,
-        custom_fields: editCustomFields,
+        custom_fields: Object.fromEntries(Object.entries(editCustomFields).filter(([k]) => !disabledCustomFields.has(k))),
       })
       setApplied(true)
       // Refresh Paperless lists so new tags/correspondents appear immediately
@@ -228,7 +230,7 @@ export default function DocumentClassifier() {
         existing_storage_path_id: result.existing_storage_path_id,
         existing_storage_path_name: result.existing_storage_path_name,
         created_date: editCreatedDate || result.created_date,
-        custom_fields: editCustomFields,
+        custom_fields: Object.fromEntries(Object.entries(editCustomFields).filter(([k]) => !disabledCustomFields.has(k))),
       })
       setApplied(true)
 
@@ -1070,20 +1072,39 @@ export default function DocumentClassifier() {
                       <div>
                         <label className="text-xs text-surface-500 flex items-center gap-1 mb-2">
                           <Hash className="w-3 h-3" /> Custom Fields
+                          <span className="text-surface-600 ml-1">— Klick auf Namen zum Deaktivieren</span>
                         </label>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                          {Object.entries(editCustomFields).map(([key, value]) => (
-                            <div key={key}>
-                              <p className="text-xs text-surface-500 mb-0.5">{key}</p>
-                              <input
-                                type="text"
-                                value={value ?? ''}
-                                onChange={e => setEditCustomFields(prev => ({ ...prev, [key]: e.target.value || null }))}
-                                className="input w-full text-sm font-mono"
-                                placeholder="nicht gefunden"
-                              />
-                            </div>
-                          ))}
+                          {Object.entries(editCustomFields).map(([key, value]) => {
+                            const isDisabled = disabledCustomFields.has(key)
+                            return (
+                              <div key={key} className={clsx(isDisabled && 'opacity-40')}>
+                                <button
+                                  type="button"
+                                  onClick={() => setDisabledCustomFields(prev => {
+                                    const next = new Set(prev)
+                                    if (next.has(key)) next.delete(key); else next.add(key)
+                                    return next
+                                  })}
+                                  className={clsx(
+                                    'text-xs mb-0.5 flex items-center gap-1 transition-colors',
+                                    isDisabled ? 'text-red-400 line-through' : 'text-surface-500 hover:text-surface-300'
+                                  )}
+                                >
+                                  {isDisabled ? <XCircle className="w-3 h-3" /> : <Check className="w-3 h-3 opacity-50" />}
+                                  {key}
+                                </button>
+                                <input
+                                  type="text"
+                                  value={value ?? ''}
+                                  onChange={e => setEditCustomFields(prev => ({ ...prev, [key]: e.target.value || null }))}
+                                  disabled={isDisabled}
+                                  className={clsx('input w-full text-sm font-mono', isDisabled && 'bg-surface-900 text-surface-600')}
+                                  placeholder="nicht gefunden"
+                                />
+                              </div>
+                            )
+                          })}
                         </div>
                       </div>
                     )}
@@ -1698,8 +1719,11 @@ export default function DocumentClassifier() {
 
                   {/* Tag exclusion list */}
                   <div>
-                    <p className="text-xs text-surface-500 mb-2">
-                      Tags fuer KI-Vorschlaege deaktivieren:
+                    <p className="text-xs text-surface-500 mb-1">
+                      Tags ausschliessen:
+                    </p>
+                    <p className="text-[11px] text-surface-600 mb-2">
+                      Deaktivierte Tags werden nicht vorgeschlagen. Dokumente mit diesen Tags werden bei der Auto-Klassifizierung komplett übersprungen.
                     </p>
                     <div className="max-h-48 overflow-y-auto space-y-1">
                       {paperlessTags.map(tag => {
@@ -2791,6 +2815,8 @@ export default function DocumentClassifier() {
                           Alle Tags erstellen &amp; zuweisen
                         </button>
                       )}
+                      {/* Bestehenden Tag zuweisen */}
+                      <TagIdeaAssignExisting entryId={entry.id} paperlessTags={paperlessTags} onAssigned={loadTagIdeas} />
                     </div>
                   </details>
                 ))}
@@ -3331,6 +3357,78 @@ function StatCard({ label, value, sub, color }: {
       <p className="text-xs text-surface-400 mb-1">{label}</p>
       <p className={clsx('text-2xl font-bold font-mono', valueColors[color])}>{value}</p>
       <p className="text-xs text-surface-500 mt-0.5">{sub}</p>
+    </div>
+  )
+}
+
+// ── Tag-Idea: Bestehenden Tag zuweisen ──────────────────────────────────────
+
+function TagIdeaAssignExisting({
+  entryId, paperlessTags, onAssigned,
+}: {
+  entryId: number
+  paperlessTags: { id: number; name: string }[]
+  onAssigned: () => void
+}) {
+  const [search, setSearch] = useState('')
+  const [open, setOpen] = useState(false)
+  const [assigning, setAssigning] = useState(false)
+
+  const filtered = search.length > 0
+    ? paperlessTags.filter(t => t.name.toLowerCase().includes(search.toLowerCase())).slice(0, 8)
+    : []
+
+  const assign = async (tagName: string) => {
+    setAssigning(true)
+    try {
+      await api.fetchJson(`/classifier/tag-ideas/${entryId}/assign-existing`, {
+        method: 'POST',
+        body: JSON.stringify({ tag_name: tagName }),
+      })
+      setSearch('')
+      setOpen(false)
+      onAssigned()
+    } catch { /* ignore */ }
+    finally { setAssigning(false) }
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="w-full py-1.5 rounded text-xs font-medium bg-surface-700/50 text-surface-400 hover:bg-surface-700 hover:text-surface-300 border border-surface-700/50 transition-colors flex items-center justify-center gap-1.5"
+      >
+        <Tags className="w-3 h-3" />
+        Bestehenden Tag zuweisen
+      </button>
+    )
+  }
+
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+        placeholder="Tag suchen..."
+        autoFocus
+        onBlur={() => setTimeout(() => setOpen(false), 200)}
+        className="w-full px-3 py-1.5 bg-surface-900 border border-surface-600 rounded text-sm text-white focus:border-primary-500 focus:outline-none"
+      />
+      {filtered.length > 0 && (
+        <div className="absolute z-10 left-0 right-0 mt-1 bg-surface-800 border border-surface-600 rounded-lg shadow-xl max-h-40 overflow-y-auto">
+          {filtered.map(t => (
+            <button
+              key={t.id}
+              onMouseDown={() => assign(t.name)}
+              disabled={assigning}
+              className="w-full text-left px-3 py-1.5 text-sm text-surface-200 hover:bg-surface-700 transition-colors"
+            >
+              {t.name}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

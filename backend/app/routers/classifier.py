@@ -1086,6 +1086,14 @@ async def _auto_classify_loop():
                         if doc_id in classified_ids:
                             continue
 
+                        # Skip documents with excluded tags
+                        excluded_tags = getattr(config, "excluded_tag_ids", None) or []
+                        if excluded_tags:
+                            doc_tags = doc.get("tags", [])
+                            if any(t in excluded_tags for t in doc_tags):
+                                classified_ids.add(doc_id)  # don't retry
+                                continue
+
                         # Per-document Ollama lock: acquire before, release after
                         if uses_ollama:
                             if ollama_is_locked():
@@ -1517,7 +1525,13 @@ async def bulk_approve_tag_idea(
     import json as _json
 
     tag_name = req.tag_name
-    q = await db.execute(select(ClassificationHistory).where(ClassificationHistory.tag_ideas != "[]"))
+    from sqlalchemy import func as sa_func
+    q = await db.execute(
+        select(ClassificationHistory).where(
+            ClassificationHistory.tag_ideas.isnot(None),
+            sa_func.length(ClassificationHistory.tag_ideas) > 2,
+        )
+    )
     entries = q.scalars().all()
 
     affected = 0
@@ -1590,3 +1604,39 @@ async def bulk_dismiss_tag_idea(
 
     logger.info(f"Bulk dismissed tag '{tag_name}' from {affected} documents")
     return {"status": "bulk_dismissed", "tag_name": tag_name, "documents_affected": affected}
+
+
+@router.post("/tag-ideas/{entry_id}/assign-existing")
+async def assign_existing_tag(
+    entry_id: int,
+    req: TagIdeaApproveRequest,
+    db: AsyncSession = Depends(get_db),
+    client: PaperlessClient = Depends(get_paperless_client),
+):
+    """Assign an existing Paperless tag to a document from the tag-ideas view."""
+    q = await db.execute(
+        select(ClassificationHistory).where(ClassificationHistory.id == entry_id)
+    )
+    entry = q.scalars().first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+
+    tag_name = req.tag_name
+    tag = await client.get_or_create_tag(tag_name)
+    if not tag:
+        raise HTTPException(status_code=500, detail=f"Tag '{tag_name}' nicht gefunden")
+
+    doc = await client.get_document(entry.document_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Dokument nicht gefunden")
+
+    existing_tags = doc.get("tags", [])
+    if tag["id"] not in existing_tags:
+        existing_tags.append(tag["id"])
+        await client.update_document(entry.document_id, {"tags": existing_tags})
+
+    from app.services.cache import get_cache
+    await get_cache().clear("paperless:")
+
+    logger.info(f"Assigned existing tag '{tag_name}' to doc {entry.document_id}")
+    return {"status": "assigned", "tag_name": tag_name, "document_id": entry.document_id}
