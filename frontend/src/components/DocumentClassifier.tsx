@@ -1719,11 +1719,8 @@ export default function DocumentClassifier() {
 
                   {/* Tag exclusion list */}
                   <div>
-                    <p className="text-xs text-surface-500 mb-1">
-                      Tags ausschliessen:
-                    </p>
-                    <p className="text-[11px] text-surface-600 mb-2">
-                      Deaktivierte Tags werden nicht vorgeschlagen. Dokumente mit diesen Tags werden bei der Auto-Klassifizierung komplett übersprungen.
+                    <p className="text-xs text-surface-500 mb-2">
+                      Tags fuer KI-Vorschlaege deaktivieren:
                     </p>
                     <div className="max-h-48 overflow-y-auto space-y-1">
                       {paperlessTags.map(tag => {
@@ -2561,28 +2558,81 @@ export default function DocumentClassifier() {
 
             {/* Settings inline */}
             {config && (
-              <div className="flex items-center gap-4 mt-3 pt-3 border-t border-surface-700/40">
-                <label className="flex items-center gap-2 text-sm text-surface-300">
-                  Intervall:
-                  <input
-                    type="number" min={1} max={60}
-                    value={config.auto_classify_interval}
-                    onChange={e => setConfig({ ...config, auto_classify_interval: parseInt(e.target.value) || 5 })}
-                    className="input w-16 text-sm text-center"
-                  /> Min
-                </label>
-                <label className="flex items-center gap-2 text-sm text-surface-300">
-                  Modus:
-                  <select
-                    value={config.auto_classify_mode}
-                    onChange={e => setConfig({ ...config, auto_classify_mode: e.target.value })}
-                    className="input text-sm"
-                  >
-                    <option value="review">Immer prüfen</option>
-                    <option value="auto_apply">Auto-Anwenden (nur unsichere prüfen)</option>
-                  </select>
-                </label>
-              </div>
+              <>
+                <div className="flex items-center gap-4 mt-3 pt-3 border-t border-surface-700/40">
+                  <label className="flex items-center gap-2 text-sm text-surface-300">
+                    Intervall:
+                    <input
+                      type="number" min={1} max={60}
+                      value={config.auto_classify_interval}
+                      onChange={e => setConfig({ ...config, auto_classify_interval: parseInt(e.target.value) || 5 })}
+                      className="input w-16 text-sm text-center"
+                    /> Min
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-surface-300">
+                    Modus:
+                    <select
+                      value={config.auto_classify_mode}
+                      onChange={e => setConfig({ ...config, auto_classify_mode: e.target.value })}
+                      className="input text-sm"
+                    >
+                      <option value="review">Immer prüfen</option>
+                      <option value="auto_apply">Auto-Anwenden (nur unsichere prüfen)</option>
+                    </select>
+                  </label>
+                </div>
+
+                {/* Auto-Classify Skip Tags */}
+                <div className="mt-3 pt-3 border-t border-surface-700/40">
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <p className="text-sm font-medium text-surface-200">Dokumente mit diesen Tags überspringen</p>
+                      <p className="text-xs text-surface-500 mt-0.5">
+                        Dokumente die einen dieser Tags haben, werden von der Auto-Klassifizierung komplett ignoriert (z.B. wenn sie von einem n8n-Workflow bereits klassifiziert wurden).
+                      </p>
+                    </div>
+                    {(config.auto_classify_skip_tag_ids || []).length > 0 && (
+                      <span className="text-xs px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                        {config.auto_classify_skip_tag_ids.length} aktiv
+                      </span>
+                    )}
+                  </div>
+                  <div className="max-h-40 overflow-y-auto space-y-1 bg-surface-900/30 rounded-lg p-2 border border-surface-700/30">
+                    {paperlessTags.length === 0 ? (
+                      <p className="text-xs text-surface-500 text-center py-2">Keine Tags gefunden</p>
+                    ) : (
+                      paperlessTags.map(tag => {
+                        const skip = (config.auto_classify_skip_tag_ids || []).includes(tag.id)
+                        return (
+                          <label
+                            key={tag.id}
+                            className={clsx(
+                              'flex items-center gap-2 p-1.5 rounded text-sm cursor-pointer transition-colors',
+                              skip ? 'bg-amber-500/10' : 'hover:bg-surface-700/30'
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={skip}
+                              onChange={() => {
+                                const current = config.auto_classify_skip_tag_ids || []
+                                const next = skip
+                                  ? current.filter(id => id !== tag.id)
+                                  : [...current, tag.id]
+                                setConfig({ ...config, auto_classify_skip_tag_ids: next })
+                              }}
+                              className="w-4 h-4 rounded accent-amber-500"
+                            />
+                            <span className={skip ? 'text-amber-300 font-medium' : 'text-surface-300'}>
+                              {tag.name}
+                            </span>
+                          </label>
+                        )
+                      })
+                    )}
+                  </div>
+                </div>
+              </>
             )}
           </div>
 

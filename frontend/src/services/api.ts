@@ -871,6 +871,7 @@ export interface ClassifierConfig {
   auto_classify_enabled: boolean
   auto_classify_interval: number
   auto_classify_mode: string
+  auto_classify_skip_tag_ids: number[]
   classification_tag_enabled: boolean
   classification_tag_name: string
   review_tag_enabled: boolean

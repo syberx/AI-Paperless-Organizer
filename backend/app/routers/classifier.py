@@ -58,6 +58,7 @@ class ClassifierConfigUpdate(BaseModel):
     auto_classify_enabled: Optional[bool] = None
     auto_classify_interval: Optional[int] = None
     auto_classify_mode: Optional[str] = None
+    auto_classify_skip_tag_ids: Optional[List[int]] = None
     classification_tag_enabled: Optional[bool] = None
     classification_tag_name: Optional[str] = None
     review_tag_enabled: Optional[bool] = None
@@ -1086,11 +1087,11 @@ async def _auto_classify_loop():
                         if doc_id in classified_ids:
                             continue
 
-                        # Skip documents with excluded tags
-                        excluded_tags = getattr(config, "excluded_tag_ids", None) or []
-                        if excluded_tags:
+                        # Skip documents with tags in auto_classify_skip_tag_ids
+                        skip_tags = getattr(config, "auto_classify_skip_tag_ids", None) or []
+                        if skip_tags:
                             doc_tags = doc.get("tags", [])
-                            if any(t in excluded_tags for t in doc_tags):
+                            if any(t in skip_tags for t in doc_tags):
                                 classified_ids.add(doc_id)  # don't retry
                                 continue
 
