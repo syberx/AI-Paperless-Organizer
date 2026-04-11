@@ -2149,7 +2149,7 @@ export default function DocumentClassifier() {
                                   onChange={(e) => updateStorageProfile(profile.paperless_path_id, 'context_prompt', e.target.value)}
                                   className="input mt-0.5 text-sm"
                                   rows={3}
-                                  placeholder="Erklaere der KI, welche Dokumente hierhin gehoeren...&#10;z.B.: Dokumente fuer Tanja Wilms privat. NICHT geschaeftlich/Reittherapie."
+                                  placeholder="Erklaere der KI, welche Dokumente hierhin gehoeren...&#10;z.B.: Private Dokumente von [Name]. Rechnungen, Versicherungen, persoenliche Korrespondenz. NICHT geschaeftlich."
                                 />
                                 <p className="text-xs text-surface-600 mt-1">Ohne Prompt nutzt die KI nur den Pfadnamen zur Zuordnung.</p>
                               </div>

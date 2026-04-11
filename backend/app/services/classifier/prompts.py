@@ -209,7 +209,7 @@ Dokument-Zusammenfassung: {summary}
 Antworte NUR mit dem Namen des Dokumenttyps als einfacher String. Wenn keiner passt, antworte mit "null"."""
 
 
-SYSTEM_PROMPT_OLLAMA_STORAGE_PATH = """Ordne dieses Dokument dem richtigen Speicherpfad (= Person/Ordner) zu.
+SYSTEM_PROMPT_OLLAMA_STORAGE_PATH = """Ordne dieses Dokument dem BESTEN verfuegbaren Speicherpfad zu.
 
 ERKANNTE DOKUMENT-INFOS:
 - Titel: {title}
@@ -225,13 +225,14 @@ VERFUEGBARE SPEICHERPFADE:
 {path_profiles}
 
 ENTSCHEIDUNGS-REGELN:
-- Lies die Kontext-Beschreibungen der Profile sorgfaeltig
-- Achte auf Privat vs. Geschaeftlich (z.B. Reittherapie = geschaeftlich Tanja)
-- Korrespondent, Tags und Dokumentinhalt helfen bei der Zuordnung
-- Wenn kein Pfad eindeutig passt: null setzen
+- Lies die Kontext-Beschreibungen der Profile sorgfaeltig — sie definieren wem/welchem Bereich ein Pfad zugeordnet ist
+- Vergleiche Korrespondent, Tags, Titel und Dokumentinhalt mit den Profil-Kontexten
+- Waehle IMMER den best-passenden Pfad, auch wenn die Zuordnung nicht 100% eindeutig ist
+- null NUR dann setzen, wenn absolut KEINE sinnvolle Zuordnung moeglich ist (z.B. komplett unbekannter Kontext)
+- Bei mehreren passenden Pfaden: Waehle den spezifischsten (z.B. Kind-Profil vor Familien-Profil)
 
 Antworte als JSON:
-{{"path_id": <ID oder null>, "reason": "Kurze Begruendung"}}
+{{"path_id": <ID oder null>, "reason": "Kurze Begruendung mit Bezug zum Profil-Kontext"}}
 
 Antworte NUR mit dem JSON, kein anderer Text."""
 
