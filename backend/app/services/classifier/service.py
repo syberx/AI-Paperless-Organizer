@@ -945,6 +945,20 @@ class DocumentClassifierService:
             for field_name, value in classification["custom_fields"].items():
                 fid = field_name_to_id.get(field_name)
                 if fid and value is not None:
+                    # Sanitize monetary/numeric values: strip currency symbols, fix formatting
+                    if isinstance(value, str):
+                        import re
+                        cleaned = value.strip()
+                        # Remove currency symbols/codes (EUR, €, $, USD, etc.)
+                        cleaned = re.sub(r'^[A-Z]{2,3}\s*', '', cleaned)
+                        cleaned = re.sub(r'[€$£]\s*', '', cleaned)
+                        cleaned = cleaned.strip()
+                        # If the result is a number, use it (handles "EUR0" → "0", "EUR123.45" → "123.45")
+                        try:
+                            float(cleaned)
+                            value = cleaned
+                        except ValueError:
+                            pass  # Keep original value if not a number after cleanup
                     custom_field_updates.append({"field": fid, "value": value})
             if custom_field_updates:
                 update_data["custom_fields"] = custom_field_updates

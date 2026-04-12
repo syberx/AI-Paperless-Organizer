@@ -348,7 +348,7 @@ export default function DocumentClassifier() {
   }
 
   useEffect(() => {
-    if (activeTab === 'settings' && paperlessTags.length === 0) {
+    if ((activeTab === 'settings' || activeTab === 'review') && paperlessTags.length === 0) {
       loadPaperlessItems()
     }
     if ((activeTab === 'settings' || activeTab === 'benchmark') && !ollamaModels) {
@@ -1173,26 +1173,25 @@ export default function DocumentClassifier() {
                 <h3 className="text-sm font-medium text-surface-400 mb-3 flex items-center gap-2">
                   <FileText className="w-4 h-4" /> Dokument-Vorschau
                 </h3>
-                <div className="rounded-lg overflow-hidden bg-surface-900 border border-surface-700/50 flex-1 min-h-[600px]">
-                  <object
-                    data={`${api.getClassifierDocumentPreviewUrl(parseInt(documentId))}#toolbar=0&navpanes=0&view=FitH`}
+                <div className="rounded-lg overflow-hidden bg-surface-900 border border-surface-700/50 flex-1 min-h-[600px] relative">
+                  <embed
+                    src={`${api.getClassifierDocumentPreviewUrl(parseInt(documentId))}#toolbar=0&navpanes=0&view=FitH`}
                     type="application/pdf"
                     title={`Vorschau Dokument ${documentId}`}
-                    className="w-full h-full min-h-[600px] border-0"
+                    className="w-full h-full min-h-[600px] border-0 absolute inset-0"
                     style={{ background: '#fff' }}
-                  >
-                    <div className="flex flex-col items-center justify-center h-full gap-3 p-8">
-                      <p className="text-surface-400 text-sm">PDF-Vorschau nicht verfügbar.</p>
-                      <a
-                        href={api.getClassifierDocumentPreviewUrl(parseInt(documentId))}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-lg text-sm transition-colors"
-                      >
-                        PDF in neuem Tab öffnen
-                      </a>
-                    </div>
-                  </object>
+                  />
+                  {/* Fallback-Link immer sichtbar */}
+                  <div className="absolute bottom-3 right-3 z-10">
+                    <a
+                      href={api.getClassifierDocumentPreviewUrl(parseInt(documentId))}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-1.5 bg-surface-800/90 hover:bg-surface-700 text-surface-300 hover:text-white rounded-lg text-xs transition-colors border border-surface-600/50 backdrop-blur-sm"
+                    >
+                      PDF in neuem Tab
+                    </a>
+                  </div>
                 </div>
               </div>
             </div>

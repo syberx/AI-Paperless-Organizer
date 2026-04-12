@@ -81,8 +81,8 @@ export default function DocumentPreview({ documentId, height = '500px', previewU
                         transformOrigin: '0 0',
                     }}
                 >
-                    <object
-                        data={`${src}#toolbar=0&navpanes=0&view=FitH`}
+                    <embed
+                        src={`${src}#toolbar=0&navpanes=0&view=FitH`}
                         type="application/pdf"
                         title="PDF Vorschau"
                         className="border-0 bg-white"
@@ -92,23 +92,7 @@ export default function DocumentPreview({ documentId, height = '500px', previewU
                             transform: `scale(${scale})`,
                             transformOrigin: '0 0',
                         }}
-                    >
-                        {/* Fallback wenn Browser kein PDF im object rendert */}
-                        <div className="flex flex-col items-center justify-center h-full gap-4 p-8 bg-surface-800">
-                            <p className="text-surface-400 text-sm text-center">
-                                PDF-Vorschau wird von deinem Browser nicht unterstützt.
-                            </p>
-                            <a
-                                href={src}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-lg text-sm transition-colors"
-                            >
-                                <ExternalLink className="w-4 h-4" />
-                                PDF in neuem Tab öffnen
-                            </a>
-                        </div>
-                    </object>
+                    />
                 </div>
             </div>
         </div>
