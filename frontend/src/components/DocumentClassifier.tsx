@@ -202,11 +202,11 @@ export default function DocumentClassifier() {
       setApplied(true)
       // Refresh Paperless lists so new tags/correspondents appear immediately
       loadPaperlessItems()
-      // Remove from review queue if in review mode
-      if (reviewMode) {
-        const currentId = parseInt(documentId)
-        setReviewQueue(prev => prev.filter(e => e.document_id !== currentId))
-      }
+      // Always remove from review queue (regardless of review mode)
+      const currentId = parseInt(documentId)
+      setReviewQueue(prev => prev.filter(e => e.document_id !== currentId))
+      // Also refresh the queue from backend to ensure consistency
+      loadReviewQueue()
     } catch (e) {
       console.error('Failed to apply:', e)
     } finally {
