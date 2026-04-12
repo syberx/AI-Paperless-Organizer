@@ -62,6 +62,7 @@ async def _migrate_columns(conn):
         ("classifier_config", "auto_classify_interval", "INTEGER DEFAULT 5"),
         ("classifier_config", "auto_classify_mode", "TEXT DEFAULT 'review'"),
         ("classifier_config", "auto_classify_skip_tag_ids", "TEXT DEFAULT '[]'"),
+        ("classifier_config", "auto_classify_only_tag_ids", "TEXT DEFAULT '[]'"),
         ("classifier_history", "tag_ideas", "TEXT DEFAULT '[]'"),
         ("classifier_config", "mistral_api_key", "TEXT DEFAULT ''"),
         ("classifier_config", "mistral_model", "TEXT DEFAULT 'mistral-small-latest'"),

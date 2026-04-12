@@ -74,6 +74,8 @@ class ClassifierConfig(Base):
     auto_classify_mode = Column(String(50), default="review")
     # Tags that mark a document to be skipped entirely by auto-classification
     auto_classify_skip_tag_ids = Column(JSON, default=[])
+    # If set, ONLY documents with at least one of these tags will be auto-classified
+    auto_classify_only_tag_ids = Column(JSON, default=[])
 
     # Batch settings
     batch_size = Column(Integer, default=10)

@@ -59,6 +59,7 @@ class ClassifierConfigUpdate(BaseModel):
     auto_classify_interval: Optional[int] = None
     auto_classify_mode: Optional[str] = None
     auto_classify_skip_tag_ids: Optional[List[int]] = None
+    auto_classify_only_tag_ids: Optional[List[int]] = None
     classification_tag_enabled: Optional[bool] = None
     classification_tag_name: Optional[str] = None
     review_tag_enabled: Optional[bool] = None
@@ -1087,13 +1088,19 @@ async def _auto_classify_loop():
                         if doc_id in classified_ids:
                             continue
 
+                        doc_tags = doc.get("tags", [])
+
                         # Skip documents with tags in auto_classify_skip_tag_ids
                         skip_tags = getattr(config, "auto_classify_skip_tag_ids", None) or []
-                        if skip_tags:
-                            doc_tags = doc.get("tags", [])
-                            if any(t in skip_tags for t in doc_tags):
-                                classified_ids.add(doc_id)  # don't retry
-                                continue
+                        if skip_tags and any(t in skip_tags for t in doc_tags):
+                            classified_ids.add(doc_id)
+                            continue
+
+                        # If only_tag_ids is set, ONLY classify docs that have at least one of these tags
+                        only_tags = [t for t in (getattr(config, "auto_classify_only_tag_ids", None) or []) if t > 0]
+                        if only_tags and not any(t in only_tags for t in doc_tags):
+                            classified_ids.add(doc_id)
+                            continue
 
                         # Per-document Ollama lock: acquire before, release after
                         if uses_ollama:
