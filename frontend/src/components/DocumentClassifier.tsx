@@ -2628,35 +2628,47 @@ export default function DocumentClassifier() {
                       </div>
                     </div>
 
-                    {/* Status-Tags Übersicht */}
+                    {/* Status-Tags — direkt ein/ausschaltbar */}
                     <div className="pt-2 border-t border-purple-500/10">
-                      <p className="text-[10px] text-surface-500 mb-1.5">Status-Tags (konfigurierbar unter Einstellungen):</p>
+                      <p className="text-[10px] text-surface-500 mb-1.5">Status-Tags (klicken zum Ein-/Ausschalten):</p>
                       <div className="flex flex-wrap gap-2 text-[10px]">
-                        <span className={clsx(
-                          'px-2 py-0.5 rounded border',
-                          config.classification_tag_enabled
-                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                            : 'bg-surface-800 text-surface-500 border-surface-700'
-                        )}>
+                        <button
+                          onClick={() => autoSaveConfigField('classification_tag_enabled', !config.classification_tag_enabled)}
+                          className={clsx(
+                            'px-2 py-0.5 rounded border cursor-pointer transition-colors',
+                            config.classification_tag_enabled
+                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
+                              : 'bg-surface-800 text-surface-500 border-surface-700 hover:border-surface-500'
+                          )}
+                        >
                           Fertig-Tag: {config.classification_tag_enabled ? `"${config.classification_tag_name || 'KI-klassifiziert'}"` : 'aus'}
-                        </span>
-                        <span className={clsx(
-                          'px-2 py-0.5 rounded border',
-                          config.review_tag_enabled
-                            ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-                            : 'bg-surface-800 text-surface-500 border-surface-700'
-                        )}>
+                        </button>
+                        <button
+                          onClick={() => autoSaveConfigField('review_tag_enabled', !config.review_tag_enabled)}
+                          className={clsx(
+                            'px-2 py-0.5 rounded border cursor-pointer transition-colors',
+                            config.review_tag_enabled
+                              ? 'bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-amber-500/20'
+                              : 'bg-surface-800 text-surface-500 border-surface-700 hover:border-surface-500'
+                          )}
+                        >
                           Prüf-Tag: {config.review_tag_enabled ? `"${config.review_tag_name || 'KI-prüfen'}"` : 'aus'}
-                        </span>
-                        <span className={clsx(
-                          'px-2 py-0.5 rounded border',
-                          config.tag_ideas_tag_enabled
-                            ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20'
-                            : 'bg-surface-800 text-surface-500 border-surface-700'
-                        )}>
+                        </button>
+                        <button
+                          onClick={() => autoSaveConfigField('tag_ideas_tag_enabled', !config.tag_ideas_tag_enabled)}
+                          className={clsx(
+                            'px-2 py-0.5 rounded border cursor-pointer transition-colors',
+                            config.tag_ideas_tag_enabled
+                              ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20 hover:bg-cyan-500/20'
+                              : 'bg-surface-800 text-surface-500 border-surface-700 hover:border-surface-500'
+                          )}
+                        >
                           Tag-Ideen: {config.tag_ideas_tag_enabled ? `"${config.tag_ideas_tag_name || 'KI-tag-ideen'}"` : 'aus'}
-                        </span>
+                        </button>
                       </div>
+                      {config.auto_classify_mode === 'review' && !config.review_tag_enabled && (
+                        <p className="text-[10px] text-amber-400 mt-1.5">Empfehlung: Im Prüf-Modus den Prüf-Tag aktivieren, damit du die Dokumente in Paperless findest.</p>
+                      )}
                     </div>
                   </div>
                 )}
