@@ -2548,21 +2548,35 @@ export default function DocumentClassifier() {
               </div>
               <div className="flex items-center gap-3 flex-wrap">
                 {autoClassifyStatus?.enabled && (
-                  <span className="text-xs text-surface-500">
-                    {autoClassifyStatus.processed} angewendet · {autoClassifyStatus.reviewed} zur Prüfung · {autoClassifyStatus.errors} Fehler
-                    {autoClassifyStatus.filter_mode === 'tag' && ' · Tag-Modus'}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs px-2 py-0.5 rounded-lg border font-medium" style={{
+                      background: autoClassifyStatus.filter_mode === 'tag' ? 'rgba(168,85,247,0.15)' : 'rgba(59,130,246,0.15)',
+                      borderColor: autoClassifyStatus.filter_mode === 'tag' ? 'rgba(168,85,247,0.3)' : 'rgba(59,130,246,0.3)',
+                      color: autoClassifyStatus.filter_mode === 'tag' ? 'rgb(192,132,252)' : 'rgb(147,197,253)',
+                    }}>
+                      {autoClassifyStatus.filter_mode === 'tag' ? 'Tag-Modus' : 'DB-Modus'}
+                    </span>
+                    <span className="text-xs text-surface-500">
+                      {autoClassifyStatus.processed} angewendet · {autoClassifyStatus.reviewed} zur Prüfung · {autoClassifyStatus.errors} Fehler
+                    </span>
+                  </div>
                 )}
                 {!autoClassifyStatus?.enabled && (
-                  <select
-                    value={autoFilterMode}
-                    onChange={e => setAutoFilterMode(e.target.value as 'db' | 'tag')}
-                    className="input text-xs py-1.5 px-2"
-                    title="Modus wählen"
-                  >
-                    <option value="db">Neue Dokumente (DB)</option>
-                    <option value="tag">Nur mit Tag (erneut möglich)</option>
-                  </select>
+                  <div className="flex flex-col gap-1">
+                    <select
+                      value={autoFilterMode}
+                      onChange={e => setAutoFilterMode(e.target.value as 'db' | 'tag')}
+                      className="input text-xs py-1.5 px-2"
+                    >
+                      <option value="db">Neue Dokumente (DB-Modus)</option>
+                      <option value="tag">Nur mit Tag (Tag-Modus)</option>
+                    </select>
+                    <p className="text-[10px] text-surface-600 max-w-xs">
+                      {autoFilterMode === 'db'
+                        ? 'Klassifiziert nur Dokumente die noch nie verarbeitet wurden.'
+                        : 'Klassifiziert nur Dokumente mit dem konfigurierten Tag – auch bereits verarbeitete (Neuklassifizierung).'}
+                    </p>
+                  </div>
                 )}
                 <button
                   onClick={toggleAutoClassify}
