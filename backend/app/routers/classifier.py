@@ -1143,6 +1143,20 @@ async def _auto_classify_loop():
                             else:
                                 _auto_classify_state["processed"] += 1
                             classified_ids.add(doc_id)
+
+                            # Tag-Modus: Auslöser-Tag nach Klassifizierung entfernen
+                            if filter_mode == "tag" and only_tags and action != "error":
+                                try:
+                                    fresh_doc = await client.get_document(doc_id)
+                                    if fresh_doc:
+                                        current_tags = fresh_doc.get("tags", [])
+                                        new_tags = [t for t in current_tags if t not in only_tags]
+                                        if len(new_tags) != len(current_tags):
+                                            await client.update_document(doc_id, {"tags": new_tags})
+                                            logger.info(f"Auto-classify doc {doc_id}: trigger tag(s) removed")
+                                except Exception as tag_err:
+                                    logger.warning(f"Could not remove trigger tag from doc {doc_id}: {tag_err}")
+
                             logger.info(f"Auto-classify doc {doc_id}: {action}")
                         except Exception as e:
                             _auto_classify_state["errors"] += 1

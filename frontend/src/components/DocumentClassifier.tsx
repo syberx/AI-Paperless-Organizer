@@ -2585,41 +2585,78 @@ export default function DocumentClassifier() {
                     </p>
                   </div>
                 )}
-                {/* Inline Tag-Auswahl wenn Tag-Modus und nicht laufend */}
+                {/* Inline Tag-Modus Konfiguration */}
                 {!autoClassifyStatus?.enabled && autoFilterMode === 'tag' && config && (
-                  <div className="w-full mt-2 p-3 bg-purple-500/5 border border-purple-500/20 rounded-lg">
-                    <p className="text-xs font-medium text-purple-300 mb-2">
-                      Welche Tags sollen klassifiziert werden?
-                    </p>
-                    {(config.auto_classify_only_tag_ids || []).filter(id => id > 0).length === 0 && (
-                      <p className="text-xs text-amber-400 mb-2">Bitte mindestens einen Tag auswählen.</p>
-                    )}
-                    <div className="max-h-32 overflow-y-auto space-y-1 bg-surface-900/30 rounded-lg p-2">
-                      {paperlessTags.length === 0 ? (
-                        <p className="text-xs text-surface-500 text-center py-1">Tags werden geladen...</p>
-                      ) : (
-                        paperlessTags.map(tag => {
-                          const selected = (config.auto_classify_only_tag_ids || []).includes(tag.id)
-                          return (
-                            <label key={tag.id} className={clsx(
-                              'flex items-center gap-2 p-1 rounded text-xs cursor-pointer transition-colors',
-                              selected ? 'bg-purple-500/10' : 'hover:bg-surface-700/30'
-                            )}>
-                              <input
-                                type="checkbox"
-                                checked={selected}
-                                onChange={() => {
-                                  const current = (config.auto_classify_only_tag_ids || []).filter(id => id > 0)
-                                  const next = selected ? current.filter(id => id !== tag.id) : [...current, tag.id]
-                                  autoSaveConfigField('auto_classify_only_tag_ids', next.length > 0 ? next : [])
-                                }}
-                                className="w-3.5 h-3.5 rounded accent-purple-500"
-                              />
-                              <span className={selected ? 'text-purple-300 font-medium' : 'text-surface-300'}>{tag.name}</span>
-                            </label>
-                          )
-                        })
+                  <div className="w-full mt-2 p-3 bg-purple-500/5 border border-purple-500/20 rounded-lg space-y-3">
+                    {/* Auslöser-Tag */}
+                    <div>
+                      <p className="text-xs font-medium text-purple-300 mb-1">
+                        Auslöser-Tag wählen
+                      </p>
+                      <p className="text-[10px] text-surface-500 mb-2">
+                        Nur Dokumente mit diesem Tag werden klassifiziert. Der Tag wird nach der Klassifizierung automatisch entfernt.
+                      </p>
+                      {(config.auto_classify_only_tag_ids || []).filter(id => id > 0).length === 0 && (
+                        <p className="text-xs text-amber-400 mb-2">Wähle einen Auslöser-Tag um starten zu können.</p>
                       )}
+                      <div className="max-h-28 overflow-y-auto space-y-1 bg-surface-900/30 rounded-lg p-2">
+                        {paperlessTags.length === 0 ? (
+                          <p className="text-xs text-surface-500 text-center py-1">Tags werden geladen...</p>
+                        ) : (
+                          paperlessTags.map(tag => {
+                            const selected = (config.auto_classify_only_tag_ids || []).includes(tag.id)
+                            return (
+                              <label key={tag.id} className={clsx(
+                                'flex items-center gap-2 p-1 rounded text-xs cursor-pointer transition-colors',
+                                selected ? 'bg-purple-500/10' : 'hover:bg-surface-700/30'
+                              )}>
+                                <input
+                                  type="checkbox"
+                                  checked={selected}
+                                  onChange={() => {
+                                    const current = (config.auto_classify_only_tag_ids || []).filter(id => id > 0)
+                                    const next = selected ? current.filter(id => id !== tag.id) : [...current, tag.id]
+                                    autoSaveConfigField('auto_classify_only_tag_ids', next.length > 0 ? next : [])
+                                  }}
+                                  className="w-3.5 h-3.5 rounded accent-purple-500"
+                                />
+                                <span className={selected ? 'text-purple-300 font-medium' : 'text-surface-300'}>{tag.name}</span>
+                              </label>
+                            )
+                          })
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Status-Tags Übersicht */}
+                    <div className="pt-2 border-t border-purple-500/10">
+                      <p className="text-[10px] text-surface-500 mb-1.5">Status-Tags (konfigurierbar unter Einstellungen):</p>
+                      <div className="flex flex-wrap gap-2 text-[10px]">
+                        <span className={clsx(
+                          'px-2 py-0.5 rounded border',
+                          config.classification_tag_enabled
+                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                            : 'bg-surface-800 text-surface-500 border-surface-700'
+                        )}>
+                          Fertig-Tag: {config.classification_tag_enabled ? `"${config.classification_tag_name || 'KI-klassifiziert'}"` : 'aus'}
+                        </span>
+                        <span className={clsx(
+                          'px-2 py-0.5 rounded border',
+                          config.review_tag_enabled
+                            ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                            : 'bg-surface-800 text-surface-500 border-surface-700'
+                        )}>
+                          Prüf-Tag: {config.review_tag_enabled ? `"${config.review_tag_name || 'KI-prüfen'}"` : 'aus'}
+                        </span>
+                        <span className={clsx(
+                          'px-2 py-0.5 rounded border',
+                          config.tag_ideas_tag_enabled
+                            ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20'
+                            : 'bg-surface-800 text-surface-500 border-surface-700'
+                        )}>
+                          Tag-Ideen: {config.tag_ideas_tag_enabled ? `"${config.tag_ideas_tag_name || 'KI-tag-ideen'}"` : 'aus'}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 )}
