@@ -573,6 +573,13 @@ export default function DocumentClassifier() {
     if (autoClassifyStatus?.enabled) {
       await api.fetchJson('/classifier/auto-classify/stop', { method: 'POST' })
     } else {
+      // Block start in tag mode without tags
+      if (autoFilterMode === 'tag') {
+        const onlyTags = (config?.auto_classify_only_tag_ids || []).filter(id => id > 0)
+        if (onlyTags.length === 0) {
+          return // Button should be disabled, but safety check
+        }
+      }
       await api.fetchJson('/classifier/auto-classify/start', {
         method: 'POST',
         body: JSON.stringify({ filter_mode: autoFilterMode }),
@@ -2578,13 +2585,54 @@ export default function DocumentClassifier() {
                     </p>
                   </div>
                 )}
+                {/* Inline Tag-Auswahl wenn Tag-Modus und nicht laufend */}
+                {!autoClassifyStatus?.enabled && autoFilterMode === 'tag' && config && (
+                  <div className="w-full mt-2 p-3 bg-purple-500/5 border border-purple-500/20 rounded-lg">
+                    <p className="text-xs font-medium text-purple-300 mb-2">
+                      Welche Tags sollen klassifiziert werden?
+                    </p>
+                    {(config.auto_classify_only_tag_ids || []).filter(id => id > 0).length === 0 && (
+                      <p className="text-xs text-amber-400 mb-2">Bitte mindestens einen Tag auswählen.</p>
+                    )}
+                    <div className="max-h-32 overflow-y-auto space-y-1 bg-surface-900/30 rounded-lg p-2">
+                      {paperlessTags.length === 0 ? (
+                        <p className="text-xs text-surface-500 text-center py-1">Tags werden geladen...</p>
+                      ) : (
+                        paperlessTags.map(tag => {
+                          const selected = (config.auto_classify_only_tag_ids || []).includes(tag.id)
+                          return (
+                            <label key={tag.id} className={clsx(
+                              'flex items-center gap-2 p-1 rounded text-xs cursor-pointer transition-colors',
+                              selected ? 'bg-purple-500/10' : 'hover:bg-surface-700/30'
+                            )}>
+                              <input
+                                type="checkbox"
+                                checked={selected}
+                                onChange={() => {
+                                  const current = (config.auto_classify_only_tag_ids || []).filter(id => id > 0)
+                                  const next = selected ? current.filter(id => id !== tag.id) : [...current, tag.id]
+                                  autoSaveConfigField('auto_classify_only_tag_ids', next.length > 0 ? next : [])
+                                }}
+                                className="w-3.5 h-3.5 rounded accent-purple-500"
+                              />
+                              <span className={selected ? 'text-purple-300 font-medium' : 'text-surface-300'}>{tag.name}</span>
+                            </label>
+                          )
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
                 <button
                   onClick={toggleAutoClassify}
+                  disabled={!autoClassifyStatus?.enabled && autoFilterMode === 'tag' && (config?.auto_classify_only_tag_ids || []).filter(id => id > 0).length === 0}
                   className={clsx(
                     'px-4 py-2 rounded-lg text-sm font-medium transition-colors',
                     autoClassifyStatus?.enabled
                       ? 'bg-red-500/20 text-red-300 hover:bg-red-500/30 border border-red-500/30'
-                      : 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/30'
+                      : (!autoClassifyStatus?.enabled && autoFilterMode === 'tag' && (config?.auto_classify_only_tag_ids || []).filter(id => id > 0).length === 0)
+                        ? 'bg-surface-700 text-surface-500 cursor-not-allowed border border-surface-600'
+                        : 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/30'
                   )}
                 >
                   {autoClassifyStatus?.enabled ? 'Stoppen' : 'Starten'}
@@ -2676,71 +2724,6 @@ export default function DocumentClassifier() {
                   </div>
                 </div>
 
-                {/* Auto-Classify ONLY Tags — optional, Toggle-aktiviert */}
-                <div className="mt-3 pt-3 border-t border-surface-700/40">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1 mr-3">
-                      <p className="text-sm font-medium text-surface-200">Tag-Filter für Auto-Klassifizierung</p>
-                      <p className="text-xs text-surface-500 mt-0.5">
-                        Nur Dokumente mit bestimmten Tags automatisch klassifizieren. Deaktiviert = alle Dokumente werden klassifiziert.
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => {
-                        if ((config.auto_classify_only_tag_ids || []).length > 0) {
-                          autoSaveConfigField('auto_classify_only_tag_ids', [])
-                        } else {
-                          autoSaveConfigField('auto_classify_only_tag_ids', [-1])
-                        }
-                      }}
-                      className={clsx(
-                        'px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors shrink-0',
-                        (config.auto_classify_only_tag_ids || []).length > 0
-                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                          : 'bg-surface-700/50 text-surface-400 border-surface-700/50 hover:text-surface-300'
-                      )}
-                    >
-                      {(config.auto_classify_only_tag_ids || []).length > 0 ? 'Aktiv' : 'Deaktiviert'}
-                    </button>
-                  </div>
-
-                  {(config.auto_classify_only_tag_ids || []).length > 0 && (
-                    <div className="mt-3 max-h-40 overflow-y-auto space-y-1 bg-surface-900/30 rounded-lg p-2 border border-surface-700/30">
-                      {paperlessTags.length === 0 ? (
-                        <p className="text-xs text-surface-500 text-center py-2">Keine Tags gefunden</p>
-                      ) : (
-                        paperlessTags.map(tag => {
-                          const only = (config.auto_classify_only_tag_ids || []).includes(tag.id)
-                          return (
-                            <label
-                              key={tag.id}
-                              className={clsx(
-                                'flex items-center gap-2 p-1.5 rounded text-sm cursor-pointer transition-colors',
-                                only ? 'bg-emerald-500/10' : 'hover:bg-surface-700/30'
-                              )}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={only}
-                                onChange={() => {
-                                  const current = (config.auto_classify_only_tag_ids || []).filter(id => id > 0)
-                                  const next = only
-                                    ? current.filter(id => id !== tag.id)
-                                    : [...current, tag.id]
-                                  autoSaveConfigField('auto_classify_only_tag_ids', next.length > 0 ? next : [-1])
-                                }}
-                                className="w-4 h-4 rounded accent-emerald-500"
-                              />
-                              <span className={only ? 'text-emerald-300 font-medium' : 'text-surface-300'}>
-                                {tag.name}
-                              </span>
-                            </label>
-                          )
-                        })
-                      )}
-                    </div>
-                  )}
-                </div>
               </>
             )}
           </div>
