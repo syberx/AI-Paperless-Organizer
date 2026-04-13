@@ -8,18 +8,19 @@ Alle wichtigen Änderungen an AI Paperless Organizer.
 
 ### Auto-Klassifizierung
 - **DB-Modus vs. Tag-Modus**: Beim Starten wählbar — DB-Modus klassifiziert nur neue Dokumente, Tag-Modus erlaubt Neuklassifizierung von Dokumenten mit bestimmten Tags
-- **Tag-Filter direkt beim Start**: Im Tag-Modus werden die Tags inline abgefragt, Starten erst möglich wenn Tags gewählt sind
+- **Auslöser-Tag**: Im Tag-Modus wählt man einen Tag der die Klassifizierung auslöst — wird danach automatisch entfernt
+- **Status-Tags Übersicht**: Zeigt beim Start ob Fertig-/Prüf-/Tag-Ideen-Tags aktiv sind
 - **Review-Tag wird nach Anwenden entfernt**: "KI-prüfen" und "KI-tag-ideen" Tags werden automatisch vom Dokument entfernt
-- **Skip/Only-Tags werden sofort gespeichert**: Kein "Speichern"-Button mehr nötig, Änderungen überleben Neustarts
+- **Skip-Tags werden sofort gespeichert**: Kein "Speichern"-Button mehr nötig, Änderungen überleben Neustarts
 - **Prüf-Warteschlange**: "Alle verwerfen" Button zum Leeren von hängengebliebenen Einträgen
-- **Prüf-Warteschlange aktualisiert sich** nach jedem Anwenden automatisch
+- **Bugfix**: Prüf-Warteschlange aktualisiert sich nach Anwenden
 
 ### Custom Fields
 - **Felder beim Prüfen deaktivierbar**: Klick auf den Feldnamen → Feld wird nicht übernommen
-- **Betrag-Feld Fix**: Währungssymbole (EUR, USD) werden vor dem Senden automatisch entfernt
+- **Bugfix**: Betrag-Feld mit Währungssymbolen (EUR, USD) verursacht keinen Fehler mehr
 
 ### Speicherpfad
-- **Besserer Match-Prompt**: KI wählt jetzt den besten verfügbaren Pfad statt zu schnell "kein Pfad" zu setzen
+- **Bugfix**: KI wählt jetzt den besten verfügbaren Pfad statt zu schnell "kein Pfad" zu setzen
 
 ---
 
