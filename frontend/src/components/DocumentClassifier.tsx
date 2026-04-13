@@ -424,6 +424,18 @@ export default function DocumentClassifier() {
     }
   }
 
+  // Auto-save specific config fields immediately (for settings outside the Settings tab)
+  const autoSaveConfigField = async (field: string, value: any) => {
+    if (!config) return
+    const updated = { ...config, [field]: value }
+    setConfig(updated)
+    try {
+      await api.updateClassifierConfig({ [field]: value } as any)
+    } catch (e) {
+      console.error(`Failed to auto-save ${field}:`, e)
+    }
+  }
+
   const updateBenchSlot = (idx: number, field: 'provider' | 'model', value: string) => {
     setBenchSlots(prev => prev.map((s, i) => {
       if (i !== idx) return s
@@ -555,11 +567,17 @@ export default function DocumentClassifier() {
     } catch {}
   }
 
+  const [autoFilterMode, setAutoFilterMode] = useState<'db' | 'tag'>('db')
+
   const toggleAutoClassify = async () => {
-    const endpoint = autoClassifyStatus?.enabled
-      ? '/classifier/auto-classify/stop'
-      : '/classifier/auto-classify/start'
-    await api.fetchJson(endpoint, { method: 'POST' })
+    if (autoClassifyStatus?.enabled) {
+      await api.fetchJson('/classifier/auto-classify/stop', { method: 'POST' })
+    } else {
+      await api.fetchJson('/classifier/auto-classify/start', {
+        method: 'POST',
+        body: JSON.stringify({ filter_mode: autoFilterMode }),
+      })
+    }
     await loadAutoClassifyStatus()
   }
 
@@ -2528,11 +2546,23 @@ export default function DocumentClassifier() {
                 <h2 className="text-lg font-semibold text-surface-100">Auto-Klassifizierung</h2>
                 <p className="text-xs text-surface-500 mt-0.5">Klassifiziert neue Dokumente automatisch im Hintergrund</p>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
                 {autoClassifyStatus?.enabled && (
                   <span className="text-xs text-surface-500">
                     {autoClassifyStatus.processed} angewendet · {autoClassifyStatus.reviewed} zur Prüfung · {autoClassifyStatus.errors} Fehler
+                    {autoClassifyStatus.filter_mode === 'tag' && ' · Tag-Modus'}
                   </span>
+                )}
+                {!autoClassifyStatus?.enabled && (
+                  <select
+                    value={autoFilterMode}
+                    onChange={e => setAutoFilterMode(e.target.value as 'db' | 'tag')}
+                    className="input text-xs py-1.5 px-2"
+                    title="Modus wählen"
+                  >
+                    <option value="db">Neue Dokumente (DB)</option>
+                    <option value="tag">Nur mit Tag (erneut möglich)</option>
+                  </select>
                 )}
                 <button
                   onClick={toggleAutoClassify}
@@ -2618,7 +2648,7 @@ export default function DocumentClassifier() {
                                 const next = skip
                                   ? current.filter(id => id !== tag.id)
                                   : [...current, tag.id]
-                                setConfig({ ...config, auto_classify_skip_tag_ids: next })
+                                autoSaveConfigField('auto_classify_skip_tag_ids', next)
                               }}
                               className="w-4 h-4 rounded accent-amber-500"
                             />
@@ -2644,10 +2674,9 @@ export default function DocumentClassifier() {
                     <button
                       onClick={() => {
                         if ((config.auto_classify_only_tag_ids || []).length > 0) {
-                          setConfig({ ...config, auto_classify_only_tag_ids: [] })
+                          autoSaveConfigField('auto_classify_only_tag_ids', [])
                         } else {
-                          // Aktivieren — Liste wird sichtbar, User wählt Tags
-                          setConfig({ ...config, auto_classify_only_tag_ids: [-1] })
+                          autoSaveConfigField('auto_classify_only_tag_ids', [-1])
                         }
                       }}
                       className={clsx(
@@ -2684,7 +2713,7 @@ export default function DocumentClassifier() {
                                   const next = only
                                     ? current.filter(id => id !== tag.id)
                                     : [...current, tag.id]
-                                  setConfig({ ...config, auto_classify_only_tag_ids: next.length > 0 ? next : [-1] })
+                                  autoSaveConfigField('auto_classify_only_tag_ids', next.length > 0 ? next : [-1])
                                 }}
                                 className="w-4 h-4 rounded accent-emerald-500"
                               />
@@ -2711,9 +2740,25 @@ export default function DocumentClassifier() {
                   {reviewQueue.length} Dokument{reviewQueue.length !== 1 ? 'e' : ''} zur manuellen Prüfung
                 </p>
               </div>
-              <button onClick={loadReviewQueue} className="btn btn-sm bg-surface-700 hover:bg-surface-600 text-surface-300 text-xs">
-                <RefreshCw className="w-3 h-3 mr-1" /> Aktualisieren
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={loadReviewQueue} className="btn btn-sm bg-surface-700 hover:bg-surface-600 text-surface-300 text-xs">
+                  <RefreshCw className="w-3 h-3 mr-1" /> Aktualisieren
+                </button>
+                {reviewQueue.length > 0 && (
+                  <button
+                    onClick={async () => {
+                      if (!confirm(`Alle ${reviewQueue.length} Einträge aus der Warteschlange entfernen?`)) return
+                      try {
+                        await api.fetchJson('/classifier/review-queue/clear', { method: 'POST' })
+                        loadReviewQueue()
+                      } catch {}
+                    }}
+                    className="btn btn-sm bg-red-900/30 hover:bg-red-900/50 text-red-300 border border-red-800/30 text-xs"
+                  >
+                    Alle verwerfen
+                  </button>
+                )}
+              </div>
             </div>
 
             {reviewLoading ? (

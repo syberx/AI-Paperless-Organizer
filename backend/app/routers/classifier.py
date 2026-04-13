@@ -1021,6 +1021,7 @@ _auto_classify_state: Dict[str, Any] = {
     "reviewed": 0,
     "current_doc": None,
     "last_run": None,
+    "filter_mode": "db",  # "db" = new docs only (skip DB history), "tag" = only docs with tag (re-classify possible)
 }
 
 
@@ -1058,13 +1059,18 @@ async def _auto_classify_loop():
                 mode = getattr(config, "auto_classify_mode", "review") or "review"
                 interval = getattr(config, "auto_classify_interval", 5) or 5
 
-                # Find all applied document IDs
-                applied_q = await db_sess.execute(
-                    select(ClassificationHistory.document_id).where(
-                        ClassificationHistory.status.in_(["applied", "review", "pending"])
-                    ).distinct()
-                )
-                classified_ids = {r[0] for r in applied_q.all()}
+                # Find already processed document IDs (only in "db" mode)
+                filter_mode = _auto_classify_state.get("filter_mode", "db")
+                if filter_mode == "db":
+                    applied_q = await db_sess.execute(
+                        select(ClassificationHistory.document_id).where(
+                            ClassificationHistory.status.in_(["applied", "review", "pending"])
+                        ).distinct()
+                    )
+                    classified_ids = {r[0] for r in applied_q.all()}
+                else:
+                    # Tag mode: don't skip based on DB history — allow re-classification
+                    classified_ids = set()
 
                 # Fetch documents in batches to find unclassified ones
                 found_any = False
@@ -1096,11 +1102,14 @@ async def _auto_classify_loop():
                             classified_ids.add(doc_id)
                             continue
 
-                        # If only_tag_ids is set, ONLY classify docs that have at least one of these tags
+                        # If only_tag_ids is set (or tag mode), ONLY classify docs with these tags
                         only_tags = [t for t in (getattr(config, "auto_classify_only_tag_ids", None) or []) if t > 0]
+                        if filter_mode == "tag" and not only_tags:
+                            # Tag mode requires tags to be configured
+                            logger.warning("Auto-classify tag mode: no tags configured, skipping")
+                            break
                         if only_tags and not any(t in only_tags for t in doc_tags):
-                            classified_ids.add(doc_id)
-                            continue
+                            continue  # don't add to classified_ids in tag mode — tag might be added later
 
                         # Per-document Ollama lock: acquire before, release after
                         if uses_ollama:
@@ -1173,18 +1182,27 @@ async def _auto_classify_loop():
             await asyncio.sleep(interval * 60)
 
 
+class AutoClassifyStartRequest(BaseModel):
+    filter_mode: str = "db"  # "db" or "tag"
+
+
 @router.post("/auto-classify/start")
-async def start_auto_classify(db: AsyncSession = Depends(get_db)):
+async def start_auto_classify(
+    req: Optional[AutoClassifyStartRequest] = None,
+    db: AsyncSession = Depends(get_db),
+):
     """Start the auto-classification background job."""
     if _auto_classify_state["enabled"]:
         return {"status": "already_running"}
 
+    filter_mode = (req.filter_mode if req else "db") or "db"
     _auto_classify_state["enabled"] = True
     _auto_classify_state["processed"] = 0
     _auto_classify_state["errors"] = 0
     _auto_classify_state["reviewed"] = 0
+    _auto_classify_state["filter_mode"] = filter_mode
     _auto_classify_state["task"] = asyncio.create_task(_auto_classify_loop())
-    logger.info("Auto-classify started")
+    logger.info(f"Auto-classify started (mode: {filter_mode})")
 
     # Persist to DB so it auto-starts after restart
     try:
@@ -1235,6 +1253,7 @@ async def get_auto_classify_status():
         "reviewed": _auto_classify_state["reviewed"],
         "current_doc": _auto_classify_state["current_doc"],
         "last_run": _auto_classify_state["last_run"],
+        "filter_mode": _auto_classify_state.get("filter_mode", "db"),
         "waiting_for": ollama_holder() if ollama_is_locked() and _auto_classify_state["enabled"] and ollama_holder() != "classifier" else None,
     }
 
@@ -1309,6 +1328,21 @@ async def dismiss_review_entry(
     entry.status = "rejected"
     await db.commit()
     return {"status": "dismissed"}
+
+
+@router.post("/review-queue/clear")
+async def clear_review_queue(db: AsyncSession = Depends(get_db)):
+    """Clear all entries from the review queue (mark as rejected)."""
+    from sqlalchemy import update
+    result = await db.execute(
+        update(ClassificationHistory)
+        .where(ClassificationHistory.status == "review")
+        .values(status="rejected")
+    )
+    await db.commit()
+    count = result.rowcount
+    logger.info(f"Cleared review queue: {count} entries marked as rejected")
+    return {"status": "cleared", "count": count}
 
 
 # ── Tag Ideas ─────────────────────────────────────────────────────────────────

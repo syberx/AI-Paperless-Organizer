@@ -884,6 +884,44 @@ class DocumentClassifierService:
                         update_data["tags"] = current_tag_ids
                         logger.info(f"Apply: added classification tag '{tag_name}' (id={cls_tag['id']}) to doc {document_id}")
 
+        # Remove Review-Tag after apply (if configured)
+        if getattr(config, "review_tag_enabled", False):
+            review_tag_name = (getattr(config, "review_tag_name", None) or "KI-prüfen").strip()
+            if review_tag_name:
+                try:
+                    all_tags = await self.paperless.get_tags(use_cache=False)
+                    review_tag_obj = next((t for t in all_tags if t["name"] == review_tag_name), None)
+                    if review_tag_obj:
+                        current_tag_ids = list(update_data.get("tags") or [])
+                        if not current_tag_ids:
+                            doc = await self.paperless.get_document(document_id)
+                            current_tag_ids = doc.get("tags", []) if doc else []
+                        if review_tag_obj["id"] in current_tag_ids:
+                            current_tag_ids = [t for t in current_tag_ids if t != review_tag_obj["id"]]
+                            update_data["tags"] = current_tag_ids
+                            logger.info(f"Apply: removed review tag '{review_tag_name}' (id={review_tag_obj['id']}) from doc {document_id}")
+                except Exception as e:
+                    logger.warning(f"Could not remove review tag: {e}")
+
+        # Also remove tag-ideas tag after apply (if configured)
+        if getattr(config, "tag_ideas_tag_enabled", False):
+            ideas_tag_name = (getattr(config, "tag_ideas_tag_name", None) or "KI-tag-ideen").strip()
+            if ideas_tag_name:
+                try:
+                    all_tags = await self.paperless.get_tags(use_cache=False)
+                    ideas_tag_obj = next((t for t in all_tags if t["name"] == ideas_tag_name), None)
+                    if ideas_tag_obj:
+                        current_tag_ids = list(update_data.get("tags") or [])
+                        if not current_tag_ids:
+                            doc = await self.paperless.get_document(document_id)
+                            current_tag_ids = doc.get("tags", []) if doc else []
+                        if ideas_tag_obj["id"] in current_tag_ids:
+                            current_tag_ids = [t for t in current_tag_ids if t != ideas_tag_obj["id"]]
+                            update_data["tags"] = current_tag_ids
+                            logger.info(f"Apply: removed tag-ideas tag '{ideas_tag_name}' from doc {document_id}")
+                except Exception as e:
+                    logger.warning(f"Could not remove tag-ideas tag: {e}")
+
         # Resolve correspondent
         if classification.get("correspondent"):
             corr = await self.paperless.get_or_create_correspondent(
