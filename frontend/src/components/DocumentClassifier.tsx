@@ -2630,7 +2630,10 @@ export default function DocumentClassifier() {
 
                     {/* Status-Tags — direkt ein/ausschaltbar */}
                     <div className="pt-2 border-t border-purple-500/10">
-                      <p className="text-[10px] text-surface-500 mb-1.5">Status-Tags (klicken zum Ein-/Ausschalten):</p>
+                      <p className="text-[10px] text-surface-500 mb-1.5">
+                        Status-Tags (klicken zum Ein-/Ausschalten · Tag-Namen anpassen unter{' '}
+                        <button onClick={() => setActiveTab('settings')} className="text-primary-400 hover:text-primary-300 underline underline-offset-2">Einstellungen</button>):
+                      </p>
                       <div className="flex flex-wrap gap-2 text-[10px]">
                         <button
                           onClick={() => autoSaveConfigField('classification_tag_enabled', !config.classification_tag_enabled)}
