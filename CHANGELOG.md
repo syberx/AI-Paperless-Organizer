@@ -22,6 +22,9 @@ Alle wichtigen Änderungen an AI Paperless Organizer.
 ### Speicherpfad
 - **Bugfix**: KI wählt jetzt den besten verfügbaren Pfad statt zu schnell "kein Pfad" zu setzen
 
+### Mistral / OpenRouter
+- **Bugfix**: Klassifizierung mit Mistral Cloud und OpenRouter funktioniert jetzt (Tool-Schema Kompatibilität)
+
 ---
 
 ## 2026-04-12

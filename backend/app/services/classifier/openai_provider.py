@@ -265,19 +265,30 @@ class OpenAIToolCallingProvider(BaseClassifierProvider):
 
     def _filter_tools(self, config: Dict) -> List[Dict]:
         """Only include tools for enabled features."""
+        import copy
+        is_non_openai = self._provider_label in ("Mistral", "OpenRouter", "Anthropic")
         tools = []
         for tool in CLASSIFIER_TOOLS:
             fn_name = tool["function"]["name"]
+            include = False
             if fn_name == "search_tags" and config.get("enable_tags"):
-                tools.append(tool)
+                include = True
             elif fn_name == "search_correspondents" and config.get("enable_correspondent"):
-                tools.append(tool)
+                include = True
             elif fn_name == "get_document_types" and config.get("enable_document_type"):
-                tools.append(tool)
+                include = True
             elif fn_name == "get_storage_paths" and config.get("enable_storage_path"):
-                tools.append(tool)
+                include = True
             elif fn_name == "get_custom_field_definitions" and config.get("enable_custom_fields"):
-                tools.append(tool)
+                include = True
+            if include:
+                if is_non_openai:
+                    # Remove additionalProperties — not supported by Mistral/OpenRouter
+                    t = copy.deepcopy(tool)
+                    t["function"]["parameters"].pop("additionalProperties", None)
+                    tools.append(t)
+                else:
+                    tools.append(tool)
         return tools
 
     def _parse_result(
