@@ -24,6 +24,7 @@ Alle wichtigen Änderungen an AI Paperless Organizer.
 
 ### Mistral / OpenRouter
 - **Bugfix**: Klassifizierung mit Mistral Cloud und OpenRouter funktioniert jetzt (Tool-Schema Kompatibilität)
+- **Mistral OCR**: Neuer OCR-Provider über Mistral's dedizierte OCR API (Modell: mistral-ocr-2503-completion). Sendet PDFs direkt an Mistral — kein Ollama nötig. Button "Mistral" neben "Ollama" in der Einzel-OCR
 
 ---
 

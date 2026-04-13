@@ -14,6 +14,7 @@ from typing import Optional, List
 import httpx
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from app.database import get_db
 from app.services.paperless_client import PaperlessClient, get_paperless_client
 from app.services.ocr_service import OcrService, batch_state, watchdog_state, single_ocr_running, ocr_page_progress, load_review_queue, save_review_queue, load_ocr_ignore_list, save_ocr_ignore_list, load_ocr_error_list, save_ocr_error_list, load_ocr_error_counts, save_ocr_error_counts, DEFAULT_OLLAMA_URL, DEFAULT_OCR_MODEL
@@ -690,6 +691,96 @@ async def clear_ocr_error_list():
     save_ocr_error_list([])
     save_ocr_error_counts({})
     return {"cleared": True}
+
+
+# --- Mistral OCR ---
+
+async def _get_mistral_api_key(db: AsyncSession) -> str:
+    """Get Mistral API key from LLM providers table."""
+    from app.models.settings_model import LLMProvider
+    q = await db.execute(select(LLMProvider).where(LLMProvider.name == "mistral"))
+    provider = q.scalar_one_or_none()
+    return provider.api_key if provider and provider.api_key else ""
+
+@router.post("/mistral-ocr/{document_id}")
+async def mistral_ocr_single(
+    document_id: int,
+    client: PaperlessClient = Depends(get_paperless_client),
+    db: AsyncSession = Depends(get_db),
+):
+    """Run OCR on a document using Mistral's dedicated OCR API."""
+    from app.models.settings_model import LLMProvider
+    from app.services.mistral_ocr_service import mistral_ocr_document
+
+    # Get Mistral API key from LLM providers
+    api_key = await _get_mistral_api_key(db)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Kein Mistral API-Key konfiguriert. Bitte unter Einstellungen → LLM → Mistral hinterlegen.")
+
+    # Download the original PDF from Paperless
+    try:
+        pdf_bytes = await client.download_document_file(document_id)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Dokument konnte nicht geladen werden: {e}")
+
+    if not pdf_bytes or pdf_bytes[:4] != b'%PDF':
+        raise HTTPException(status_code=400, detail="Dokument ist kein PDF")
+
+    # Run Mistral OCR
+    try:
+        result = await mistral_ocr_document(pdf_bytes, api_key)
+    except Exception as e:
+        logger.error(f"Mistral OCR failed for doc {document_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Mistral OCR Fehler: {e}")
+
+    return {
+        "document_id": document_id,
+        "provider": "mistral",
+        "model": "mistral-ocr-2503-completion",
+        "pages": result["pages"],
+        "full_text": result["full_text"],
+        "page_count": result["page_count"],
+    }
+
+
+@router.post("/mistral-ocr/{document_id}/apply")
+async def apply_mistral_ocr(
+    document_id: int,
+    client: PaperlessClient = Depends(get_paperless_client),
+    db: AsyncSession = Depends(get_db),
+):
+    """Apply Mistral OCR result to a document — same as running OCR + saving."""
+    from app.services.mistral_ocr_service import mistral_ocr_document
+
+    api_key = await _get_mistral_api_key(db)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Kein Mistral API-Key konfiguriert")
+
+    pdf_bytes = await client.download_document_file(document_id)
+    if not pdf_bytes or pdf_bytes[:4] != b'%PDF':
+        raise HTTPException(status_code=400, detail="Dokument ist kein PDF")
+
+    result = await mistral_ocr_document(pdf_bytes, api_key)
+
+    # Write OCR text back to Paperless
+    if result["full_text"]:
+        await client.update_document(document_id, {"content": result["full_text"]})
+        logger.info(f"Mistral OCR applied to doc {document_id}: {result['page_count']} pages, {len(result['full_text'])} chars")
+        return {"applied": True, "page_count": result["page_count"], "chars": len(result["full_text"])}
+
+    return {"applied": False, "reason": "Kein Text erkannt"}
+
+
+@router.post("/mistral-ocr/test")
+async def test_mistral_ocr(db: AsyncSession = Depends(get_db)):
+    """Test Mistral OCR API connection."""
+    from app.services.mistral_ocr_service import test_mistral_ocr_connection
+
+    api_key = await _get_mistral_api_key(db)
+    if not api_key:
+        return {"connected": False, "error": "Kein Mistral API-Key konfiguriert"}
+
+    return await test_mistral_ocr_connection(api_key)
 
 
 # --- Document Preview Proxy ---
