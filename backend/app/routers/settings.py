@@ -97,6 +97,7 @@ async def get_llm_providers(db: AsyncSession = Depends(get_db)):
         {"name": "azure", "display_name": "Azure OpenAI", "model": "gpt-4"},
         {"name": "ollama", "display_name": "Ollama (Lokal)", "api_base_url": "http://localhost:11434", "model": "llama3.1"},
         {"name": "mistral", "display_name": "Mistral AI", "model": "mistral-small-latest"},
+        {"name": "mistral-ocr", "display_name": "Mistral OCR (nur API-Key)", "model": "mistral-ocr-2503-completion"},
         {"name": "openrouter", "display_name": "OpenRouter", "model": "mistralai/mistral-small-2603"},
     ]
 

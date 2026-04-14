@@ -662,6 +662,12 @@ export default function SettingsPanel() {
                           <p className="text-xs text-surface-500">Klicke "Installierte Modelle laden" um Dropdowns zu sehen.</p>
                         )}
                       </div>
+                    ) : provider.name === 'mistral-ocr' ? (
+                      /* === MISTRAL OCR: Nur API-Key, kein Modell === */
+                      <div className="p-3 bg-orange-500/5 border border-orange-500/20 rounded-lg space-y-1">
+                        <p className="text-xs text-orange-300 font-medium">Dedizierter OCR-Service</p>
+                        <p className="text-xs text-surface-400">Mistral OCR ist ein eigener API-Service mit nur einem Modell (mistral-ocr-2503-completion). Es wird nur ein API-Key benötigt — kein Modell auswählen. Wird ausschließlich für OCR genutzt (nicht für Klassifizierung/Bereinigung).</p>
+                      </div>
                     ) : (
                       /* === CLOUD PROVIDERS: Simple text inputs === */
                       <>
@@ -761,7 +767,7 @@ export default function SettingsPanel() {
               }}
               className="input w-48 text-sm"
             >
-              {providers.filter(p => p.is_configured || p.name === 'ollama').map(p => (
+              {providers.filter(p => (p.is_configured || p.name === 'ollama') && p.name !== 'mistral-ocr').map(p => (
                 <option key={p.name} value={p.name}>{p.display_name}</option>
               ))}
             </select>
@@ -782,7 +788,7 @@ export default function SettingsPanel() {
               }}
               className="input w-48 text-sm"
             >
-              {providers.map(p => (
+              {providers.filter(p => p.name !== 'mistral-ocr').map(p => (
                 <option key={p.name} value={p.name}>{p.display_name}</option>
               ))}
             </select>

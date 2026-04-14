@@ -696,8 +696,14 @@ async def clear_ocr_error_list():
 # --- Mistral OCR ---
 
 async def _get_mistral_api_key(db: AsyncSession) -> str:
-    """Get Mistral API key from LLM providers table."""
+    """Get Mistral OCR API key. Prefers 'mistral-ocr' provider, falls back to 'mistral'."""
     from app.models.settings_model import LLMProvider
+    # Prefer dedicated OCR key
+    q = await db.execute(select(LLMProvider).where(LLMProvider.name == "mistral-ocr"))
+    provider = q.scalar_one_or_none()
+    if provider and provider.api_key:
+        return provider.api_key
+    # Fallback to general Mistral key
     q = await db.execute(select(LLMProvider).where(LLMProvider.name == "mistral"))
     provider = q.scalar_one_or_none()
     return provider.api_key if provider and provider.api_key else ""
