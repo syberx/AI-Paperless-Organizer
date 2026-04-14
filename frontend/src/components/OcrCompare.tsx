@@ -51,7 +51,9 @@ export default function OcrCompare() {
         setLoadingModels(true)
         try {
             const data = await api.getOllamaModels()
-            setAvailableModels(data.models)
+            // Add Mistral OCR as a special "model" option (Cloud-based, separate provider)
+            const allModels = ['mistral-ocr', ...data.models]
+            setAvailableModels(allModels)
             setCurrentModel(data.current_model)
             if (data.current_model && data.models.includes(data.current_model)) {
                 setSelectedModels([data.current_model])
@@ -374,7 +376,12 @@ export default function OcrCompare() {
                                                         {isSelected && <Check className="w-3.5 h-3.5 text-white" />}
                                                     </div>
                                                     <span className="font-mono text-sm truncate">{model}</span>
-                                                    {isCurrent && (
+                                                    {model === 'mistral-ocr' && (
+                                                        <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-orange-500/20 text-orange-300 border border-orange-500/30 flex-shrink-0">
+                                                            Cloud
+                                                        </span>
+                                                    )}
+                                                    {isCurrent && model !== 'mistral-ocr' && (
                                                         <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex-shrink-0">
                                                             aktiv
                                                         </span>

@@ -503,9 +503,9 @@ export interface OcrStats {
 
 // OCR Settings
 export const getOcrSettings = () =>
-  fetchJson<{ ollama_url: string; ollama_urls: string[]; model: string; max_image_size: number; smart_skip_enabled: boolean; watchdog_enabled?: boolean; watchdog_interval?: number }>('/ocr/settings')
+  fetchJson<{ ollama_url: string; ollama_urls: string[]; model: string; max_image_size: number; smart_skip_enabled: boolean; provider?: string; watchdog_enabled?: boolean; watchdog_interval?: number }>('/ocr/settings')
 
-export const saveOcrSettings = (data: { ollama_url: string; ollama_urls?: string[]; model: string; max_image_size: number; smart_skip_enabled: boolean }) =>
+export const saveOcrSettings = (data: { ollama_url: string; ollama_urls?: string[]; model: string; max_image_size: number; smart_skip_enabled: boolean; provider?: string }) =>
   fetchJson<{ success: boolean }>('/ocr/settings', {
     method: 'POST',
     body: JSON.stringify(data)

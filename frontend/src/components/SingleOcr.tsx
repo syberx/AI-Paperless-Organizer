@@ -184,39 +184,7 @@ export default function SingleOcr({ initialDocId }: SingleOcrProps = {}) {
                             className="btn bg-cyan-600 hover:bg-cyan-700 text-white flex items-center gap-2 px-8 shadow-lg shadow-cyan-900/20 disabled:opacity-50"
                         >
                             {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5" />}
-                            Ollama
-                        </button>
-                        <button
-                            onClick={async () => {
-                                const id = parseInt(docId)
-                                if (isNaN(id)) return
-                                setLoading(true)
-                                setResult(null)
-                                setError('')
-                                setApplied(false)
-                                try {
-                                    const res = await api.fetchJson<any>(`/ocr/mistral-ocr/${id}`, { method: 'POST' })
-                                    setResult({
-                                        document_id: id,
-                                        title: `Dokument #${id}`,
-                                        old_content: '',
-                                        new_content: res.full_text || '',
-                                        old_length: 0,
-                                        new_length: (res.full_text || '').length,
-                                        pages_processed: res.page_count || 0,
-                                        processing_time_seconds: 0,
-                                    } as api.OcrResult)
-                                } catch (e: any) {
-                                    setError(e?.message || 'Mistral OCR Fehler')
-                                } finally {
-                                    setLoading(false)
-                                }
-                            }}
-                            disabled={loading || !docId}
-                            className="btn bg-orange-600 hover:bg-orange-700 text-white flex items-center gap-2 px-6 shadow-lg shadow-orange-900/20 disabled:opacity-50"
-                        >
-                            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5" />}
-                            Mistral
+                            Start
                         </button>
                     </div>
 

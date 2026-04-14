@@ -68,6 +68,7 @@ class OcrSettingsRequest(BaseModel):
     model: str = DEFAULT_OCR_MODEL
     max_image_size: int = 1344
     smart_skip_enabled: bool = True
+    provider: str = "ollama"  # "ollama" or "mistral-ocr"
 
 
 class OcrApplyRequest(BaseModel):
@@ -131,6 +132,7 @@ async def save_ocr_settings_endpoint(request: OcrSettingsRequest, client: Paperl
     ocr_settings["model"] = request.model
     ocr_settings["max_image_size"] = request.max_image_size
     ocr_settings["smart_skip_enabled"] = request.smart_skip_enabled
+    ocr_settings["provider"] = request.provider
     
     # Handle watchdog settings if present (need to update Pydantic model first)
     # For now, we assume they might be in request if we update model
@@ -285,7 +287,39 @@ async def ocr_single_document(
     client: PaperlessClient = Depends(get_paperless_client),
     db: AsyncSession = Depends(get_db),
 ):
-    """Run OCR on a single document with page-level persistence and resume support."""
+    """Run OCR on a single document. Uses configured provider (Ollama or Mistral OCR)."""
+    # Route to Mistral OCR if configured as default provider
+    provider = ocr_settings.get("provider", "ollama")
+    if provider == "mistral-ocr":
+        from app.services.mistral_ocr_service import mistral_ocr_document
+        api_key = await _get_mistral_api_key(db)
+        if not api_key:
+            raise HTTPException(status_code=400, detail="Kein Mistral OCR API-Key konfiguriert. Bitte unter Einstellungen → LLM → Mistral OCR hinterlegen.")
+        try:
+            pdf_bytes = await client.download_document_file(document_id)
+            if not pdf_bytes or pdf_bytes[:4] != b'%PDF':
+                raise HTTPException(status_code=400, detail="Dokument ist kein PDF")
+            mistral_result = await mistral_ocr_document(pdf_bytes, api_key)
+            doc = await client.get_document(document_id)
+            return {
+                "document_id": document_id,
+                "title": doc.get("title", "") if doc else "",
+                "old_content": doc.get("content", "") if doc else "",
+                "new_content": mistral_result["full_text"],
+                "old_length": len(doc.get("content", "") if doc else ""),
+                "new_length": len(mistral_result["full_text"]),
+                "pages_processed": mistral_result["page_count"],
+                "processing_time_seconds": 0,
+                "provider": "mistral-ocr",
+                "model": "mistral-ocr-2503-completion",
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Mistral OCR error for doc {document_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Mistral OCR Fehler: {str(e)}")
+
+    # Default: Ollama OCR
     try:
         ocr_service_module.single_ocr_running = True
         service = get_ocr_service()
@@ -1015,7 +1049,50 @@ async def _run_compare_job(paperless_client, document_id: int, models: list, tar
             compare_state["current_model_index"] = model_idx
             compare_state["current_page"] = 0
             compare_state["elapsed_seconds"] = round(time.time() - job_start, 1)
-            
+
+            # Special handling: Mistral OCR uses a separate API
+            if model_name == "mistral-ocr":
+                compare_state["phase"] = "mistral_ocr"
+                print(f"[Compare] Running Mistral OCR for doc {document_id}")
+                model_start = time.time()
+                try:
+                    from app.database import async_session
+                    from app.services.mistral_ocr_service import mistral_ocr_document
+                    async with async_session() as db_sess:
+                        api_key = await _get_mistral_api_key(db_sess)
+                    if not api_key:
+                        raise RuntimeError("Kein Mistral OCR API-Key konfiguriert")
+                    if not is_pdf:
+                        raise RuntimeError("Mistral OCR braucht ein PDF")
+                    mistral_result = await mistral_ocr_document(file_bytes, api_key)
+                    # Filter to target page if specified
+                    if target_page > 0:
+                        page_text = next((p["text"] for p in mistral_result["pages"] if p["page"] == target_page), "")
+                        text = page_text
+                    else:
+                        text = mistral_result["full_text"]
+                    duration = time.time() - model_start
+                    compare_state["results"].append({
+                        "model": model_name,
+                        "text": text,
+                        "chars": len(text),
+                        "duration_seconds": round(duration, 1),
+                        "pages_processed": mistral_result["page_count"],
+                        "error": None,
+                    })
+                    print(f"[Compare] Mistral OCR DONE: {len(text)} chars in {duration:.1f}s")
+                except Exception as e:
+                    print(f"[Compare] Mistral OCR ERROR: {e}")
+                    compare_state["results"].append({
+                        "model": model_name,
+                        "text": "",
+                        "chars": 0,
+                        "duration_seconds": round(time.time() - model_start, 1),
+                        "pages_processed": 0,
+                        "error": str(e),
+                    })
+                continue
+
             # Health check: wait for Ollama to be ready before starting each model
             compare_state["phase"] = "health_check"
             print(f"[Compare] Checking Ollama health before model: {model_name}")

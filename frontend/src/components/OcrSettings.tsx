@@ -19,6 +19,7 @@ export default function OcrSettings() {
     const [smartSkipEnabled, setSmartSkipEnabled] = useState(true)
     const [availableModels, setAvailableModels] = useState<string[]>([])
     const [loadingModels, setLoadingModels] = useState(false)
+    const [provider, setProvider] = useState<'ollama' | 'mistral-ocr'>('ollama')
 
     useEffect(() => {
         loadSettings()
@@ -48,6 +49,7 @@ export default function OcrSettings() {
             setOcrModel(settings.model)
             setMaxImageSize(settings.max_image_size || 1344)
             setSmartSkipEnabled(settings.smart_skip_enabled !== undefined ? settings.smart_skip_enabled : true)
+            if (settings.provider) setProvider(settings.provider as 'ollama' | 'mistral-ocr')
 
             if (settings.watchdog_enabled !== undefined) {
                 setWatchdogEnabled(settings.watchdog_enabled)
@@ -72,7 +74,8 @@ export default function OcrSettings() {
                 ollama_urls: updatedUrls,
                 model: ocrModel,
                 max_image_size: maxImageSize,
-                smart_skip_enabled: smartSkipEnabled
+                smart_skip_enabled: smartSkipEnabled,
+                provider
             })
         }
     }
@@ -87,7 +90,8 @@ export default function OcrSettings() {
             ollama_urls: updatedUrls,
             model: ocrModel,
             max_image_size: maxImageSize,
-            smart_skip_enabled: smartSkipEnabled
+            smart_skip_enabled: smartSkipEnabled,
+                provider
         })
     }
 
@@ -109,7 +113,8 @@ export default function OcrSettings() {
                 ollama_urls: updatedUrls,
                 model: ocrModel,
                 max_image_size: maxImageSize,
-                smart_skip_enabled: smartSkipEnabled
+                smart_skip_enabled: smartSkipEnabled,
+                provider
             })
         }
     }
@@ -127,7 +132,8 @@ export default function OcrSettings() {
                 ollama_urls: ollamaUrls,
                 model: ocrModel,
                 max_image_size: maxImageSize,
-                smart_skip_enabled: smartSkipEnabled
+                smart_skip_enabled: smartSkipEnabled,
+                provider
             })
             // Save watchdog settings separately
             await api.setWatchdogSettings(watchdogEnabled, watchdogInterval)
@@ -174,7 +180,67 @@ export default function OcrSettings() {
             </div>
 
             <div className="p-6 space-y-8">
-                {/* URLs List */}
+                {/* OCR Provider Selection */}
+                <div>
+                    <label className="block text-sm font-medium text-surface-300 mb-3">
+                        OCR Provider
+                    </label>
+                    <div className="grid grid-cols-2 gap-3">
+                        <button
+                            onClick={async () => {
+                                setProvider('ollama')
+                                await api.saveOcrSettings({
+                                    ollama_url: ollamaUrls[0] || 'http://localhost:11434',
+                                    ollama_urls: ollamaUrls,
+                                    model: ocrModel,
+                                    max_image_size: maxImageSize,
+                                    smart_skip_enabled: smartSkipEnabled,
+                                    provider: 'ollama',
+                                })
+                            }}
+                            className={clsx(
+                                'p-4 rounded-xl border text-left transition-colors',
+                                provider === 'ollama'
+                                    ? 'bg-cyan-500/10 border-cyan-500/40 ring-1 ring-cyan-500/30'
+                                    : 'bg-surface-900/40 border-surface-700/50 hover:border-surface-500'
+                            )}
+                        >
+                            <div className="flex items-center gap-2 mb-1">
+                                <Server className={clsx('w-4 h-4', provider === 'ollama' ? 'text-cyan-400' : 'text-surface-400')} />
+                                <span className={clsx('font-medium', provider === 'ollama' ? 'text-cyan-300' : 'text-surface-300')}>Ollama Vision</span>
+                            </div>
+                            <p className="text-xs text-surface-500">Lokale Vision-Modelle (qwen3-vl, glm-ocr, ...). Keine Cloud, volle Privatsphäre.</p>
+                        </button>
+                        <button
+                            onClick={async () => {
+                                setProvider('mistral-ocr')
+                                await api.saveOcrSettings({
+                                    ollama_url: ollamaUrls[0] || 'http://localhost:11434',
+                                    ollama_urls: ollamaUrls,
+                                    model: ocrModel,
+                                    max_image_size: maxImageSize,
+                                    smart_skip_enabled: smartSkipEnabled,
+                                    provider: 'mistral-ocr',
+                                })
+                            }}
+                            className={clsx(
+                                'p-4 rounded-xl border text-left transition-colors',
+                                provider === 'mistral-ocr'
+                                    ? 'bg-orange-500/10 border-orange-500/40 ring-1 ring-orange-500/30'
+                                    : 'bg-surface-900/40 border-surface-700/50 hover:border-surface-500'
+                            )}
+                        >
+                            <div className="flex items-center gap-2 mb-1">
+                                <Zap className={clsx('w-4 h-4', provider === 'mistral-ocr' ? 'text-orange-400' : 'text-surface-400')} />
+                                <span className={clsx('font-medium', provider === 'mistral-ocr' ? 'text-orange-300' : 'text-surface-300')}>Mistral OCR (Cloud)</span>
+                            </div>
+                            <p className="text-xs text-surface-500">Sehr schnell, sehr genau. PDFs werden direkt an Mistral gesendet. API-Key unter LLM-Einstellungen.</p>
+                        </button>
+                    </div>
+                </div>
+
+                {/* URLs List — nur bei Ollama anzeigen */}
+                {provider === 'ollama' && (
                 <div>
                     <label className="block text-sm font-medium text-surface-300 mb-3">
                         Ollama Server URLs (Priorität von oben nach unten)
@@ -252,8 +318,10 @@ export default function OcrSettings() {
                         Automatisch Failover auf Backup-Server bei Verbindungsproblemen.
                     </p>
                 </div>
+                )}
 
-                {/* Model */}
+                {/* Model — nur bei Ollama */}
+                {provider === 'ollama' && (
                 <div>
                     <label className="block text-sm font-medium text-surface-300 mb-2">
                         OCR Modell
@@ -301,8 +369,20 @@ export default function OcrSettings() {
                         {' '}Empfohlen: <span className="text-surface-300 font-mono">qwen3-vl:4b-instruct</span>
                     </p>
                 </div>
+                )}
 
-                {/* Performance & Quality Settings */}
+                {/* Hinweis bei Mistral-Modus */}
+                {provider === 'mistral-ocr' && (
+                <div className="p-4 bg-orange-500/5 border border-orange-500/20 rounded-xl">
+                    <p className="text-sm text-orange-300 font-medium mb-1">Mistral OCR aktiv</p>
+                    <p className="text-xs text-surface-400">
+                        Es wird das Modell <span className="font-mono text-surface-300">mistral-ocr-2503-completion</span> verwendet (kein Modellauswahl nötig). Stelle sicher dass du einen API-Key unter Einstellungen → LLM → Mistral OCR hinterlegt hast.
+                    </p>
+                </div>
+                )}
+
+                {/* Performance & Quality Settings — nur bei Ollama */}
+                {provider === 'ollama' && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* Resolution */}
                     <div>
@@ -349,6 +429,7 @@ export default function OcrSettings() {
                         </div>
                     </div>
                 </div>
+                )}
 
                 {/* Watchdog / Continuous Mode */}
                 <div className="pt-6 border-t border-surface-700/50">
