@@ -114,9 +114,9 @@ async def get_llm_providers(db: AsyncSession = Depends(get_db)):
             if p["name"] not in existing_names:
                 db.add(LLMProvider(**p))
                 added = True
-        # Migrate stale model names
+        # Migrate stale model names — force mistral-ocr to latest
         for p in providers:
-            if p.name == "mistral-ocr" and p.model == "mistral-ocr-2503-completion":
+            if p.name == "mistral-ocr" and p.model != "mistral-ocr-latest":
                 p.model = "mistral-ocr-latest"
                 added = True
         if added:
