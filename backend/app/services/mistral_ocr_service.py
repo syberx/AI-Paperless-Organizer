@@ -41,11 +41,12 @@ async def mistral_ocr_document(
     """
     pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
 
+    # Mistral expects a data URL when sending base64 (type must be "document_url")
     request_body = {
         "model": model,
         "document": {
-            "type": "base64",
-            "data": pdf_b64,
+            "type": "document_url",
+            "document_url": f"data:application/pdf;base64,{pdf_b64}",
         },
     }
 
