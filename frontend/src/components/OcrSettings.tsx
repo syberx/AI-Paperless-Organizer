@@ -376,7 +376,7 @@ export default function OcrSettings() {
                 <div className="p-4 bg-orange-500/5 border border-orange-500/20 rounded-xl">
                     <p className="text-sm text-orange-300 font-medium mb-1">Mistral OCR aktiv</p>
                     <p className="text-xs text-surface-400">
-                        Es wird das Modell <span className="font-mono text-surface-300">mistral-ocr-2503-completion</span> verwendet (kein Modellauswahl nötig). Stelle sicher dass du einen API-Key unter Einstellungen → LLM → Mistral OCR hinterlegt hast.
+                        Es wird das Modell <span className="font-mono text-surface-300">mistral-ocr-latest</span> verwendet (kein Modellauswahl nötig). Stelle sicher dass du einen API-Key unter Einstellungen → LLM → Mistral OCR hinterlegt hast.
                     </p>
                 </div>
                 )}

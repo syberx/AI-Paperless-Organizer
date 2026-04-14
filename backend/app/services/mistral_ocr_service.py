@@ -4,7 +4,7 @@ Completely separate from the Ollama Vision OCR. Sends PDFs directly
 to Mistral's /v1/ocr endpoint which returns structured text per page.
 
 API Docs: https://docs.mistral.ai/api/endpoint/ocr
-Model: mistral-ocr-2503-completion
+Model: mistral-ocr-latest
 """
 
 import base64
@@ -15,7 +15,7 @@ from typing import Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 MISTRAL_OCR_URL = "https://api.mistral.ai/v1/ocr"
-MISTRAL_OCR_MODEL = "mistral-ocr-2503-completion"
+MISTRAL_OCR_MODEL = "mistral-ocr-latest"
 
 
 async def mistral_ocr_document(
@@ -29,7 +29,7 @@ async def mistral_ocr_document(
     Args:
         pdf_bytes: Raw PDF file bytes
         api_key: Mistral API key
-        model: OCR model name (default: mistral-ocr-2503-completion)
+        model: OCR model name (default: mistral-ocr-latest)
         include_image_base64: Whether to include page images in response
 
     Returns:

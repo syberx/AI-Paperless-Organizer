@@ -311,7 +311,7 @@ async def ocr_single_document(
                 "pages_processed": mistral_result["page_count"],
                 "processing_time_seconds": 0,
                 "provider": "mistral-ocr",
-                "model": "mistral-ocr-2503-completion",
+                "model": "mistral-ocr-latest",
             }
         except HTTPException:
             raise
@@ -776,7 +776,7 @@ async def mistral_ocr_single(
     return {
         "document_id": document_id,
         "provider": "mistral",
-        "model": "mistral-ocr-2503-completion",
+        "model": "mistral-ocr-latest",
         "pages": result["pages"],
         "full_text": result["full_text"],
         "page_count": result["page_count"],

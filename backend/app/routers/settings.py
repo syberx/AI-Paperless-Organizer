@@ -97,7 +97,7 @@ async def get_llm_providers(db: AsyncSession = Depends(get_db)):
         {"name": "azure", "display_name": "Azure OpenAI", "model": "gpt-4"},
         {"name": "ollama", "display_name": "Ollama (Lokal)", "api_base_url": "http://localhost:11434", "model": "llama3.1"},
         {"name": "mistral", "display_name": "Mistral AI", "model": "mistral-small-latest"},
-        {"name": "mistral-ocr", "display_name": "Mistral OCR (nur API-Key)", "model": "mistral-ocr-2503-completion"},
+        {"name": "mistral-ocr", "display_name": "Mistral OCR (nur API-Key)", "model": "mistral-ocr-latest"},
         {"name": "openrouter", "display_name": "OpenRouter", "model": "mistralai/mistral-small-2603"},
     ]
 
@@ -113,6 +113,11 @@ async def get_llm_providers(db: AsyncSession = Depends(get_db)):
         for p in ALL_DEFAULTS:
             if p["name"] not in existing_names:
                 db.add(LLMProvider(**p))
+                added = True
+        # Migrate stale model names
+        for p in providers:
+            if p.name == "mistral-ocr" and p.model == "mistral-ocr-2503-completion":
+                p.model = "mistral-ocr-latest"
                 added = True
         if added:
             await db.commit()
