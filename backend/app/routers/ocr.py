@@ -1265,18 +1265,35 @@ async def get_compare_status():
 @router.post("/compare/evaluate")
 async def evaluate_ocr_results(
     request: OcrEvaluateRequest,
-    llm_service: LLMProviderService = Depends(get_llm_service)
+    db: AsyncSession = Depends(get_db),
 ):
     """Send OCR comparison results to an external LLM for quality evaluation.
-    
+
     WARNING: This sends document text to a cloud API (OpenAI, Anthropic, etc.)!
     Uses a thorough multi-criteria evaluation inspired by professional OCR benchmarks.
     """
-    if not llm_service.provider:
-        raise HTTPException(
-            status_code=400, 
-            detail="Kein LLM-Provider konfiguriert. Bitte zuerst unter Einstellungen einen Provider (z.B. OpenAI) einrichten."
+    from app.models.settings_model import LLMProvider
+
+    # Find a usable cloud LLM provider (any configured one, prefer is_active=True)
+    # Skip ollama (local, often weak) and mistral-ocr (OCR-only, no chat)
+    candidates_q = await db.execute(
+        select(LLMProvider).where(
+            LLMProvider.is_configured == True,
+            LLMProvider.api_key != "",
+            LLMProvider.name.notin_(["ollama", "mistral-ocr"]),
         )
+    )
+    candidates = candidates_q.scalars().all()
+
+    # Prefer is_active provider, else any candidate
+    provider = next((p for p in candidates if p.is_active), None) or (candidates[0] if candidates else None)
+    if not provider:
+        raise HTTPException(
+            status_code=400,
+            detail="Kein Cloud-LLM konfiguriert. Bitte unter Einstellungen → LLM Modelle einen Provider (z.B. OpenAI) mit API-Key hinterlegen."
+        )
+
+    llm_service = LLMProviderService(provider)
     
     results = request.results
     if not results or len(results) < 1:
