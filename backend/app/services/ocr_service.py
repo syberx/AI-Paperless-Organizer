@@ -1166,6 +1166,49 @@ class OcrService:
         
         return {"success": tag_success, "document_id": document_id}
     
+    async def _ocr_document_via_provider(self, paperless_client, doc_id: int, force: bool = False, db_session=None):
+        """Run OCR using the configured provider (Ollama or Mistral OCR)."""
+        # Read current provider setting
+        try:
+            from app.routers.ocr import ocr_settings as _ocr_cfg
+            provider = _ocr_cfg.get("provider", "ollama")
+        except Exception:
+            provider = "ollama"
+
+        if provider == "mistral-ocr":
+            from app.services.mistral_ocr_service import mistral_ocr_document
+            from app.database import async_session
+            from app.models.settings_model import LLMProvider
+            from sqlalchemy import select as _sel
+            async with async_session() as db_sess:
+                q = await db_sess.execute(_sel(LLMProvider).where(LLMProvider.name == "mistral-ocr"))
+                prov = q.scalar_one_or_none()
+                api_key = prov.api_key if prov and prov.api_key else ""
+                if not api_key:
+                    q2 = await db_sess.execute(_sel(LLMProvider).where(LLMProvider.name == "mistral"))
+                    prov2 = q2.scalar_one_or_none()
+                    api_key = prov2.api_key if prov2 and prov2.api_key else ""
+            if not api_key:
+                raise RuntimeError("Kein Mistral OCR API-Key konfiguriert")
+
+            doc = await paperless_client.get_document(doc_id)
+            pdf_bytes = await paperless_client.download_document_file(doc_id)
+            if not pdf_bytes or pdf_bytes[:4] != b'%PDF':
+                raise RuntimeError("Dokument ist kein PDF")
+            import time as _time
+            start = _time.time()
+            result = await mistral_ocr_document(pdf_bytes, api_key)
+            duration = _time.time() - start
+            return {
+                "new_content": result["full_text"],
+                "old_content": doc.get("content", "") if doc else "",
+                "ocr_duration": duration,
+                "ocr_pages": result["page_count"],
+            }
+
+        # Default: Ollama Vision
+        return await self.ocr_document(paperless_client, doc_id, force=force, db_session=db_session)
+
     async def batch_ocr(
         self,
         paperless_client,
@@ -1176,7 +1219,7 @@ class OcrService:
     ) -> None:
         """Run batch OCR. Updates batch_state in-place for progress tracking."""
         global batch_state
-        
+
         batch_state.update({
             "running": True,
             "should_stop": False,
@@ -1188,18 +1231,28 @@ class OcrService:
             "mode": mode
         })
 
+        # Determine active provider — Ollama-Lock only needed for Ollama
+        try:
+            from app.routers.ocr import ocr_settings as _ocr_cfg
+            active_provider = _ocr_cfg.get("provider", "ollama")
+        except Exception:
+            active_provider = "ollama"
+
         from app.services.ollama_lock import acquire as ollama_acquire, release as ollama_release, is_locked as ollama_is_locked, current_holder as ollama_holder
         lock_acquired = False
         try:
-            if ollama_is_locked():
-                holder = ollama_holder()
-                batch_state["log"].append(f"⏳ Warte auf {holder} (Ollama belegt)...")
-                logger.info(f"[OCR-Batch] Ollama belegt durch {holder}, warte...")
-            lock_acquired = await ollama_acquire("ocr-batch", timeout=600)
-            if not lock_acquired:
-                batch_state["log"].append("❌ Ollama-Lock nicht erhalten nach 10 Min – Abbruch.")
-                batch_state["running"] = False
-                return
+            if active_provider == "ollama":
+                if ollama_is_locked():
+                    holder = ollama_holder()
+                    batch_state["log"].append(f"⏳ Warte auf {holder} (Ollama belegt)...")
+                    logger.info(f"[OCR-Batch] Ollama belegt durch {holder}, warte...")
+                lock_acquired = await ollama_acquire("ocr-batch", timeout=600)
+                if not lock_acquired:
+                    batch_state["log"].append("❌ Ollama-Lock nicht erhalten nach 10 Min – Abbruch.")
+                    batch_state["running"] = False
+                    return
+            else:
+                batch_state["log"].append(f"🚀 Batch läuft über: {active_provider} (Cloud)")
             # Get the tags we need
             ocrfinish_tag = await paperless_client.get_or_create_tag(TAG_OCR_FINISH)
             ocrfinish_tag_id = ocrfinish_tag.get("id")
@@ -1219,12 +1272,13 @@ class OcrService:
             # Determine which documents to process
             documents = []
             
-            # OPTIMIZATION: Check for best server before starting
-            batch_state["log"].append("🔎 Prüfe verfügbare Ollama-Server...")
-            if await self.find_best_server():
-                batch_state["log"].append(f"🚀 Verbunden mit: {self.get_current_url()}")
-            else:
-                 batch_state["log"].append(f"⚠️ Warnung: Kein Server antwortet schnell. Nutze {self.get_current_url()}")
+            # OPTIMIZATION: Check for best server before starting (only Ollama)
+            if active_provider == "ollama":
+                batch_state["log"].append("🔎 Prüfe verfügbare Ollama-Server...")
+                if await self.find_best_server():
+                    batch_state["log"].append(f"🚀 Verbunden mit: {self.get_current_url()}")
+                else:
+                     batch_state["log"].append(f"⚠️ Warnung: Kein Server antwortet schnell. Nutze {self.get_current_url()}")
 
             if mode == "all":
                 # Get all documents – with retry on connection errors
@@ -1329,10 +1383,10 @@ class OcrService:
                 batch_state["log"].append(f"🔄 [{i+1}/{len(documents)}] Verarbeite: {doc_title} (ID: {doc_id})")
                 
                 try:
-                    # Use the multi-page aware OCR logic with DB persistence
+                    # Use the configured provider (Ollama or Mistral OCR)
                     from app.database import async_session
                     async with async_session() as db_sess:
-                        ocr_result = await self.ocr_document(paperless_client, doc_id, db_session=db_sess)
+                        ocr_result = await self._ocr_document_via_provider(paperless_client, doc_id, db_session=db_sess)
                     new_content = ocr_result.get("new_content")
                     old_content = ocr_result.get("old_content", "")
                     ocr_duration = ocr_result.get("ocr_duration", 0)
@@ -1356,7 +1410,7 @@ class OcrService:
                             # RETRY: Run OCR again fresh (force=True clears DB page cache)
                             try:
                                 async with async_session() as db_sess2:
-                                    retry_result = await self.ocr_document(paperless_client, doc_id, force=True, db_session=db_sess2)
+                                    retry_result = await self._ocr_document_via_provider(paperless_client, doc_id, force=True, db_session=db_sess2)
                                 retry_content = retry_result.get("new_content")
                                 retry_len = len(retry_content) if retry_content else 0
                                 
