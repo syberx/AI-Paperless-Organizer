@@ -838,14 +838,21 @@ class DocumentClassifierService:
             all_tags = await self.paperless.get_tags(use_cache=True)
             tag_name_to_id = {t["name"].lower(): t["id"] for t in all_tags}
             tag_id_to_name = {t["id"]: t["name"] for t in all_tags}
+            excluded_ids = set(config.excluded_tag_ids or [])
             tag_ids = []
             for tag_name in classification["tags"]:
                 tid = tag_name_to_id.get(tag_name.lower())
                 if tid:
+                    if tid in excluded_ids:
+                        logger.info(f"Apply: skipping excluded tag '{tag_name}' (id={tid})")
+                        continue
                     tag_ids.append(tid)
                 else:
                     new_tag = await self.paperless.get_or_create_tag(tag_name)
                     if new_tag:
+                        if new_tag["id"] in excluded_ids:
+                            logger.info(f"Apply: skipping newly-created excluded tag '{tag_name}'")
+                            continue
                         tag_ids.append(new_tag["id"])
 
             doc = await self.paperless.get_document(document_id)
