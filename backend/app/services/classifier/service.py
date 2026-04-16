@@ -985,7 +985,6 @@ class DocumentClassifierService:
                 if fid and value is not None:
                     # Sanitize monetary/numeric values: strip currency symbols, fix formatting
                     if isinstance(value, str):
-                        import re
                         cleaned = value.strip()
                         # Remove currency symbols/codes (EUR, €, $, USD, etc.)
                         cleaned = re.sub(r'^[A-Z]{2,3}\s*', '', cleaned)
