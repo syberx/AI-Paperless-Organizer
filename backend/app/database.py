@@ -61,6 +61,7 @@ async def _migrate_columns(conn):
         ("classifier_config", "auto_classify_enabled", "BOOLEAN DEFAULT 0"),
         ("classifier_config", "auto_classify_interval", "INTEGER DEFAULT 5"),
         ("classifier_config", "auto_classify_mode", "TEXT DEFAULT 'review'"),
+        ("classifier_config", "auto_classify_filter_mode", "TEXT DEFAULT 'db'"),
         ("classifier_config", "auto_classify_skip_tag_ids", "TEXT DEFAULT '[]'"),
         ("classifier_config", "auto_classify_only_tag_ids", "TEXT DEFAULT '[]'"),
         ("classifier_history", "tag_ideas", "TEXT DEFAULT '[]'"),

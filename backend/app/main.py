@@ -60,9 +60,11 @@ async def lifespan(app: FastAPI):
             cls_config = q.scalars().first()
             if cls_config and getattr(cls_config, "auto_classify_enabled", False):
                 from app.routers.classifier import _auto_classify_state, _auto_classify_loop
+                persisted_filter = getattr(cls_config, "auto_classify_filter_mode", "db") or "db"
                 _auto_classify_state["enabled"] = True
+                _auto_classify_state["filter_mode"] = persisted_filter
                 asyncio.get_running_loop().create_task(_auto_classify_loop())
-                logging.getLogger(__name__).info("Auto-classify auto-started")
+                logging.getLogger(__name__).info(f"Auto-classify auto-started (filter_mode={persisted_filter})")
     except Exception as e:
         logging.getLogger(__name__).error(f"Auto-classify auto-start failed: {e}")
 

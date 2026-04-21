@@ -94,6 +94,8 @@ export default function DocumentClassifier() {
     try {
       const cfg = await api.getClassifierConfig()
       setConfig(cfg)
+      const fm = (cfg as any).auto_classify_filter_mode
+      if (fm === 'db' || fm === 'tag') setAutoFilterMode(fm)
     } catch (e) {
       console.error('Failed to load classifier config:', e)
     } finally {
@@ -564,6 +566,10 @@ export default function DocumentClassifier() {
     try {
       const s = await api.fetchJson<any>('/classifier/auto-classify/status')
       setAutoClassifyStatus(s)
+      // Restore filter_mode from running status
+      if (s.filter_mode === 'db' || s.filter_mode === 'tag') {
+        setAutoFilterMode(s.filter_mode)
+      }
     } catch {}
   }
 
@@ -2572,7 +2578,11 @@ export default function DocumentClassifier() {
                   <div className="flex flex-col gap-1">
                     <select
                       value={autoFilterMode}
-                      onChange={e => setAutoFilterMode(e.target.value as 'db' | 'tag')}
+                      onChange={e => {
+                        const v = e.target.value as 'db' | 'tag'
+                        setAutoFilterMode(v)
+                        autoSaveConfigField('auto_classify_filter_mode', v)
+                      }}
                       className="input text-xs py-1.5 px-2"
                     >
                       <option value="db">Neue Dokumente (DB-Modus)</option>

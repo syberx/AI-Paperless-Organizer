@@ -72,6 +72,7 @@ class ClassifierConfig(Base):
     auto_classify_interval = Column(Integer, default=5)  # minutes
     # What to do after auto-classify: "review" (always review), "auto_apply" (apply if confident)
     auto_classify_mode = Column(String(50), default="review")
+    auto_classify_filter_mode = Column(String(20), default="db")  # "db" or "tag"
     # Tags that mark a document to be skipped entirely by auto-classification
     auto_classify_skip_tag_ids = Column(JSON, default=[])
     # If set, ONLY documents with at least one of these tags will be auto-classified

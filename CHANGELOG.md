@@ -4,6 +4,18 @@ Alle wichtigen Änderungen an AI Paperless Organizer.
 
 ---
 
+## 2026-04-15
+
+- **Bugfix**: Tag-Modus Klassifizierung crashte bei Custom Fields mit Fehler "cannot access local variable 're'"
+- **Bugfix**: Ausgeschlossene Tags werden jetzt endgültig beim Anwenden gefiltert (nicht nur bei Vorschlägen)
+- **Bugfix**: Auto-Klassifizierung DB/Tag-Modus bleibt nach Neustart erhalten (war bisher immer auf DB-Modus zurückgesetzt)
+- **Bugfix**: OCR Batch-Modus (Alle/Getaggt/Manuell) wird im Browser gespeichert und nicht mehr zurückgesetzt
+- **Mistral OCR**: Funktioniert jetzt auch beim Batch-Scan (nicht nur Einzel-OCR)
+- **Feature**: Mistral OCR im Modell-Vergleich gegen Ollama testen
+- **Feature**: Docker Hub Images aktualisiert
+
+---
+
 ## 2026-04-13
 
 ### Auto-Klassifizierung

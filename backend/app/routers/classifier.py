@@ -58,6 +58,7 @@ class ClassifierConfigUpdate(BaseModel):
     auto_classify_enabled: Optional[bool] = None
     auto_classify_interval: Optional[int] = None
     auto_classify_mode: Optional[str] = None
+    auto_classify_filter_mode: Optional[str] = None
     auto_classify_skip_tag_ids: Optional[List[int]] = None
     auto_classify_only_tag_ids: Optional[List[int]] = None
     classification_tag_enabled: Optional[bool] = None
@@ -1218,12 +1219,13 @@ async def start_auto_classify(
     _auto_classify_state["task"] = asyncio.create_task(_auto_classify_loop())
     logger.info(f"Auto-classify started (mode: {filter_mode})")
 
-    # Persist to DB so it auto-starts after restart
+    # Persist to DB so it auto-starts after restart (mode + filter_mode)
     try:
         q = await db.execute(select(ClassifierConfig).where(ClassifierConfig.id == 1))
         config = q.scalars().first()
         if config:
             config.auto_classify_enabled = True
+            config.auto_classify_filter_mode = filter_mode
             await db.commit()
     except Exception as e:
         logger.warning(f"Could not persist auto-classify enabled: {e}")

@@ -48,8 +48,15 @@ export default function OcrManager() {
         setActiveTab('single')
     }
 
-    // Batch OCR state
-    const [batchMode, setBatchMode] = useState<BatchMode>('all')
+    // Batch OCR state (persistent via localStorage)
+    const [batchMode, setBatchModeState] = useState<BatchMode>(() => {
+        const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('ocr_batch_mode') : null
+        return (saved === 'all' || saved === 'tagged' || saved === 'manual') ? saved as BatchMode : 'all'
+    })
+    const setBatchMode = (mode: BatchMode) => {
+        setBatchModeState(mode)
+        try { localStorage.setItem('ocr_batch_mode', mode) } catch {}
+    }
     const [manualIds, setManualIds] = useState('')
     const [setFinishTag, setSetFinishTag] = useState(true)
     const [batchStatus, setBatchStatus] = useState<api.BatchOcrStatus | null>(null)
