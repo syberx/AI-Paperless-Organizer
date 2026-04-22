@@ -11,6 +11,9 @@ aiosqlite>=0.19.0
 httpx>=0.27.0
 aiohttp>=3.9.1
 
+# Fuzzy string matching for transaction matcher
+rapidfuzz>=3.0.0
+
 # LLM Providers
 openai>=1.12.0
 anthropic>=0.18.1

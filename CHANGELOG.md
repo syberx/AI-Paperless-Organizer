@@ -4,6 +4,15 @@ Alle wichtigen Änderungen an AI Paperless Organizer.
 
 ---
 
+## 2026-04-16
+
+- **Neu: Transaktions-Match API** – externe Buchhaltungstools (EÜR, n8n, PayPal-Reconciliation) können Bank-/PayPal-Buchungen per `POST /api/match/transaction` gegen Paperless-Belege matchen. Score-basiert (Rechnungsnummer, Betrag, IBAN, Datum, Kundenname Fuzzy, Volltext), gibt Top 3 mit 0-100% zurück
+- **Match-Optionen pro Request**: Datum-Fenster, Betrag-Toleranz (€ oder %), Fuzzy-Schwelle, Anzahl Treffer frei einstellbar
+- **Match-Log** – rollende letzte 30 Anfragen einsehbar unter `/api/match/log`
+- **API-Doku erweitert** unter Einstellungen → API
+
+---
+
 ## 2026-04-15
 
 - **Bugfix**: Tag-Modus Klassifizierung crashte bei Custom Fields mit Fehler "cannot access local variable 're'"

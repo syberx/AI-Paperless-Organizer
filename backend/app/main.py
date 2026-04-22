@@ -12,7 +12,7 @@ logging.basicConfig(
     format="%(levelname)s %(name)s: %(message)s",
     stream=sys.stdout,
 )
-from app.routers import paperless, correspondents, tags, document_types, settings, llm, debug, statistics, ignored_items, ocr, cleanup, classifier, rag, api_keys, cloud_import, duplicates
+from app.routers import paperless, correspondents, tags, document_types, settings, llm, debug, statistics, ignored_items, ocr, cleanup, classifier, rag, api_keys, cloud_import, duplicates, match
 from app.routers.ocr import ocr_settings, get_ocr_service
 from app.services.ocr_service import watchdog_state
 from app.services.paperless_client import PaperlessClient
@@ -193,6 +193,7 @@ app.include_router(rag.router, prefix="/api/rag", tags=["RAG"])
 app.include_router(api_keys.router, prefix="/api/api-keys", tags=["API Keys"])
 app.include_router(cloud_import.router, prefix="/api/cloud-import", tags=["Cloud Import"])
 app.include_router(duplicates.router, prefix="/api/cleanup/duplicates", tags=["Duplicates"])
+app.include_router(match.router, prefix="/api/match", tags=["Transaction Match"])
 
 
 @app.get("/api/health")

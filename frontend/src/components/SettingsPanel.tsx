@@ -1099,6 +1099,7 @@ export default function SettingsPanel() {
                 <li><strong className="text-surface-200">Chat</strong> - Stelle Fragen zu deinen Dokumenten, die KI antwortet mit Quellenangaben</li>
                 <li><strong className="text-surface-200">Suche</strong> - Semantische Dokumentensuche (findet Bedeutung, nicht nur Stichworte)</li>
                 <li><strong className="text-surface-200">Sessions</strong> - Chat-Verlaeufe werden gespeichert und koennen abgerufen werden</li>
+                <li><strong className="text-surface-200">Transaktions-Match</strong> - Bank-/PayPal-Buchung an Paperless-Beleg matchen (für EÜR/Buchhaltung)</li>
               </ul>
             </div>
 
@@ -1143,6 +1144,43 @@ Authorization: Bearer po_dein_api_key
             </div>
 
             <div>
+              <h4 className="font-medium text-surface-100 mb-1">Transaktions-Match (für EÜR/Buchhaltung)</h4>
+              <p className="text-surface-400 mb-2 text-xs">
+                Matcht eine Bank-/PayPal-Buchung gegen deine Paperless-Dokumente per Score-System
+                (Rechnungsnummer, Betrag, IBAN, Datum, Kundenname, Volltext). Gibt Top 3 Treffer mit Score 0-100% zurück.
+              </p>
+              <pre className="bg-surface-900 text-green-400 rounded-lg p-3 overflow-x-auto text-xs">
+{`POST /api/match/transaction
+Content-Type: application/json
+Authorization: Bearer po_dein_api_key
+
+{
+  "transaction": {
+    "amount": 41.22,
+    "date": "2025-11-10",
+    "description": "Domain renewal",
+    "customer": "TLD Registrar Ltd",
+    "iban": "DE...",
+    "bookingNumber": "WEB-2025-0058",
+    "paypalTransactionId": "1048329975057"
+  },
+  "options": {
+    "dateWindowDays": 7,
+    "amountToleranceEur": 0.5,
+    "amountTolerancePercent": 0,
+    "fuzzyThreshold": 75,
+    "limit": 3
+  }
+}`}</pre>
+              <p className="text-surface-500 mt-1 text-xs">
+                Antwort: <code className="text-surface-300">matches[]</code> mit
+                {' '}<code className="text-surface-300">documentId</code>, <code className="text-surface-300">score</code>,
+                {' '}<code className="text-surface-300">confidence</code> (high/medium/low),
+                {' '}<code className="text-surface-300">matchedOn[]</code> (welches Feld welches Gewicht beisteuerte).
+              </p>
+            </div>
+
+            <div>
               <h4 className="font-medium text-surface-100 mb-1">Weitere Endpunkte</h4>
               <div className="bg-surface-700/50 rounded-lg p-3 space-y-1 text-xs font-mono text-surface-200">
                 <div><span className="text-blue-400">GET</span> /api/rag/sessions - Alle Chat-Sessions auflisten</div>
@@ -1151,6 +1189,8 @@ Authorization: Bearer po_dein_api_key
                 <div><span className="text-green-400">POST</span> /api/rag/index/start - Indexierung starten</div>
                 <div><span className="text-blue-400">GET</span> /api/rag/index/status - Indexierungsstatus</div>
                 <div><span className="text-blue-400">GET</span> /api/rag/config - RAG-Konfiguration</div>
+                <div><span className="text-blue-400">GET</span> /api/match/health - Health-Check Match-API</div>
+                <div><span className="text-blue-400">GET</span> /api/match/log - Letzte 30 Match-Anfragen</div>
               </div>
             </div>
 
