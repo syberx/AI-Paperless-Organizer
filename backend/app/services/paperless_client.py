@@ -254,7 +254,7 @@ class PaperlessClient:
         tag_id: int = None,
         document_type_id: int = None,
         query: str = None,
-        page_size: int = 1000 # Safer page size to avoid 120s timeout
+        page_size: int = 500  # >500 überschreitet regelmäßig 120s Timeout bei vielen Dokumenten
     ) -> List[Dict]:
         """Get documents with optional filters and auto-pagination."""
         params = {"page_size": page_size}

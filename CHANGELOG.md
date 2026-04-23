@@ -6,6 +6,9 @@ Alle wichtigen Änderungen an AI Paperless Organizer.
 
 ## 2026-04-23
 
+### OCR Batch – Paperless-Timeout
+- **Fix**: Default-`page_size` in `get_documents()` von 1000 → 500. Paperless überschreitet bei `page_size=1000` regelmäßig das 120s-httpx-Timeout (>150s gemessen), wodurch Batch-OCR mit „Paperless nicht erreichbar" abbrach
+
 ### Transaktions-Match API
 - **Bugfix Amount-Vorzeichen**: Negative Buchungen (z.B. Ausgaben `-21.25`) werden jetzt korrekt mit positiven Paperless-Beträgen gematcht (`abs()`)
 - **Amount Format-Varianten**: Prüft sowohl `21.25` als auch `21,25` und ganzzahlige Beträge als `21`
