@@ -7,7 +7,9 @@ Alle wichtigen Änderungen an AI Paperless Organizer.
 ## 2026-04-23
 
 ### OCR Batch – Paperless-Timeout
-- **Fix**: Default-`page_size` in `get_documents()` von 1000 → 500. Paperless überschreitet bei `page_size=1000` regelmäßig das 120s-httpx-Timeout (>150s gemessen), wodurch Batch-OCR mit „Paperless nicht erreichbar" abbrach
+- **Fix**: Default-`page_size` in `get_documents()` von 1000 → 250. Paperless-ngx antwortet bei vielen Dokumenten bei `page_size=1000` nicht innerhalb des httpx-Timeouts; selbst 500 läuft unter Last knapp ans Limit (115s/120s gemessen). 250 antwortet stabil in ~50s.
+- **Fix**: httpx-Timeout in `PaperlessClient._request` von 120s → 180s als Reserve für temporäre Paperless-Lastspitzen
+- **Fehlermeldung**: Batch-OCR zeigt jetzt Exception-Typ im Log (vorher nur `– Retry in 30s` ohne Kontext, da `httpx.ReadTimeout` leeren `str()` hat); Stacktrace landet im Backend-Log
 
 ### Transaktions-Match API
 - **Bugfix Amount-Vorzeichen**: Negative Buchungen (z.B. Ausgaben `-21.25`) werden jetzt korrekt mit positiven Paperless-Beträgen gematcht (`abs()`)

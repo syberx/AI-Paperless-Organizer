@@ -1289,19 +1289,20 @@ class OcrService:
                         all_docs = await paperless_client.get_documents()
                         break
                     except Exception as fetch_err:
+                        err_text = f"{type(fetch_err).__name__}: {fetch_err}" if str(fetch_err) else type(fetch_err).__name__
                         if _attempt < 2:
                             wait_sec = 30 * (_attempt + 1)
                             batch_state["log"].append(
-                                f"⚠️ Paperless nicht erreichbar (Versuch {_attempt + 1}/3): {fetch_err} – "
+                                f"⚠️ Paperless nicht erreichbar (Versuch {_attempt + 1}/3): {err_text} – "
                                 f"Retry in {wait_sec}s..."
                             )
-                            logger.warning(f"batch_ocr: get_documents failed (attempt {_attempt+1}): {fetch_err}")
+                            logger.warning(f"batch_ocr: get_documents failed (attempt {_attempt+1}): {err_text}", exc_info=True)
                             await asyncio.sleep(wait_sec)
                         else:
                             batch_state["log"].append(
-                                f"❌ Paperless nach 3 Versuchen nicht erreichbar – Batch abgebrochen."
+                                f"❌ Paperless nach 3 Versuchen nicht erreichbar ({err_text}) – Batch abgebrochen."
                             )
-                            logger.error(f"batch_ocr: get_documents failed after 3 attempts: {fetch_err}")
+                            logger.error(f"batch_ocr: get_documents failed after 3 attempts: {err_text}", exc_info=True)
                             return
 
                 # Filter out those already having ocrfinish, ocrpruefen, or ocrfehler tag

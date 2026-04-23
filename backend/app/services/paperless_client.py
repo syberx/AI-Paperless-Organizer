@@ -41,7 +41,7 @@ class PaperlessClient:
         
         url = f"{self.base_url}/api{endpoint}"
         
-        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True, verify=False) as client:
+        async with httpx.AsyncClient(timeout=180.0, follow_redirects=True, verify=False) as client:
             response = await client.request(
                 method=method,
                 url=url,
@@ -254,7 +254,7 @@ class PaperlessClient:
         tag_id: int = None,
         document_type_id: int = None,
         query: str = None,
-        page_size: int = 500  # >500 überschreitet regelmäßig 120s Timeout bei vielen Dokumenten
+        page_size: int = 250  # 500 reicht gefährlich nah an 120s heran, 250 antwortet stabil in ~50s
     ) -> List[Dict]:
         """Get documents with optional filters and auto-pagination."""
         params = {"page_size": page_size}
