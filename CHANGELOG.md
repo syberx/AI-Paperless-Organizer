@@ -6,9 +6,10 @@ Alle wichtigen Änderungen an AI Paperless Organizer.
 
 ## 2026-04-23
 
-### OCR Batch – Paperless-Timeout
+### OCR Batch – Paperless-Timeout & Transiente Fehler
 - **Fix**: Default-`page_size` in `get_documents()` von 1000 → 250. Paperless-ngx antwortet bei vielen Dokumenten bei `page_size=1000` nicht innerhalb des httpx-Timeouts; selbst 500 läuft unter Last knapp ans Limit (115s/120s gemessen). 250 antwortet stabil in ~50s.
 - **Fix**: httpx-Timeout in `PaperlessClient._request` von 120s → 180s als Reserve für temporäre Paperless-Lastspitzen
+- **Fix**: Zentraler Retry (3×, 5/10s Backoff) in `_request` für GETs auf Timeout, ConnectError, RemoteProtocolError sowie HTTP 502/503/504/521/522/524. Damit killt ein einzelner Cloudflare-/Proxy-Hänger (z.B. `get_tags()` vor dem Batch) nicht mehr den ganzen OCR-Batch.
 - **Fehlermeldung**: Batch-OCR zeigt jetzt Exception-Typ im Log (vorher nur `– Retry in 30s` ohne Kontext, da `httpx.ReadTimeout` leeren `str()` hat); Stacktrace landet im Backend-Log
 
 ### Transaktions-Match API

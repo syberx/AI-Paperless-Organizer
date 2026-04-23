@@ -41,31 +41,65 @@ class PaperlessClient:
         
         url = f"{self.base_url}/api{endpoint}"
         
+        import logging as _log
+        import asyncio
+        _logger = _log.getLogger(__name__)
+        # Retry auf transiente Fehler (Timeout, Connection, 502/503/504/521/522/524).
+        # Nur für idempotente Methoden (GET), POST/PUT/PATCH/DELETE retryen wir nicht automatisch.
+        retry_statuses = {502, 503, 504, 521, 522, 524}
+        max_attempts = 3 if method.upper() == "GET" else 1
+        last_exc = None
         async with httpx.AsyncClient(timeout=180.0, follow_redirects=True, verify=False) as client:
-            response = await client.request(
-                method=method,
-                url=url,
-                headers=self.headers,
-                params=params,
-                json=json
-            )
-            if not response.is_success:
-                # Log the full Paperless error response for debugging
+            for attempt in range(1, max_attempts + 1):
                 try:
-                    err_body = response.json()
-                except Exception:
-                    err_body = response.text[:500]
-                import logging as _log
-                _log.getLogger(__name__).error(
-                    f"Paperless API error {response.status_code} for {method} {endpoint}: {err_body}"
-                )
-                response.raise_for_status()
+                    response = await client.request(
+                        method=method,
+                        url=url,
+                        headers=self.headers,
+                        params=params,
+                        json=json
+                    )
+                except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError) as e:
+                    last_exc = e
+                    if attempt < max_attempts:
+                        wait = 5 * attempt
+                        _logger.warning(
+                            f"Paperless {method} {endpoint} {type(e).__name__} "
+                            f"(Versuch {attempt}/{max_attempts}) – Retry in {wait}s"
+                        )
+                        await asyncio.sleep(wait)
+                        continue
+                    raise
 
-            # DELETE requests often return 204 No Content
-            if response.status_code == 204 or not response.content:
-                return None
+                if response.status_code in retry_statuses and attempt < max_attempts:
+                    wait = 5 * attempt
+                    _logger.warning(
+                        f"Paperless {method} {endpoint} HTTP {response.status_code} "
+                        f"(Versuch {attempt}/{max_attempts}) – Retry in {wait}s"
+                    )
+                    await asyncio.sleep(wait)
+                    continue
 
-            return response.json()
+                if not response.is_success:
+                    try:
+                        err_body = response.json()
+                    except Exception:
+                        err_body = response.text[:500]
+                    _logger.error(
+                        f"Paperless API error {response.status_code} for {method} {endpoint}: {err_body}"
+                    )
+                    response.raise_for_status()
+
+                # DELETE requests often return 204 No Content
+                if response.status_code == 204 or not response.content:
+                    return None
+
+                return response.json()
+
+            # sollte nie erreicht werden, Absicherung
+            if last_exc:
+                raise last_exc
+            return None
     
     async def test_connection(self) -> bool:
         """Test if connection to Paperless is working."""
