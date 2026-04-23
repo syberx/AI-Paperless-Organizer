@@ -50,6 +50,7 @@ class TransactionInput(BaseModel):
     paypalTransactionId: Optional[str] = ""
     paypalInvoiceNumber: Optional[str] = ""
     paypalSubject: Optional[str] = ""
+    paypalItemTitle: Optional[str] = ""
     paymentProvider: Optional[str] = ""
 
 

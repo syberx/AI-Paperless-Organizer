@@ -4,6 +4,18 @@ Alle wichtigen Änderungen an AI Paperless Organizer.
 
 ---
 
+## 2026-04-23
+
+### Transaktions-Match API
+- **Bugfix Amount-Vorzeichen**: Negative Buchungen (z.B. Ausgaben `-21.25`) werden jetzt korrekt mit positiven Paperless-Beträgen gematcht (`abs()`)
+- **Amount Format-Varianten**: Prüft sowohl `21.25` als auch `21,25` und ganzzahlige Beträge als `21`
+- **Rechnungsnummer-Regex**: Extrahiert Rechnungsnummern (`nc-4670017`, `WEB-2025-0058`, `RE-2024-0815`, `INV-1234`) aus `paypalItemTitle`, `paypalSubject` und `description` — löst Prio-1 (100%) Matches aus
+- **Volltext-Fallback für Betrag**: Wenn Custom-Field "Betrag" fehlt, wird OCR-Content nach dem Betrag gescannt (+12 Punkte)
+- **Fallback Field-Name**: Nutzt "Betrag" oder "Gesamtbetrag" als Custom-Field
+- **Neues Feld**: `paypalItemTitle` im Request-Schema
+
+---
+
 ## 2026-04-16
 
 - **Neu: Transaktions-Match API** – externe Buchhaltungstools (EÜR, n8n, PayPal-Reconciliation) können Bank-/PayPal-Buchungen per `POST /api/match/transaction` gegen Paperless-Belege matchen. Score-basiert (Rechnungsnummer, Betrag, IBAN, Datum, Kundenname Fuzzy, Volltext), gibt Top 3 mit 0-100% zurück

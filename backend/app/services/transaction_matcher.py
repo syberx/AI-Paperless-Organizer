@@ -54,14 +54,38 @@ class TransactionMatcher:
         booking_number = (transaction.get("bookingNumber") or "").strip()
         paypal_tx_id = (transaction.get("paypalTransactionId") or "").strip()
         paypal_invoice = (transaction.get("paypalInvoiceNumber") or "").strip()
+        paypal_item_title = (transaction.get("paypalItemTitle") or "").strip()
+        paypal_subject = (transaction.get("paypalSubject") or "").strip()
         amount = transaction.get("amount")
         iban = (transaction.get("iban") or "").strip()
         date_str = transaction.get("date", "")
         customer = (transaction.get("customer") or "").strip()
         description = (transaction.get("description") or "").strip()
 
+        # ────────── Extract invoice number candidates from all text fields ──────────
+        invoice_candidates: List[str] = []
+        # Explicit fields (highest priority)
+        for s in [booking_number, paypal_invoice, paypal_tx_id]:
+            if s:
+                invoice_candidates.append(s)
+        # Regex-extract from free-text fields (paypalItemTitle, description, subject)
+        invoice_patterns = [
+            r'\b[a-zA-Z]{2,6}-\d{4,10}\b',      # nc-4670017, RE-2024-0815, INV-1234
+            r'\b[A-Z]{2,6}-\d{4}-\d{3,6}\b',    # WEB-2025-0058
+            r'\b(?:RG|RE|INV|Rg|Invoice)[\s\-_]?\d{4,10}\b',  # Rg 12345
+            r'\b\d{8,14}\b',                     # generic long numbers
+        ]
+        for text in [paypal_item_title, paypal_subject, description]:
+            if not text:
+                continue
+            for pat in invoice_patterns:
+                for m in re.findall(pat, text):
+                    cleaned = m.strip()
+                    if cleaned and cleaned not in invoice_candidates:
+                        invoice_candidates.append(cleaned)
+
         # ────────── P1: Invoice Number exact → short-circuit 100% ──────────
-        for candidate_nr in filter(None, [booking_number, paypal_invoice, paypal_tx_id]):
+        for candidate_nr in invoice_candidates:
             docs = await self._search_custom_field("Rechnungsnummer", candidate_nr)
             if docs:
                 return [self._build_match(
@@ -69,7 +93,7 @@ class TransactionMatcher:
                     score=100,
                     confidence="high",
                     matched_on=[{
-                        "field": "bookingNumber",
+                        "field": "invoiceNumber",
                         "via": "custom_field_rechnungsnummer",
                         "weight": 100,
                         "value": candidate_nr,
@@ -91,12 +115,32 @@ class TransactionMatcher:
             except Exception as e:
                 logger.warning(f"Date parsing failed: {e}")
 
-        # If no date, fetch a broader pool by amount or customer
-        if not candidates and amount is not None:
-            amount_str = f"{amount:.2f}".replace(".", ",")
-            docs = await self._search_custom_field("Betrag", amount_str)
-            for d in docs:
-                candidates[d["id"]] = d
+        # Always add amount-based candidates (covers docs outside date window)
+        if amount is not None:
+            abs_amount = abs(amount)
+            # Try multiple format variants (Paperless stores amounts as strings in various formats)
+            amount_variants = [
+                f"{abs_amount:.2f}",                     # 21.25
+                f"{abs_amount:.2f}".replace(".", ","),   # 21,25
+                f"{abs_amount:g}",                       # 21.25 or 21
+                str(int(abs_amount)) if abs_amount == int(abs_amount) else None,  # 21 (whole numbers)
+            ]
+            seen_variants = set()
+            for variant in amount_variants:
+                if not variant or variant in seen_variants:
+                    continue
+                seen_variants.add(variant)
+                try:
+                    docs = await self._search_custom_field("Betrag", variant)
+                    for d in docs:
+                        candidates[d["id"]] = d
+                    if not docs:
+                        # Try "Gesamtbetrag" as fallback field name
+                        docs = await self._search_custom_field("Gesamtbetrag", variant)
+                        for d in docs:
+                            candidates[d["id"]] = d
+                except Exception as e:
+                    logger.debug(f"Amount search failed for {variant}: {e}")
 
         if not candidates and customer:
             docs = await self._search_by_correspondent(customer)
@@ -149,11 +193,12 @@ class TransactionMatcher:
         cf_values = self._extract_custom_fields(doc)
         content = (doc.get("content") or "").lower()
 
-        # P2: Amount in custom field
+        # P2: Amount in custom field (ignore sign — Paperless stores absolute values)
         tx_amount = tx.get("amount")
         if tx_amount is not None:
+            abs_tx_amount = abs(tx_amount)
             cf_amount = cf_values.get("betrag") or cf_values.get("gesamtbetrag") or cf_values.get("amount")
-            if cf_amount and self._amount_matches(cf_amount, tx_amount, amount_tolerance_eur, amount_tolerance_percent):
+            if cf_amount and self._amount_matches(cf_amount, abs_tx_amount, amount_tolerance_eur, amount_tolerance_percent):
                 raw_score += 30
                 matched_on.append({
                     "field": "amount",
@@ -161,6 +206,22 @@ class TransactionMatcher:
                     "weight": 30,
                     "value": str(cf_amount),
                 })
+            elif content:
+                # Fallback: amount in OCR content (exact string match, both formats)
+                amount_patterns = [
+                    f"{abs_tx_amount:.2f}",                      # 21.25
+                    f"{abs_tx_amount:.2f}".replace(".", ","),    # 21,25
+                ]
+                for ap in amount_patterns:
+                    if ap in content:
+                        raw_score += 12
+                        matched_on.append({
+                            "field": "amount",
+                            "via": "content_fulltext",
+                            "weight": 12,
+                            "value": ap,
+                        })
+                        break
 
         # P3: IBAN in custom field
         tx_iban = (tx.get("iban") or "").strip().replace(" ", "").upper()
