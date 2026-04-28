@@ -566,8 +566,9 @@ export default function DocumentClassifier() {
     try {
       const s = await api.fetchJson<any>('/classifier/auto-classify/status')
       setAutoClassifyStatus(s)
-      // Restore filter_mode from running status
-      if (s.filter_mode === 'db' || s.filter_mode === 'tag') {
+      // Only restore filter_mode from status if classify is currently RUNNING
+      // (otherwise status returns the default 'db' which would overwrite user selection)
+      if (s.enabled && (s.filter_mode === 'db' || s.filter_mode === 'tag')) {
         setAutoFilterMode(s.filter_mode)
       }
     } catch {}
