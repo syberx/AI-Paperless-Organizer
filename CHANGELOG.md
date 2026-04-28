@@ -4,6 +4,15 @@ Alle wichtigen Änderungen an AI Paperless Organizer.
 
 ---
 
+## 2026-04-23 (Update)
+
+### Klassifizierer-Bugfixes
+- **Bugfix Status-Tags vergessen**: GET `/api/classifier/config` lieferte `classification_tag_enabled`, `review_tag_enabled`, `tag_ideas_tag_enabled` und deren Namen NICHT zurück. Werte wurden zwar in der DB gespeichert, aber nach dem Reload zeigte das UI alles wieder als "aus". Jetzt sind alle Felder im Response.
+- **Bugfix Tag-Modus überschrieben**: Status-Polling synchronisierte den User-eingestellten Filter-Modus ständig mit dem Backend-Default `db`, sobald die Auto-Klassifizierung NICHT lief. Jetzt nur noch synchronisiert wenn enabled=true.
+- **Bugfix Skip-Tags + Tag-Auswahl fehlten im GET**: `auto_classify_filter_mode`, `auto_classify_skip_tag_ids`, `auto_classify_only_tag_ids` werden jetzt korrekt zurückgegeben.
+
+---
+
 ## 2026-04-23
 
 ### OCR Batch – Paperless-Timeout & Transiente Fehler

@@ -163,6 +163,15 @@ async def get_config(
         "auto_classify_enabled": bool(getattr(config, "auto_classify_enabled", False)),
         "auto_classify_interval": getattr(config, "auto_classify_interval", 5) or 5,
         "auto_classify_mode": getattr(config, "auto_classify_mode", "review") or "review",
+        "auto_classify_filter_mode": getattr(config, "auto_classify_filter_mode", "db") or "db",
+        "auto_classify_skip_tag_ids": getattr(config, "auto_classify_skip_tag_ids", None) or [],
+        "auto_classify_only_tag_ids": getattr(config, "auto_classify_only_tag_ids", None) or [],
+        "classification_tag_enabled": bool(getattr(config, "classification_tag_enabled", False)),
+        "classification_tag_name": getattr(config, "classification_tag_name", "KI-klassifiziert") or "KI-klassifiziert",
+        "review_tag_enabled": bool(getattr(config, "review_tag_enabled", False)),
+        "review_tag_name": getattr(config, "review_tag_name", "KI-prüfen") or "KI-prüfen",
+        "tag_ideas_tag_enabled": bool(getattr(config, "tag_ideas_tag_enabled", False)),
+        "tag_ideas_tag_name": getattr(config, "tag_ideas_tag_name", "KI-tag-ideen") or "KI-tag-ideen",
     }
 
 
