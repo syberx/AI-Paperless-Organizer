@@ -418,7 +418,18 @@ export default function DocumentClassifier() {
     if (!config) return
     setSettingsSaving(true)
     try {
-      await api.updateClassifierConfig(config)
+      // Auto-save fields (live-saved per click) ausklammern — sonst überschreibt der
+      // "Speichern"-Button im Settings-Tab versehentlich die zuletzt gewählten Tags.
+      const {
+        auto_classify_only_tag_ids: _o,
+        auto_classify_skip_tag_ids: _s,
+        auto_classify_filter_mode: _f,
+        classification_tag_enabled: _ce,
+        review_tag_enabled: _re,
+        tag_ideas_tag_enabled: _ie,
+        ...settingsPayload
+      } = config as any
+      await api.updateClassifierConfig(settingsPayload)
     } catch (e) {
       console.error('Failed to save config:', e)
     } finally {
