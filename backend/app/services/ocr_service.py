@@ -1347,11 +1347,26 @@ class OcrService:
             ignored_ids = get_ocr_ignored_ids()
             if ignored_ids:
                 before_count = len(documents)
+                skipped_docs = [d for d in documents if d.get("id") in ignored_ids]
                 documents = [d for d in documents if d.get("id") not in ignored_ids]
                 skipped = before_count - len(documents)
                 if skipped > 0:
                     batch_state["log"].append(f"🚫 {skipped} Dokument(e) übersprungen (OCR Ignore-Liste)")
                     print(f"[OCR] Skipped {skipped} ignored documents")
+                    # Tag ignored docs with ocrfehler in Paperless so the watchdog won't find them again.
+                    # Without this, the watchdog loops forever: it finds these docs (no tag), starts batch,
+                    # batch skips them, no tag set → repeat.
+                    if ocrerror_tag_id and skipped_docs:
+                        skipped_ids = [d.get("id") for d in skipped_docs if d.get("id")]
+                        try:
+                            await paperless_client.bulk_update_documents(
+                                document_ids=skipped_ids,
+                                add_tags=[ocrerror_tag_id]
+                            )
+                            batch_state["log"].append(f"🏷️ {skipped} Dokument(e) mit Tag 'ocrfehler' versehen (dauerhaft ignoriert)")
+                            logger.info(f"[OCR] Tagged {skipped} ignore-list docs with ocrfehler to stop watchdog loop")
+                        except Exception as tag_err:
+                            logger.warning(f"[OCR] Failed to tag ignored docs with ocrfehler: {tag_err}")
             
             batch_state["total"] = len(documents)
             
@@ -1647,9 +1662,8 @@ class OcrService:
                             pending_count = await paperless_client.get_document_count(
                                 tags_id_none=exclude_ids
                             )
-                            # NOTE: Do NOT subtract the ignore list here – ignored documents already
-                            # have ocrfinish/ocrfehler tags and are excluded by the Paperless query.
-                            # Subtracting would cause false negatives when the ignore list is large.
+                            # Ignored docs get ocrfehler-tagged by the batch when skipped, so they
+                            # are excluded by the tags_id_none query after the first encounter.
                             if pending_count == 0:
                                 logger.info("Watchdog: Keine neuen Dokumente – überspringe diesen Zyklus")
                                 should_run = False
