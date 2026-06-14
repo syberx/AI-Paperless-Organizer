@@ -60,6 +60,9 @@ OCR_ERROR_FILE = Path("/app/data/ocr_error_list.json")
 QUALITY_THRESHOLD = 0.5
 # Max error count before a document is permanently tagged as ocrfehler
 MAX_ERROR_COUNT = 3
+# Permanently-failed (ocrfehler) docs are retried by the watchdog after this many hours,
+# in case the failure was transient (e.g. the Ollama host/notebook was temporarily offline).
+RETRY_FAILED_AFTER_HOURS = 6
 
 def load_review_queue() -> List[Dict]:
     """Load review queue from file."""
@@ -169,6 +172,7 @@ watchdog_state = {
     "running": False,
     "interval_minutes": 5,
     "last_run": None,
+    "last_failed_retry": None,  # epoch seconds of last ocrfehler retry sweep
     "task": None  # asyncio.Task
 }
 
@@ -230,12 +234,43 @@ class OcrService:
                 last_error = str(e)
         
         return {
-            "connected": False, 
-            "model_available": False, 
+            "connected": False,
+            "model_available": False,
             "error": f"Alle Versuche fehlgeschlagen. Letzter Fehler: {last_error}",
             "tried_urls": self.ollama_urls
         }
-    
+
+    async def retry_failed_ocr_docs(self, paperless_client) -> int:
+        """Give permanently-failed (ocrfehler) documents another chance.
+
+        Removes the ocrfehler tag and clears the persisted error counters so the next
+        watchdog cycle re-processes them. OCR failures are frequently transient (the
+        Ollama host/notebook was offline at the time), so documents should not stay
+        benched forever. Manually ignored documents (OCR ignore list) are left as-is.
+        Returns the number of documents reset.
+        """
+        ignored = get_ocr_ignored_ids()
+        failed_ids = [e["document_id"] for e in load_ocr_error_list() if e.get("document_id")]
+        failed_ids += [int(k) for k in load_ocr_error_counts().keys() if str(k).isdigit()]
+        failed_ids = sorted({i for i in failed_ids if i not in ignored})
+        if not failed_ids:
+            return 0
+        try:
+            ocrerror_tag = await paperless_client.get_or_create_tag(TAG_OCR_ERROR)
+            tag_id = ocrerror_tag.get("id") if ocrerror_tag else None
+            if tag_id:
+                await paperless_client.bulk_update_documents(
+                    document_ids=failed_ids,
+                    remove_tags=[tag_id],
+                )
+        except Exception as e:
+            logger.warning(f"[OCR] Retry sweep: could not remove ocrfehler tag: {e}")
+        # Reset persisted error state so the docs are treated as fresh on the next run.
+        save_ocr_error_list([])
+        save_ocr_error_counts({})
+        logger.info(f"[OCR] Retry sweep: reset {len(failed_ids)} failed document(s) for another OCR attempt")
+        return len(failed_ids)
+
     @staticmethod
     def get_model_params(model_name: str) -> dict:
         """Get optimal OCR parameters based on model name/size.
@@ -1654,23 +1689,45 @@ class OcrService:
                     logger.info("Watchdog checking for new documents...")
                     print(f"[OCR] Watchdog check at {datetime.now().isoformat()}")
 
-                    # --- Smart pre-check: only start batch when there's something to do ---
                     should_run = True
-                    try:
-                        exclude_ids = await _get_exclude_tag_ids()
-                        if exclude_ids:
-                            pending_count = await paperless_client.get_document_count(
-                                tags_id_none=exclude_ids
-                            )
-                            # Ignored docs get ocrfehler-tagged by the batch when skipped, so they
-                            # are excluded by the tags_id_none query after the first encounter.
-                            if pending_count == 0:
-                                logger.info("Watchdog: Keine neuen Dokumente – überspringe diesen Zyklus")
-                                should_run = False
-                            else:
-                                logger.info(f"Watchdog: ~{pending_count} Dokument(e) ohne OCR gefunden, starte Batch...")
-                    except Exception as check_err:
-                        logger.warning(f"Watchdog: Pre-Check fehlgeschlagen, starte Batch trotzdem: {check_err}")
+
+                    # Preflight: if Ollama (often a laptop) is unreachable, skip the whole
+                    # cycle. Running now would fail every page and burn the 3-strike budget,
+                    # permanently benching documents for a purely transient outage.
+                    conn = await self.test_connection()
+                    if not conn.get("connected"):
+                        logger.info("Watchdog: Ollama nicht erreichbar (Host/Notebook offline?) – Zyklus übersprungen, keine Dokumente werden als fehlerhaft markiert")
+                        should_run = False
+                    else:
+                        # Periodically give permanently-failed (ocrfehler) docs another try,
+                        # in case the earlier failure was transient (host had been offline).
+                        last_retry = watchdog_state.get("last_failed_retry")
+                        now_ts = time.time()
+                        if last_retry is None or (now_ts - last_retry) >= RETRY_FAILED_AFTER_HOURS * 3600:
+                            try:
+                                n = await self.retry_failed_ocr_docs(paperless_client)
+                                if n:
+                                    logger.info(f"Watchdog: {n} fehlgeschlagene(s) Dokument(e) für neuen OCR-Versuch zurückgesetzt")
+                            except Exception as retry_err:
+                                logger.warning(f"Watchdog: Retry-Sweep fehlgeschlagen: {retry_err}")
+                            watchdog_state["last_failed_retry"] = now_ts
+
+                        # --- Smart pre-check: only start batch when there's something to do ---
+                        try:
+                            exclude_ids = await _get_exclude_tag_ids()
+                            if exclude_ids:
+                                pending_count = await paperless_client.get_document_count(
+                                    tags_id_none=exclude_ids
+                                )
+                                # Ignored docs get ocrfehler-tagged by the batch when skipped, so they
+                                # are excluded by the tags_id_none query after the first encounter.
+                                if pending_count == 0:
+                                    logger.info("Watchdog: Keine neuen Dokumente – überspringe diesen Zyklus")
+                                    should_run = False
+                                else:
+                                    logger.info(f"Watchdog: ~{pending_count} Dokument(e) ohne OCR gefunden, starte Batch...")
+                        except Exception as check_err:
+                            logger.warning(f"Watchdog: Pre-Check fehlgeschlagen, starte Batch trotzdem: {check_err}")
 
                     if should_run:
                         await self.batch_ocr(

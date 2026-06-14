@@ -13,6 +13,10 @@ Alle wichtigen Änderungen an AI Paperless Organizer.
 - **Bugfix Tag-Ideen trotz Deaktivierung**: Die Einstellung `tag_behavior = existing_only` („nur vorhandene Tags") wurde nirgends durchgesetzt – das Modell schlug weiterhin neue Tags vor. Im Post-Processing werden neu vorgeschlagene Tags jetzt verworfen, wenn `existing_only` aktiv ist.
 - **Bugfix Entfernte Tags kamen zurück**: Beim manuellen/Review-Apply wurden vom Nutzer entfernte Tags durch den `tags_keep_existing`-Merge wieder aus dem Paperless-Dokument hinzugefügt. Manuell kuratierte Tag-Listen sind jetzt maßgeblich (`tags_authoritative`): kein Merge mit dem Bestand, eine leere Liste löscht alle Tags. Der Merge-Schutz bleibt für die Auto-Klassifizierung erhalten.
 
+### OCR-Watchdog – fehlgeschlagene Docs nicht mehr dauerhaft ausmustern
+- **Preflight-Check**: Vor jedem Watchdog-Zyklus wird Ollama auf Erreichbarkeit geprüft. Ist der Host/das Notebook offline, wird der Zyklus komplett übersprungen, statt jede Seite scheitern zu lassen und damit Dokumente nach 3 transienten Fehlversuchen permanent als `ocrfehler` zu markieren.
+- **Automatischer Retry-Sweep**: Permanent fehlgeschlagene (`ocrfehler`) Dokumente werden alle `RETRY_FAILED_AFTER_HOURS` (Standard 6 h) automatisch zurückgesetzt (Tag entfernt + Fehlerzähler geleert) und im nächsten Zyklus erneut versucht – z. B. sobald das Notebook wieder online ist. Manuell ignorierte Dokumente bleiben unangetastet.
+
 ---
 
 ## 2026-04-23 (Update)
