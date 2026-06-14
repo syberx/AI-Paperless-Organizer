@@ -4,6 +4,13 @@ Alle wichtigen Änderungen an AI Paperless Organizer.
 
 ---
 
+## 2026-06-14
+
+### Auto-Klassifizierung – „Nur diese Tags"-Filter blockierte db-Modus
+- **Bugfix**: Der `only_tag_ids`-Filter wurde im Auto-Classify-Loop unabhängig vom Filter-Modus angewendet. Ein im Tag-Modus gesetzter (und danach hängengebliebener) Wert führte dazu, dass im normalen `db`-Modus **alle** neuen Dokumente übersprungen wurden, die diesen Tag nicht trugen – die Klassifizierung lief leer, ohne Fehler. Jetzt greift `only_tags` nur noch im `tag`-Modus.
+
+---
+
 ## 2026-04-23 (Update)
 
 ### Klassifizierer-Bugfixes

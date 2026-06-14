@@ -1112,14 +1112,17 @@ async def _auto_classify_loop():
                             classified_ids.add(doc_id)
                             continue
 
-                        # If only_tag_ids is set (or tag mode), ONLY classify docs with these tags
+                        # only_tag_ids restricts classification to specific tags — ONLY in tag mode.
+                        # In db mode it must be ignored, otherwise a leftover value silently blocks
+                        # every new document from being classified.
                         only_tags = [t for t in (getattr(config, "auto_classify_only_tag_ids", None) or []) if t > 0]
-                        if filter_mode == "tag" and not only_tags:
-                            # Tag mode requires tags to be configured
-                            logger.warning("Auto-classify tag mode: no tags configured, skipping")
-                            break
-                        if only_tags and not any(t in only_tags for t in doc_tags):
-                            continue  # don't add to classified_ids in tag mode — tag might be added later
+                        if filter_mode == "tag":
+                            if not only_tags:
+                                # Tag mode requires tags to be configured
+                                logger.warning("Auto-classify tag mode: no tags configured, skipping")
+                                break
+                            if not any(t in only_tags for t in doc_tags):
+                                continue  # tag might be added later — don't mark as classified
 
                         # Per-document Ollama lock: acquire before, release after
                         if uses_ollama:
