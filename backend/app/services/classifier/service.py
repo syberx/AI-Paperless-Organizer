@@ -649,6 +649,13 @@ class DocumentClassifierService:
 
             result.tags = filtered_tags
             result.tags_new = [t for t in result.tags if t.lower() not in existing_tag_names]
+            # Enforce tag_behavior: in "existing_only" mode the model must not introduce
+            # new tags. Drop any proposed tag that does not already exist in Paperless,
+            # otherwise tag ideas keep appearing despite the setting being off.
+            if getattr(config, "tag_behavior", "existing_only") == "existing_only" and result.tags_new:
+                logger.info(f"tag_behavior=existing_only: dropping new tag ideas {result.tags_new}")
+                result.tags = [t for t in result.tags if t.lower() in existing_tag_names]
+                result.tags_new = []
             logger.info(f"Post-process filtered tags: {result.tags} (new: {result.tags_new})")
 
         # --- Filter ignored dates ---
@@ -820,9 +827,16 @@ class DocumentClassifierService:
         }
 
     async def apply_classification(
-        self, document_id: int, classification: Dict[str, Any]
+        self, document_id: int, classification: Dict[str, Any],
+        tags_authoritative: bool = False,
     ) -> Dict[str, Any]:
-        """Apply a (potentially edited) classification to a document in Paperless."""
+        """Apply a (potentially edited) classification to a document in Paperless.
+
+        When tags_authoritative is True (manual / review apply) the provided tag list is
+        treated as the final set: no merge with the document's existing tags, and an
+        explicit empty list clears all tags. For automatic classification it stays False
+        so tags_keep_existing can still protect manually-assigned tags.
+        """
         config = await self.get_config()
         update_data = {}
 
@@ -833,14 +847,16 @@ class DocumentClassifierService:
         if created and created != "null" and re.match(r"\d{4}-\d{2}-\d{2}", str(created)):
             update_data["created"] = created
 
-        # Resolve tags to IDs
-        if classification.get("tags"):
+        # Resolve tags to IDs. In authoritative mode an explicit (even empty) tag list
+        # must be applied, so enter the block whenever a "tags" key is present.
+        has_tags_key = "tags" in classification and classification.get("tags") is not None
+        if classification.get("tags") or (tags_authoritative and has_tags_key):
             all_tags = await self.paperless.get_tags(use_cache=True)
             tag_name_to_id = {t["name"].lower(): t["id"] for t in all_tags}
             tag_id_to_name = {t["id"]: t["name"] for t in all_tags}
             excluded_ids = set(config.excluded_tag_ids or [])
             tag_ids = []
-            for tag_name in classification["tags"]:
+            for tag_name in (classification.get("tags") or []):
                 tid = tag_name_to_id.get(tag_name.lower())
                 if tid:
                     if tid in excluded_ids:
@@ -855,25 +871,30 @@ class DocumentClassifierService:
                             continue
                         tag_ids.append(new_tag["id"])
 
-            doc = await self.paperless.get_document(document_id)
-            existing_tag_ids = doc.get("tags", []) if doc else []
-
-            if config.tags_keep_existing:
-                for etid in existing_tag_ids:
-                    if etid not in tag_ids:
-                        tag_ids.append(etid)
-            else:
-                # Replacing mode: keep protected tags from existing document
-                protected_patterns = self._build_protected_matchers(config)
-                if protected_patterns:
-                    for etid in existing_tag_ids:
-                        tag_name = tag_id_to_name.get(etid, "")
-                        if etid not in tag_ids and self._is_tag_protected(tag_name, protected_patterns):
-                            tag_ids.append(etid)
-                            logger.info(f"Apply: keeping protected tag '{tag_name}' (id={etid})")
-
-            if tag_ids:
+            if tags_authoritative:
+                # Human-curated list wins: do NOT merge existing doc tags back in, so a
+                # tag the user removed stays removed. An empty list clears all tags.
                 update_data["tags"] = tag_ids
+            else:
+                doc = await self.paperless.get_document(document_id)
+                existing_tag_ids = doc.get("tags", []) if doc else []
+
+                if config.tags_keep_existing:
+                    for etid in existing_tag_ids:
+                        if etid not in tag_ids:
+                            tag_ids.append(etid)
+                else:
+                    # Replacing mode: keep protected tags from existing document
+                    protected_patterns = self._build_protected_matchers(config)
+                    if protected_patterns:
+                        for etid in existing_tag_ids:
+                            tag_name = tag_id_to_name.get(etid, "")
+                            if etid not in tag_ids and self._is_tag_protected(tag_name, protected_patterns):
+                                tag_ids.append(etid)
+                                logger.info(f"Apply: keeping protected tag '{tag_name}' (id={etid})")
+
+                if tag_ids:
+                    update_data["tags"] = tag_ids
 
         # Classification Tag: if enabled, ensure the configured tag is on every classified document
         if getattr(config, "classification_tag_enabled", False):
@@ -881,12 +902,13 @@ class DocumentClassifierService:
             if tag_name:
                 cls_tag = await self.paperless.get_or_create_tag(tag_name)
                 if cls_tag:
-                    current_tag_ids = list(update_data.get("tags") or [])
+                    if "tags" in update_data:
+                        current_tag_ids = list(update_data["tags"])
+                    else:
+                        # tags not set by this apply — load existing tags from document
+                        doc = await self.paperless.get_document(document_id)
+                        current_tag_ids = doc.get("tags", []) if doc else []
                     if cls_tag["id"] not in current_tag_ids:
-                        if not current_tag_ids:
-                            # tags not yet fetched — load existing tags from document
-                            doc = await self.paperless.get_document(document_id)
-                            current_tag_ids = doc.get("tags", []) if doc else []
                         current_tag_ids.append(cls_tag["id"])
                         update_data["tags"] = current_tag_ids
                         logger.info(f"Apply: added classification tag '{tag_name}' (id={cls_tag['id']}) to doc {document_id}")
@@ -899,8 +921,9 @@ class DocumentClassifierService:
                     all_tags = await self.paperless.get_tags(use_cache=False)
                     review_tag_obj = next((t for t in all_tags if t["name"] == review_tag_name), None)
                     if review_tag_obj:
-                        current_tag_ids = list(update_data.get("tags") or [])
-                        if not current_tag_ids:
+                        if "tags" in update_data:
+                            current_tag_ids = list(update_data["tags"])
+                        else:
                             doc = await self.paperless.get_document(document_id)
                             current_tag_ids = doc.get("tags", []) if doc else []
                         if review_tag_obj["id"] in current_tag_ids:
@@ -918,8 +941,9 @@ class DocumentClassifierService:
                     all_tags = await self.paperless.get_tags(use_cache=False)
                     ideas_tag_obj = next((t for t in all_tags if t["name"] == ideas_tag_name), None)
                     if ideas_tag_obj:
-                        current_tag_ids = list(update_data.get("tags") or [])
-                        if not current_tag_ids:
+                        if "tags" in update_data:
+                            current_tag_ids = list(update_data["tags"])
+                        else:
                             doc = await self.paperless.get_document(document_id)
                             current_tag_ids = doc.get("tags", []) if doc else []
                         if ideas_tag_obj["id"] in current_tag_ids:

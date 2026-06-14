@@ -9,6 +9,10 @@ Alle wichtigen Änderungen an AI Paperless Organizer.
 ### Auto-Klassifizierung – „Nur diese Tags"-Filter blockierte db-Modus
 - **Bugfix**: Der `only_tag_ids`-Filter wurde im Auto-Classify-Loop unabhängig vom Filter-Modus angewendet. Ein im Tag-Modus gesetzter (und danach hängengebliebener) Wert führte dazu, dass im normalen `db`-Modus **alle** neuen Dokumente übersprungen wurden, die diesen Tag nicht trugen – die Klassifizierung lief leer, ohne Fehler. Jetzt greift `only_tags` nur noch im `tag`-Modus.
 
+### Manuelle Klassifizierung – Tag-Bugs
+- **Bugfix Tag-Ideen trotz Deaktivierung**: Die Einstellung `tag_behavior = existing_only` („nur vorhandene Tags") wurde nirgends durchgesetzt – das Modell schlug weiterhin neue Tags vor. Im Post-Processing werden neu vorgeschlagene Tags jetzt verworfen, wenn `existing_only` aktiv ist.
+- **Bugfix Entfernte Tags kamen zurück**: Beim manuellen/Review-Apply wurden vom Nutzer entfernte Tags durch den `tags_keep_existing`-Merge wieder aus dem Paperless-Dokument hinzugefügt. Manuell kuratierte Tag-Listen sind jetzt maßgeblich (`tags_authoritative`): kein Merge mit dem Bestand, eine leere Liste löscht alle Tags. Der Merge-Schutz bleibt für die Auto-Klassifizierung erhalten.
+
 ---
 
 ## 2026-04-23 (Update)

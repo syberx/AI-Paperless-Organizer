@@ -922,7 +922,9 @@ async def apply_classification(
     service: DocumentClassifierService = Depends(_get_service),
 ):
     """Apply a classification to a document in Paperless."""
-    result = await service.apply_classification(req.document_id, req.classification)
+    result = await service.apply_classification(
+        req.document_id, req.classification, tags_authoritative=True
+    )
     return result
 
 
@@ -1330,7 +1332,9 @@ async def approve_review_entry(
         raise HTTPException(status_code=404, detail="Entry not found")
 
     # Apply the classification
-    result = await service.apply_classification(req.document_id, req.classification)
+    result = await service.apply_classification(
+        req.document_id, req.classification, tags_authoritative=True
+    )
 
     # Update entry status
     entry.status = "applied"
