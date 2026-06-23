@@ -105,6 +105,12 @@ class ClassifierConfig(Base):
     # Tag-Ideas Tag: optional tag assigned when AI suggests new tags (tag ideas)
     tag_ideas_tag_enabled = Column(Boolean, default=False)
     tag_ideas_tag_name = Column(String(200), default="KI-tag-ideen")
+    # Smart correspondent matching (opt-in Beta): reuse an existing correspondent for a
+    # proposed name instead of creating a near-duplicate. All default OFF/safe.
+    correspondent_smart_match = Column(Boolean, default=False)      # master switch (Tier A)
+    correspondent_smart_fuzzy = Column(Boolean, default=False)      # also enable Tier B (guarded fuzzy)
+    correspondent_smart_threshold = Column(Integer, default=90)     # Tier-B similarity floor, 0-100
+    correspondent_smart_normalize = Column(Boolean, default=True)   # ignore legal forms (GmbH/AG) when comparing
 
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

@@ -1894,6 +1894,107 @@ export default function DocumentClassifier() {
                         </div>
                       </div>
                     </label>
+
+                    {/* ── Intelligente Korrespondenten-Zuordnung (Beta) ── */}
+                    <div className="pt-3 border-t border-surface-700/40">
+                      <label className="flex items-start gap-3 cursor-pointer group">
+                        <div className="relative mt-0.5 shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={config.correspondent_smart_match ?? false}
+                            onChange={(e) => setConfig({ ...config, correspondent_smart_match: e.target.checked })}
+                            className="sr-only peer"
+                          />
+                          <div className="w-9 h-5 bg-surface-700 peer-checked:bg-amber-600 rounded-full transition-colors" />
+                          <div className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform peer-checked:translate-x-4" />
+                        </div>
+                        <div>
+                          <span className="text-sm text-surface-200 group-hover:text-white transition-colors inline-flex items-center gap-2 flex-wrap">
+                            Intelligente Korrespondenten-Zuordnung
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-semibold uppercase tracking-wide">Beta / Test</span>
+                          </span>
+                          <p className="text-xs text-surface-500 mt-0.5">
+                            Ordnet einen von der KI vorgeschlagenen Korrespondenten einem bereits vorhandenen zu,
+                            wenn die Namen nach Normalisierung (Groß-/Kleinschreibung, Umlaute, Bindestriche,
+                            „&amp;" vs. „und", optional Rechtsform wie „GmbH") praktisch identisch sind. So entstehen
+                            weniger Dubletten wie <span className="text-amber-400 font-mono">„Muster-Technik"</span> und{' '}
+                            <span className="text-surface-400 font-mono">„Muster Technik"</span>.
+                            Nichts wird gelöscht oder umbenannt – es wird nur ein bestehender Korrespondent
+                            wiederverwendet statt neu angelegt. Jede Entscheidung steht im Backend-Log.
+                            <span className="text-surface-400"> Standardmäßig deaktiviert.</span>
+                          </p>
+                        </div>
+                      </label>
+
+                      {(config.correspondent_smart_match ?? false) && (
+                        <div className="mt-3 ml-12 space-y-3 border-l-2 border-amber-500/30 pl-3">
+                          <label className="flex items-start gap-3 cursor-pointer group">
+                            <div className="relative mt-0.5 shrink-0">
+                              <input
+                                type="checkbox"
+                                checked={config.correspondent_smart_normalize ?? true}
+                                onChange={(e) => setConfig({ ...config, correspondent_smart_normalize: e.target.checked })}
+                                className="sr-only peer"
+                              />
+                              <div className="w-9 h-5 bg-surface-700 peer-checked:bg-amber-600 rounded-full transition-colors" />
+                              <div className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform peer-checked:translate-x-4" />
+                            </div>
+                            <div>
+                              <span className="text-sm text-surface-200 group-hover:text-white transition-colors">
+                                Rechtsformen beim Vergleich ignorieren
+                              </span>
+                              <p className="text-xs text-surface-500 mt-0.5">
+                                Behandelt z.B. <span className="font-mono">„Muster GmbH"</span> und{' '}
+                                <span className="font-mono">„Muster"</span> als denselben Korrespondenten.
+                              </p>
+                            </div>
+                          </label>
+
+                          <label className="flex items-start gap-3 cursor-pointer group">
+                            <div className="relative mt-0.5 shrink-0">
+                              <input
+                                type="checkbox"
+                                checked={config.correspondent_smart_fuzzy ?? false}
+                                onChange={(e) => setConfig({ ...config, correspondent_smart_fuzzy: e.target.checked })}
+                                className="sr-only peer"
+                              />
+                              <div className="w-9 h-5 bg-surface-700 peer-checked:bg-amber-600 rounded-full transition-colors" />
+                              <div className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform peer-checked:translate-x-4" />
+                            </div>
+                            <div>
+                              <span className="text-sm text-surface-200 group-hover:text-white transition-colors">
+                                Auch ähnliche Namen zusammenführen (Tippfehler / OCR)
+                              </span>
+                              <p className="text-xs text-surface-500 mt-0.5">
+                                Erkennt zusätzlich kleine OCR-/Schreibfehler. <span className="text-amber-400">Vorsicht:</span>{' '}
+                                In seltenen Fällen können ähnliche, aber unterschiedliche Firmen zusammengeführt werden.
+                                Echte Namensunterschiede (z.B. <span className="font-mono">„Schmidt"</span> vs.{' '}
+                                <span className="font-mono">„Schmitt"</span>) werden bewusst NICHT zusammengeführt.
+                              </p>
+                            </div>
+                          </label>
+
+                          {(config.correspondent_smart_fuzzy ?? false) && (
+                            <div className="pl-12">
+                              <label className="block text-xs text-surface-400 mb-1">
+                                Ähnlichkeits-Schwelle:{' '}
+                                <span className="text-amber-400 font-mono">{config.correspondent_smart_threshold ?? 90}%</span>
+                                <span className="text-surface-500"> — höher = strenger (sicherer)</span>
+                              </label>
+                              <input
+                                type="range"
+                                min={90}
+                                max={100}
+                                step={1}
+                                value={config.correspondent_smart_threshold ?? 90}
+                                onChange={(e) => setConfig({ ...config, correspondent_smart_threshold: parseInt(e.target.value, 10) })}
+                                className="w-full accent-amber-600"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   {/* ── Korrespondenten-Ignorliste ── */}

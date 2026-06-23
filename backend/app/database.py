@@ -85,6 +85,11 @@ async def _migrate_columns(conn):
         ("classifier_config", "review_tag_name", "TEXT DEFAULT 'KI-prüfen'"),
         ("classifier_config", "tag_ideas_tag_enabled", "BOOLEAN DEFAULT 0"),
         ("classifier_config", "tag_ideas_tag_name", "TEXT DEFAULT 'KI-tag-ideen'"),
+        # Smart correspondent matching (opt-in Beta) — all default OFF/safe
+        ("classifier_config", "correspondent_smart_match", "BOOLEAN DEFAULT 0"),
+        ("classifier_config", "correspondent_smart_fuzzy", "BOOLEAN DEFAULT 0"),
+        ("classifier_config", "correspondent_smart_threshold", "INTEGER DEFAULT 90"),
+        ("classifier_config", "correspondent_smart_normalize", "BOOLEAN DEFAULT 1"),
     ]
 
     for table, column, col_type in migrations:

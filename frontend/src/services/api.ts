@@ -868,6 +868,10 @@ export interface ClassifierConfig {
   correspondent_trim_prompt: boolean
   correspondent_strip_legal: boolean
   correspondent_ignore: string[]
+  correspondent_smart_match?: boolean
+  correspondent_smart_fuzzy?: boolean
+  correspondent_smart_threshold?: number
+  correspondent_smart_normalize?: boolean
   auto_classify_enabled: boolean
   auto_classify_interval: number
   auto_classify_mode: string

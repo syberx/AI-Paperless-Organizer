@@ -67,6 +67,10 @@ class ClassifierConfigUpdate(BaseModel):
     review_tag_name: Optional[str] = None
     tag_ideas_tag_enabled: Optional[bool] = None
     tag_ideas_tag_name: Optional[str] = None
+    correspondent_smart_match: Optional[bool] = None
+    correspondent_smart_fuzzy: Optional[bool] = None
+    correspondent_smart_threshold: Optional[int] = None
+    correspondent_smart_normalize: Optional[bool] = None
 
 
 class StoragePathProfileUpdate(BaseModel):
@@ -172,6 +176,10 @@ async def get_config(
         "review_tag_name": getattr(config, "review_tag_name", "KI-prüfen") or "KI-prüfen",
         "tag_ideas_tag_enabled": bool(getattr(config, "tag_ideas_tag_enabled", False)),
         "tag_ideas_tag_name": getattr(config, "tag_ideas_tag_name", "KI-tag-ideen") or "KI-tag-ideen",
+        "correspondent_smart_match": bool(getattr(config, "correspondent_smart_match", False)),
+        "correspondent_smart_fuzzy": bool(getattr(config, "correspondent_smart_fuzzy", False)),
+        "correspondent_smart_threshold": getattr(config, "correspondent_smart_threshold", 90) or 90,
+        "correspondent_smart_normalize": bool(getattr(config, "correspondent_smart_normalize", True)),
     }
 
 

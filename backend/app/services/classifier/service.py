@@ -22,54 +22,10 @@ from app.services.classifier.tool_executor import ToolExecutor
 
 logger = logging.getLogger(__name__)
 
-# ── Legal form stripping ───────────────────────────────────────────────────────
-# Ordered longest-first so "GmbH & Co. KG" is matched before "GmbH" or "KG"
-_LEGAL_FORMS = [
-    r"GmbH\s*&\s*Co\.?\s*KGaA",
-    r"GmbH\s*&\s*Co\.?\s*KG",
-    r"GmbH\s*&\s*Co\.?",
-    r"AG\s*&\s*Co\.?\s*KG",
-    r"UG\s*\(haftungsbeschr[äa]nkt\)",
-    r"GmbH",
-    r"AG",
-    r"KGaA",
-    r"KG",
-    r"OHG",
-    r"GbR",
-    r"e\.?\s*V\.?",
-    r"e\.?\s*G\.?",
-    r"e\.?\s*K\.?",
-    r"SE",
-    r"UG",
-    r"mbH",
-    r"Ltd\.?",
-    r"Inc\.?",
-    r"Corp\.?",
-    r"P\.?L\.?C\.?",
-    r"SARL",
-    r"S\.?\s*A\.?",
-    r"N\.?\s*V\.?",
-    r"B\.?\s*V\.?",
-    r"i\.?\s*Gr\.?",      # in Gründung
-    r"i\.?\s*L\.?",       # in Liquidation
-]
-_LEGAL_SUFFIX_RE = re.compile(
-    r"[\s,]+(" + "|".join(_LEGAL_FORMS) + r")\s*$",
-    re.IGNORECASE,
-)
-
-
-def _strip_legal_forms(name: str) -> str:
-    """Remove German/international legal form suffixes from a company name."""
-    if not name:
-        return name
-    # Apply up to 3 times to strip chained suffixes like "GmbH & Co. KG"
-    for _ in range(3):
-        stripped = _LEGAL_SUFFIX_RE.sub("", name).strip(" ,.")
-        if stripped == name:
-            break
-        name = stripped
-    return name.strip()
+# Legal-form stripping (leaf module) + the opt-in correspondent matcher (pure module)
+# live in their own files to keep the import graph acyclic — see correspondent_normalize.py.
+from app.services.classifier.correspondent_normalize import _strip_legal_forms
+from app.services.classifier.correspondent_matcher import match_correspondent
 
 
 # Reference indicators that legitimise a YYYY-NNNNN number in a title.
@@ -826,6 +782,46 @@ class DocumentClassifierService:
             "results": all_results,
         }
 
+    async def _resolve_correspondent(self, name: str, config) -> Optional[Dict[str, Any]]:
+        """Resolve a proposed correspondent name to a Paperless correspondent.
+
+        Opt-in Beta "smart matching": when ``correspondent_smart_match`` is ON, an
+        existing correspondent is REUSED if the proposed name matches it after
+        normalization (Tier A) or — only with the extra ``correspondent_smart_fuzzy``
+        flag — a guarded fuzzy match (Tier B). When OFF (default) this is byte-identical
+        to the previous inline behavior: just ``get_or_create_correspondent(name)``.
+        """
+        if not bool(getattr(config, "correspondent_smart_match", False)):
+            return await self.paperless.get_or_create_correspondent(name)
+
+        # use_cache=True on purpose: create_correspondent invalidates this cache, so a
+        # freshly-created name becomes matchable next document; worst case staleness is
+        # creating a new correspondent (= today's behavior). Avoids N full HTTP fetches
+        # per auto-run over hundreds of correspondents.
+        existing = await self.paperless.get_correspondents(use_cache=True)
+        name_to_corr: Dict[str, Any] = {}
+        for c in existing:
+            cname = c.get("name")
+            if cname:
+                name_to_corr.setdefault(cname, c)
+
+        match = match_correspondent(
+            name,
+            list(name_to_corr.keys()),
+            threshold=(getattr(config, "correspondent_smart_threshold", 90) or 90) / 100.0,
+            strip_legal=bool(getattr(config, "correspondent_smart_normalize", True)),
+            allow_fuzzy=bool(getattr(config, "correspondent_smart_fuzzy", False)),
+        )
+        if match and match.matched_name in name_to_corr:
+            logger.info(
+                "Smart-match correspondent: proposed=%r -> existing=%r (ratio=%.3f, reason=%s, runner_up=%r@%.3f)",
+                name, match.matched_name, match.ratio, match.reason, match.runner_up, match.runner_up_ratio,
+            )
+            return name_to_corr[match.matched_name]
+
+        logger.info("Smart-match: no confident match for %r -> creating new", name)
+        return await self.paperless.get_or_create_correspondent(name)
+
     async def apply_classification(
         self, document_id: int, classification: Dict[str, Any],
         tags_authoritative: bool = False,
@@ -953,11 +949,10 @@ class DocumentClassifierService:
                 except Exception as e:
                     logger.warning(f"Could not remove tag-ideas tag: {e}")
 
-        # Resolve correspondent
+        # Resolve correspondent (opt-in smart matching can reuse an existing one
+        # instead of creating a near-duplicate; OFF by default = unchanged behavior)
         if classification.get("correspondent"):
-            corr = await self.paperless.get_or_create_correspondent(
-                classification["correspondent"]
-            )
+            corr = await self._resolve_correspondent(classification["correspondent"], config)
             if corr:
                 update_data["correspondent"] = corr["id"]
 

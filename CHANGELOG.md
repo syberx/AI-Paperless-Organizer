@@ -17,6 +17,11 @@ Alle wichtigen Änderungen an AI Paperless Organizer.
 - **Preflight-Check**: Vor jedem Watchdog-Zyklus wird Ollama auf Erreichbarkeit geprüft. Ist der Host/das Notebook offline, wird der Zyklus komplett übersprungen, statt jede Seite scheitern zu lassen und damit Dokumente nach 3 transienten Fehlversuchen permanent als `ocrfehler` zu markieren.
 - **Automatischer Retry-Sweep**: Permanent fehlgeschlagene (`ocrfehler`) Dokumente werden alle `RETRY_FAILED_AFTER_HOURS` (Standard 6 h) automatisch zurückgesetzt (Tag entfernt + Fehlerzähler geleert) und im nächsten Zyklus erneut versucht – z. B. sobald das Notebook wieder online ist. Manuell ignorierte Dokumente bleiben unangetastet.
 
+### Intelligente Korrespondenten-Zuordnung (Beta, opt-in, Standard AUS)
+- **Neu**: Optionales Beta-Feature, das einen von der KI vorgeschlagenen Korrespondenten einem bereits vorhandenen zuordnet, statt eine Dublette anzulegen (z. B. „Muster-Technik" und „Muster Technik"). Es wird nichts zusammengeführt, umbenannt oder gelöscht – lediglich ein bestehender Korrespondent wiederverwendet.
+- **Zwei Stufen**: Stufe A = deterministische Normalisierung (Groß-/Kleinschreibung, Umlaute, Bindestriche, „&"/„und", optional Rechtsformen) – kann konstruktionsbedingt nicht falsch zuordnen. Stufe B = vorsichtiger Fuzzy-Abgleich für Tippfehler/OCR (eigener Unterschalter, Standard AUS) mit mehreren Schutzregeln, damit ähnliche, aber unterschiedliche Namen (z. B. „Schmidt"/„Schmitt") **nicht** zusammengeführt werden.
+- **Sicherheit**: Standardmäßig komplett deaktiviert; bei AUS verhält sich die Klassifizierung exakt wie zuvor. Jede Zuordnung wird im Backend-Log protokolliert.
+
 ---
 
 ## 2026-04-23 (Update)
