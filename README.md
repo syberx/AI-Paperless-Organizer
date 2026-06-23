@@ -22,6 +22,16 @@
 
 ---
 
+## 🆕 Neu
+
+- **Intelligente Korrespondenten-Zuordnung (Beta)** – ordnet einen von der KI vorgeschlagenen Korrespondenten automatisch einem bereits vorhandenen zu, statt eine Dublette anzulegen (z. B. „Muster-Technik" und „Muster Technik"). Optional zuschaltbar, standardmäßig aus – nichts wird zusammengeführt oder gelöscht, nur ein bestehender Eintrag wiederverwendet.
+- **OCR-Watchdog robuster** – fehlgeschlagene Dokumente werden nicht mehr dauerhaft ausgemustert, sondern automatisch erneut versucht (z. B. sobald ein zwischenzeitlich offline gewesener Ollama-Host wieder erreichbar ist).
+- **Klassifizierer-Fixes** – „nur vorhandene Tags" wird jetzt wirklich durchgesetzt; beim manuellen Klassifizieren entfernte Tags bleiben entfernt.
+
+> 📋 Vollständige Liste aller Änderungen: [CHANGELOG.md](CHANGELOG.md)
+
+---
+
 ## Was kann das Tool?
 
 Andere Tools wie Paperless-GPT oder Paperless-AI klassifizieren Dokumente beim Import. **AI Paperless Organizer geht deutlich weiter** – es ist eine vollständige Verwaltungs- und Optimierungssuite für Paperless-ngx:
