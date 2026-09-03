@@ -10,7 +10,7 @@ import io
 from pathlib import Path
 from typing import Optional, Dict, List, Any
 from PIL import Image
-from pdf2image import convert_from_bytes
+from pdf2image import convert_from_bytes, pdfinfo_from_bytes
 
 # Raise PIL pixel limit for large PDF pages rendered at high DPI
 Image.MAX_IMAGE_PIXELS = 500_000_000  # 500 megapixels (default is ~178MP)
@@ -20,6 +20,11 @@ logger = logging.getLogger(__name__)
 # Default OCR settings
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 DEFAULT_OCR_MODEL = "qwen2.5vl:7b"
+
+# Documents with this many pages or more are not OCR'd automatically -- they go
+# to the ignore list for manual review. Long documents tie up the Ollama lock
+# for a very long time and block auto-classification behind it.
+OCR_MANUAL_REVIEW_PAGES = 50
 
 # Tag names for OCR workflow
 TAG_RUN_OCR = "runocr"
@@ -177,9 +182,82 @@ watchdog_state = {
 }
 
 
+class StaticPageSource:
+    """Page source for inputs that are already a single in-memory image."""
+
+    def __init__(self, images: List[Image.Image]):
+        self._images = images
+
+    def __len__(self) -> int:
+        return len(self._images)
+
+    async def render(self, index: int) -> Image.Image:
+        return self._images[index]
+
+
+class LazyPdfPageSource:
+    """Renders PDF pages one at a time instead of all at once.
+
+    convert_from_bytes() without a page range materializes every page as a PIL
+    image simultaneously. An A4 page at 400 DPI is ~3307x4677 px, so ~46 MB as
+    RGB -- a 30-page scan needs ~1.4 GB in one go, which is what kept getting
+    the container OOM-killed. Rendering per page keeps the footprint flat at
+    roughly one page, no matter how many pages the document has.
+
+    The page count comes from pdfinfo (poppler) without rendering anything.
+    """
+
+    def __init__(self, file_bytes: bytes, dpi: int, total_pages: int, document_id: int):
+        self._file_bytes = file_bytes
+        self._dpi = dpi
+        self._total_pages = total_pages
+        self._document_id = document_id
+
+    def __len__(self) -> int:
+        return self._total_pages
+
+    async def render(self, index: int) -> Image.Image:
+        """Render a single page, retrying once at a lower DPI on timeout."""
+        page_num = index + 1
+        loop = asyncio.get_running_loop()
+
+        for attempt in range(2):
+            dpi = self._dpi if attempt == 0 else max(100, self._dpi - 50)
+            try:
+                pages = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        lambda d=dpi: convert_from_bytes(
+                            self._file_bytes, dpi=d, first_page=page_num, last_page=page_num
+                        ),
+                    ),
+                    timeout=300,  # 5-minute hard timeout per page
+                )
+                if not pages:
+                    raise ValueError(f"poppler returned no image for page {page_num}")
+                print(f"[OCR] Rendered page {page_num}/{self._total_pages} at {dpi} DPI")
+                return pages[0]
+            except asyncio.TimeoutError:
+                print(f"[OCR] Page {page_num} render timed out after 5 min (attempt {attempt + 1})")
+                if attempt == 0:
+                    logger.warning(
+                        f"Page {page_num} render timeout for doc {self._document_id}, retrying at lower DPI"
+                    )
+                    continue
+                raise ValueError(
+                    f"Seite {page_num}: Rendern nach 10 Minuten abgebrochen."
+                )
+            except Exception as e:
+                if attempt == 0:
+                    print(f"[OCR] Page {page_num} render failed (attempt 1), retrying: {e}")
+                    await asyncio.sleep(2)
+                    continue
+                raise ValueError(f"Seite {page_num}: Rendern fehlgeschlagen: {e}")
+
+
 class OcrService:
     """Service for OCR using Ollama Vision models."""
-    
+
     def __init__(self, ollama_url: str = DEFAULT_OLLAMA_URL, model: str = DEFAULT_OCR_MODEL, ollama_urls: List[str] = None, max_image_size: int = 1344, smart_skip_enabled: bool = False):
         if ollama_urls and len(ollama_urls) > 0:
             self.ollama_urls = [u.rstrip("/") for u in ollama_urls if u.strip()]
@@ -876,14 +954,14 @@ class OcrService:
                     "ocr_duration": duration, "ocr_pages": 0, "source": "native_pdf",
                 }
 
-        # Convert to images
+        # Open as a page source (pages are rendered lazily, one at a time)
         ocr_page_progress[document_id]["status"] = "converting"
-        images = await self._convert_to_images(file_bytes, doc, document_id, title)
-        if not images:
+        pages = await self._open_page_source(file_bytes, doc, document_id, title)
+        if not len(pages):
             ocr_page_progress.pop(document_id, None)
             raise ValueError("Keine Seiten aus dem Dokument extrahiert")
 
-        total_pages = len(images)
+        total_pages = len(pages)
         ocr_page_progress[document_id].update({
             "total_pages": total_pages, "status": "processing",
             "pages": [{"page": i + 1, "status": "pending", "chars": 0} for i in range(total_pages)],
@@ -913,10 +991,10 @@ class OcrService:
         full_text_parts = {}
         failed_pages = []
 
-        for i, img in enumerate(images):
+        for i in range(total_pages):
             page_num = i + 1
 
-            # Skip already completed pages
+            # Skip already completed pages -- these are never rendered
             if page_num in completed_pages:
                 full_text_parts[page_num] = completed_pages[page_num]
                 print(f"[OCR] Page {page_num}/{total_pages}: resumed from DB ({len(completed_pages[page_num])} chars)")
@@ -927,7 +1005,32 @@ class OcrService:
 
             model_params = self.get_model_params(self.model)
             optimal_size = max(self.max_image_size, model_params["max_image_size"])
-            prepared_bytes = self._prepare_image_for_ollama(img, max_size=optimal_size)
+            # Render, downscale to PNG bytes, then drop the full-resolution page
+            # again -- only prepared_bytes is needed for the OCR retries below.
+            try:
+                img = await pages.render(i)
+                try:
+                    prepared_bytes = self._prepare_image_for_ollama(img, max_size=optimal_size)
+                finally:
+                    img.close()
+                    del img
+            except Exception as e:
+                # A page that cannot be rendered is treated like a page that
+                # failed OCR: recorded, then the remaining pages continue.
+                render_error = f"Rendern fehlgeschlagen: {e}"
+                logger.warning(f"OCR page {page_num} render failed: {e}")
+                print(f"[OCR] Page {page_num}: render FAILED: {e}")
+                if db_session:
+                    await self._save_page_result(
+                        db_session, document_id, page_num, total_pages,
+                        None, "error", 1, 0, render_error
+                    )
+                ocr_page_progress[document_id]["pages"][i] = {
+                    "page": page_num, "status": "error", "chars": 0, "error": render_error
+                }
+                ocr_page_progress[document_id]["errors"] += 1
+                failed_pages.append(page_num)
+                continue
 
             page_text = None
             last_error = None
@@ -1011,59 +1114,73 @@ class OcrService:
             "ocr_duration": duration, "ocr_pages": total_pages,
         }
 
-    async def _convert_to_images(self, file_bytes: bytes, doc: dict, document_id: int, title: str) -> list:
-        """Convert file to list of PIL images."""
+    async def _open_page_source(self, file_bytes: bytes, doc: dict, document_id: int, title: str):
+        """Open the file as a page source that renders one page at a time.
+
+        Returns an object with len() and an async render(index) -- see
+        LazyPdfPageSource for why pages are not all rendered up front.
+        """
         model_params = self.get_model_params(self.model)
         render_dpi = model_params.get("render_dpi", 200)
         is_pdf = file_bytes[:4] == b'%PDF'
         mime_type = doc.get("mime_type", "unknown")
 
         if is_pdf:
-            for attempt in range(2):
-                try:
-                    loop = asyncio.get_running_loop()
-                    dpi = render_dpi if attempt == 0 else max(100, render_dpi - 50)
-                    print(f"[OCR] Converting PDF at {dpi} DPI (attempt {attempt+1})…")
-                    images = await asyncio.wait_for(
-                        loop.run_in_executor(
-                            None, lambda d=dpi: convert_from_bytes(file_bytes, dpi=d)
-                        ),
-                        timeout=300  # 5-minute hard timeout per attempt
-                    )
-                    print(f"[OCR] Converted PDF to {len(images)} pages at {dpi} DPI")
-                    return images
-                except asyncio.TimeoutError:
-                    print(f"[OCR] PDF conversion timed out after 5 min (attempt {attempt+1})")
-                    if attempt == 0:
-                        logger.warning(f"PDF conversion timeout for doc {document_id}, retrying at lower DPI")
-                        continue
-                    raise ValueError(f"PDF-Konvertierung nach 10 Minuten abgebrochen – Dokument übersprungen.")
-                except Exception as e:
-                    error_str = str(e).lower()
-                    if "password" in error_str or "encrypted" in error_str:
-                        error_msg = "Passwortgeschützte PDF – kann ohne Passwort nicht verarbeitet werden."
-                        ignore_list = load_ocr_ignore_list()
-                        if not any(entry["document_id"] == document_id for entry in ignore_list):
-                            ignore_list.append({
-                                "document_id": document_id, "title": title,
-                                "reason": error_msg, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S")
-                            })
-                            save_ocr_ignore_list(ignore_list)
-                        raise ValueError(f"{error_msg} Dokument wird künftig übersprungen.")
-                    if attempt == 0:
-                        print(f"[OCR] PDF conversion failed (attempt 1), retrying: {e}")
-                        await asyncio.sleep(2)
-                    else:
-                        raise ValueError(f"PDF-Konvertierung fehlgeschlagen nach 2 Versuchen ({mime_type}): {e}")
-        else:
             try:
-                img = Image.open(io.BytesIO(file_bytes))
-                img.load()
-                print(f"[OCR] Loaded as single image ({img.format}, {img.size[0]}x{img.size[1]})")
-                return [img]
+                loop = asyncio.get_running_loop()
+                info = await asyncio.wait_for(
+                    loop.run_in_executor(None, lambda: pdfinfo_from_bytes(file_bytes)),
+                    timeout=120  # pdfinfo only parses metadata, it never renders
+                )
+                total_pages = int(info.get("Pages", 0))
+            except asyncio.TimeoutError:
+                raise ValueError("PDF-Analyse nach 2 Minuten abgebrochen – Dokument übersprungen.")
             except Exception as e:
-                raise ValueError(f"Dateiformat nicht unterstützt ({mime_type}, {len(file_bytes)} bytes): {e}")
-        return []
+                error_str = str(e).lower()
+                if "password" in error_str or "encrypted" in error_str:
+                    error_msg = "Passwortgeschützte PDF – kann ohne Passwort nicht verarbeitet werden."
+                    ignore_list = load_ocr_ignore_list()
+                    if not any(entry["document_id"] == document_id for entry in ignore_list):
+                        ignore_list.append({
+                            "document_id": document_id, "title": title,
+                            "reason": error_msg, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S")
+                        })
+                        save_ocr_ignore_list(ignore_list)
+                    raise ValueError(f"{error_msg} Dokument wird künftig übersprungen.")
+                raise ValueError(f"PDF-Analyse fehlgeschlagen ({mime_type}): {e}")
+
+            if total_pages < 1:
+                raise ValueError(f"PDF enthält keine Seiten ({mime_type}).")
+
+            # Very long documents are handed back for manual review instead of
+            # being OCR'd automatically. The page count comes from pdfinfo, so
+            # this costs nothing -- nothing has been rendered at this point.
+            # MAX_FILE_SIZE_MB does not catch these: a 58-page scan can be 2.6 MB.
+            if total_pages >= OCR_MANUAL_REVIEW_PAGES:
+                error_msg = (
+                    f"Dokument hat {total_pages} Seiten (Grenze: {OCR_MANUAL_REVIEW_PAGES}). "
+                    "Bitte manuell prüfen – wird zur Ignore-Liste hinzugefügt."
+                )
+                ignore_list = load_ocr_ignore_list()
+                if not any(entry["document_id"] == document_id for entry in ignore_list):
+                    ignore_list.append({
+                        "document_id": document_id, "title": title,
+                        "reason": error_msg, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S")
+                    })
+                    save_ocr_ignore_list(ignore_list)
+                logger.warning(f"Doc {document_id}: {total_pages} pages exceeds manual-review limit")
+                raise ValueError(error_msg)
+
+            print(f"[OCR] PDF has {total_pages} page(s), rendering at {render_dpi} DPI one page at a time")
+            return LazyPdfPageSource(file_bytes, render_dpi, total_pages, document_id)
+
+        try:
+            img = Image.open(io.BytesIO(file_bytes))
+            img.load()
+            print(f"[OCR] Loaded as single image ({img.format}, {img.size[0]}x{img.size[1]})")
+            return StaticPageSource([img])
+        except Exception as e:
+            raise ValueError(f"Dateiformat nicht unterstützt ({mime_type}, {len(file_bytes)} bytes): {e}")
 
     async def _load_completed_pages(self, db_session, document_id: int, total_pages: int) -> Dict[int, str]:
         """Load already-completed page results from the DB."""

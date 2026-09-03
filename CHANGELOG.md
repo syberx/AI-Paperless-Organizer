@@ -4,6 +4,24 @@ Alle wichtigen Änderungen an AI Paperless Organizer.
 
 ---
 
+## 2026-08-31
+
+### OCR – PDFs werden seitenweise gerendert (behebt OOM-Abstürze)
+- **Bugfix Speicherverbrauch**: `_convert_to_images` hat per `convert_from_bytes()` ohne Seitenbereich **alle** Seiten eines PDFs gleichzeitig als PIL-Images in den RAM gerendert. Eine A4-Seite bei 400 DPI ist ~46 MB, ein 30-seitiger Scan also ~1,4 GB auf einen Schlag – das hat den Container reproduzierbar vom OOM-Killer abräumen lassen (Exit 137). `MAX_FILE_SIZE_MB` begrenzt nur die Dateigröße, nicht die Seitenzahl: ein 12-MB-Scan kann 80 Seiten haben.
+- **Neu**: Die Seitenzahl kommt jetzt aus `pdfinfo` (rendert nichts), und `LazyPdfPageSource` rendert genau eine Seite pro Durchlauf. Der Speicherbedarf ist damit konstant, unabhängig vom Dokumentumfang – gemessen: 12 Seiten @ 400 DPI vorher 1627 MB, jetzt 168 MB; bei 32 Seiten unverändert 168 MB.
+- **Nebeneffekt Resume**: Bereits fertige Seiten werden beim Wiederaufsetzen gar nicht mehr gerendert (vorher wurden immer alle Seiten gerendert, auch die aus der DB übernommenen).
+- **Nebeneffekt Fehlertoleranz**: Eine Seite, die sich nicht rendern lässt, wird wie eine fehlgeschlagene OCR-Seite behandelt und als `partial` gemeldet, statt das ganze Dokument abzubrechen. Die übrigen Seiten laufen durch.
+
+### OCR – Seitenlimit für sehr lange Dokumente
+- **Neu**: Dokumente ab **50 Seiten** (`OCR_MANUAL_REVIEW_PAGES`) werden nicht mehr automatisch ge-OCRt, sondern mit einem Fehler auf die Ignore-Liste gesetzt und zur manuellen Prüfung übergeben. Die Prüfung passiert über `pdfinfo`, also bevor eine einzige Seite gerendert wird, und kostet damit nichts.
+- **Warum**: Sehr lange Dokumente belegen den Ollama-Lock über Stunden und blockieren die dahinter wartende Auto-Klassifizierung komplett. `MAX_FILE_SIZE_MB` greift hier nicht – ein 58-seitiger Scan kann 2,6 MB klein sein.
+
+### Docker – Healthchecks und Memory-Limit
+- **Neu Healthchecks**: Backend (`/api/health` via curl) und Frontend (nginx via wget) haben jetzt einen Healthcheck. Der Zustand ist damit direkt in `docker ps` sichtbar, statt dass ein totes Backend hinter einem weiterlaufenden Frontend unbemerkt bleibt. Beide Checks nutzen bewusst `127.0.0.1` statt `localhost` – im Container löst `localhost` auf `::1` auf, nginx lauscht aber nur auf IPv4.
+- **Neu Memory-Limit**: Das Backend bekommt `mem_limit: 3g`. Ohne Limit trifft ein Speicher-Spike den OOM-Killer des Hosts, der Container wird per SIGKILL beendet (Exit 137) – und Docker meldet das nicht als `OOMKilled`, weil der Kill außerhalb des Container-cgroups passiert. Mit Limit bleibt der Schaden auf den Container begrenzt und ist diagnostizierbar.
+
+---
+
 ## 2026-06-14
 
 ### Auto-Klassifizierung – „Nur diese Tags"-Filter blockierte db-Modus
