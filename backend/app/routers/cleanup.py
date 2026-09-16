@@ -44,8 +44,17 @@ async def scan_junk_documents(
         results = []
 
         for term in terms:
+            # The search term must be quoted as a phrase. Paperless' query parser
+            # binds a field prefix only to the FIRST token, so an unquoted
+            # 'title:Allgemeine Geschäftsbedingungen' searches the title for
+            # "Allgemeine" and then the rest as free full text across all fields
+            # -- 462 hits instead of 14 against our archive. A term containing a
+            # colon (like the "... Stand:" default) is rejected outright with a
+            # 400. Since this scan feeds a delete action, matching too broadly is
+            # the dangerous direction.
+            phrase = '"{}"'.format(term.replace('"', ""))
             documents = await client.get_documents(
-                query=f"{query_prefix}{term}",
+                query=f"{query_prefix}{phrase}",
                 page_size=limit
             )
             for doc in documents:

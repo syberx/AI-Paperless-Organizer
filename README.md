@@ -24,6 +24,8 @@
 
 ## 🆕 Neu
 
+- **Paperless-ngx v3 wird unterstützt** – geprüft gegen 3.1.3, lesend wie schreibend. Eine Anpassung war nötig: Die Titelsuche in „Dokumente Aufräumen" traf durch die neue Suchmaschine viel zu viele Dokumente (462 statt 14) – bei einem Feature, das löscht. Behoben. Details unter [Kompatibilität](#kompatibilität).
+- **OCR speichert deutlich sparsamer** – lange PDFs werden Seite für Seite gerendert statt alle Seiten gleichzeitig. Ein 12-seitiges Dokument bei 400 DPI brauchte vorher ~1,6 GB Arbeitsspeicher, jetzt ~170 MB – unabhängig von der Seitenzahl. Dokumente ab 50 Seiten landen zur manuellen Prüfung auf der Ignore-Liste, statt den Batch zu blockieren.
 - **Intelligente Korrespondenten-Zuordnung (Beta)** – ordnet einen von der KI vorgeschlagenen Korrespondenten automatisch einem bereits vorhandenen zu, statt eine Dublette anzulegen (z. B. „Muster-Technik" und „Muster Technik"). Optional zuschaltbar, standardmäßig aus – nichts wird zusammengeführt oder gelöscht, nur ein bestehender Eintrag wiederverwendet.
 - **OCR-Watchdog robuster** – fehlgeschlagene Dokumente werden nicht mehr dauerhaft ausgemustert, sondern automatisch erneut versucht (z. B. sobald ein zwischenzeitlich offline gewesener Ollama-Host wieder erreichbar ist).
 - **Klassifizierer-Fixes** – „nur vorhandene Tags" wird jetzt wirklich durchgesetzt; beim manuellen Klassifizieren entfernte Tags bleiben entfernt.
@@ -451,6 +453,21 @@ Der Klassifizierer liest den **OCR-Text** des Dokuments um es zu klassifizieren:
 ---
 
 ## 🚀 Quick Start
+
+### Kompatibilität
+
+**Läuft mit Paperless-ngx 2.x und 3.x.** Zuletzt geprüft gegen **Paperless-ngx 3.1.3** (PostgreSQL), lesend wie schreibend: Dokumente abrufen und filtern, `PATCH` auf Titel/Datum/Tags/Korrespondent/Typ/Speicherpfad/Custom Fields, `bulk_edit` mit `modify_tags`, `set_correspondent` und `set_document_type`, sowie Tags und Korrespondenten anlegen.
+
+Der Sprung auf v3 brachte Breaking Changes an der API. Für dieses Tool war **eine** Anpassung nötig, sie steckt ab Version vom 16.09.2026 drin:
+
+- **Dokumente Aufräumen** – die Titelsuche wird jetzt als Phrase in Anführungszeichen geschickt. Paperless' Query-Parser bindet ein Feld-Präfix nur an das erste Wort, deshalb suchte `title:Allgemeine Geschäftsbedingungen` nur den Titel nach „Allgemeine" ab und den Rest als freien Volltext über alle Felder – 462 Treffer statt 14. Begriffe mit Doppelpunkt wurden sogar mit HTTP 400 abgelehnt.
+
+Zwei weitere Stolperstellen wurden geprüft und sind unkritisch:
+
+- Das Feld `created` ist seit API v9 ein reines Datum (`YYYY-MM-DD`) statt eines Zeitstempels. Das Tool schreibt und liest genau dieses Format.
+- Von den `bulk_edit`-Methoden sind in API v10 nur `merge`, `rotate` und `edit_pdf` in eigene Endpunkte ausgezogen. Die hier genutzten Methoden sind davon nicht betroffen.
+
+> **Hinweis:** Das Tool pinnt keine API-Version, sondern nutzt den Default des Servers. Bei Paperless-ngx 3.1.3 ist das v10; die von uns verwendeten Felder sind dort identisch zu v9.
 
 ### Option 1: Docker Hub (Empfohlen)
 

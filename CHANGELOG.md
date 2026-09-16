@@ -4,6 +4,22 @@ Alle wichtigen Änderungen an AI Paperless Organizer.
 
 ---
 
+## 2026-09-16
+
+### Dokumente Aufräumen – Titelsuche traf viel zu viele Dokumente
+- **Bugfix**: Der Junk-Scan schickte den Suchbegriff unquotiert als `title:<Begriff>`. Paperless' Query-Parser bindet ein Feld-Präfix aber nur an das **erste Wort** – aus `title:Allgemeine Geschäftsbedingungen` wurde damit „Titel enthält *Allgemeine*" **plus** „*Geschäftsbedingungen* irgendwo im Volltext". Gegen ein Archiv mit 5465 Dokumenten gemessen: **462 Treffer statt 14**. Begriffe mit Doppelpunkt (wie der mitgelieferte Safe-Term „… Stand:") wurden sogar mit HTTP 400 abgewiesen.
+- **Warum das zählt**: Der Scan speist eine Löschfunktion. Zu breit zu treffen ist die gefährliche Richtung.
+- **Fix**: Der Begriff wird als Phrase in Anführungszeichen übergeben. Nachgemessen über den echten Endpunkt: 24 statt 100+ Dokumente, exakt die Summe der Einzel-Grundwahrheiten (14 + 7 + 3 + 0). Bei Einzelwort-Begriffen ändert sich nichts.
+
+### Kompatibilität mit Paperless-ngx v3 bestätigt
+- **Geprüft gegen 3.1.3** (PostgreSQL), lesend wie schreibend. Bis auf den oben genannten Fix an der Titelsuche betrifft der Sprung von 2.x auf 3.x keine der genutzten Schnittstellen.
+- Verifiziert: Dokumente abrufen und filtern (`page`, `page_size`, `ordering`, `id__gt`, `tags__id__in/all/none`, `correspondent__id`, `document_type__id`, `custom_field_query`), Einzeldokument, `PATCH` auf Titel/Datum/Tags/Korrespondent/Typ/Speicherpfad/Custom Fields, `bulk_edit` mit `modify_tags`/`set_correspondent`/`set_document_type`, Anlegen von Tags und Korrespondenten sowie die Taxonomie-Endpunkte inklusive Pagination.
+- Zwei typische v3-Stolperstellen ausdrücklich gegengeprüft: `created` ist seit API v9 ein reines Datum statt Zeitstempel (das Tool nutzt bereits `YYYY-MM-DD`), und aus `bulk_edit` sind in API v10 nur `merge`, `rotate` und `edit_pdf` ausgezogen – nicht die hier verwendeten Methoden.
+- Das Tool pinnt weiterhin keine API-Version und folgt dem Server-Default (bei 3.1.3 ist das v10). Die genutzten Felder sind dort identisch zu v9.
+- **README und Docker-Hub-Beschreibung** haben jetzt einen Abschnitt „Kompatibilität".
+
+---
+
 ## 2026-08-31
 
 ### OCR – PDFs werden seitenweise gerendert (behebt OOM-Abstürze)

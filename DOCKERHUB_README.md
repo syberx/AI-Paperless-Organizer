@@ -2,6 +2,10 @@
 
 🤖 **KI-gestütztes Tool zur Organisation deiner Paperless-ngx Dokumente**
 
+## Kompatibilität
+
+**Läuft mit Paperless-ngx 2.x und 3.x.** Zuletzt geprüft gegen **3.1.3**, lesend wie schreibend – der Umstieg auf v3 erfordert am Tool keine Anpassung.
+
 ## Features
 
 - **🏷️ Tag-Bereinigung**: Finde und lösche leere, unsinnige oder doppelte Tags
