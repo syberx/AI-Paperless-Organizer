@@ -52,6 +52,10 @@ async def scan_junk_documents(
             # colon (like the "... Stand:" default) is rejected outright with a
             # 400. Since this scan feeds a delete action, matching too broadly is
             # the dangerous direction.
+            # Paperless >= 3.0 also offers a dedicated title_search= parameter.
+            # Measured against the same archive it returns exactly the same hits
+            # as the quoted query, so it buys nothing -- and it does not exist on
+            # 2.x, which this tool still supports.
             phrase = '"{}"'.format(term.replace('"', ""))
             documents = await client.get_documents(
                 query=f"{query_prefix}{phrase}",
