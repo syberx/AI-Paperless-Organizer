@@ -154,3 +154,6 @@ CLAUDE.md
 .claude/
 .agents/
 skills-lock.json
+
+# Eigene Notizen, nicht fuer die Oeffentlichkeit
+OUTREACH-TEXTE.md
