@@ -13,6 +13,8 @@
 
 **Klassifizieren · Bereinigen · OCR · Chat · Cloud-Import · Duplikate finden – alles in einem Tool**
 
+🇩🇪 **Deutsch** · 🇬🇧 [English version](README.en.md)
+
 ![Dashboard](docs/screenshots/dashboard.png)
 
 </div>
@@ -641,6 +643,8 @@ Beiträge sind willkommen!
 - 🐛 Bug Reports
 - 💡 Feature Requests
 - 🔌 Andere LLM Provider testen
+
+Fragen, Ideen und Erfahrungsberichte: [GitHub Discussions](https://github.com/syberx/AI-Paperless-Organizer/discussions)
 
 ---
 

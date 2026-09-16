@@ -6,6 +6,11 @@ Alle wichtigen Änderungen an AI Paperless Organizer.
 
 ## 2026-09-16
 
+### Englische README + Sichtbarkeit
+- **Neu: [README.en.md](README.en.md)** – vollständige englische Fassung, mit Sprachumschalter oben in beiden READMEs.
+- **Docker-Hub-Beschreibung aktualisiert** – listete bisher nur die Tag-Bereinigung und behauptete pauschal, es würden keine Dokumentinhalte an das LLM gesendet. Das stimmt seit Klassifizierer, RAG-Chat und OCR nicht mehr; es gibt jetzt eine Tabelle, die pro Funktion aufführt, was übertragen wird.
+- **GitHub Discussions aktiviert**, Repo-Beschreibung und Topics gesetzt.
+
 ### Dokumente Aufräumen – Titelsuche traf viel zu viele Dokumente
 - **Bugfix**: Der Junk-Scan schickte den Suchbegriff unquotiert als `title:<Begriff>`. Paperless' Query-Parser bindet ein Feld-Präfix aber nur an das **erste Wort** – aus `title:Allgemeine Geschäftsbedingungen` wurde damit „Titel enthält *Allgemeine*" **plus** „*Geschäftsbedingungen* irgendwo im Volltext". Gegen ein Archiv mit 5465 Dokumenten gemessen: **462 Treffer statt 14**. Begriffe mit Doppelpunkt (wie der mitgelieferte Safe-Term „… Stand:") wurden sogar mit HTTP 400 abgewiesen.
 - **Warum das zählt**: Der Scan speist eine Löschfunktion. Zu breit zu treffen ist die gefährliche Richtung.
