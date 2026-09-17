@@ -4,6 +4,15 @@ Alle wichtigen Änderungen an AI Paperless Organizer.
 
 ---
 
+## 2026-09-17
+
+### Docker-Image von 6,09 GB auf 2,14 GB verkleinert
+- **Ursache**: `sentence-transformers` zieht `torch`, und PyPI liefert standardmäßig den **CUDA-Build** – rund 5 GB nvidia-Wheels (cudnn 553 MB, torch 554 MB, cublas 423 MB, nccl 216 MB, cufft 214 MB, cusparselt 170 MB …). Benutzt wurde davon **nichts**: Der Cross-Encoder läuft laut eigenem Kommentar in `rerank_service.py` auf der CPU, und ein Server mit GPU ist nicht vorausgesetzt.
+- **Fix**: Das Dockerfile installiert `torch` jetzt vorab aus dem CPU-Index von PyTorch, bevor `requirements.txt` an die Reihe kommt. `sentence-transformers` findet die Abhängigkeit dann schon erfüllt.
+- **Wirkung**: Image **6,09 GB → 2,14 GB** (−65 %), Build-Zeit von über einer Stunde auf wenige Minuten, null nvidia-Pakete im Image. Verifiziert: `torch 2.14.0+cpu`, `torch.version.cuda = None`, Tensor-Rechnung funktioniert, `CrossEncoder` lädt, Container startet und `/api/health` antwortet mit 200.
+
+---
+
 ## 2026-09-16
 
 ### Englische README + Sichtbarkeit

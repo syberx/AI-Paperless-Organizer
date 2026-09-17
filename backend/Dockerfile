@@ -16,6 +16,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /tmp/rclone /tmp/rclone.zip \
     && rm -rf /var/lib/apt/lists/*
 
+# Install the CPU-only torch build BEFORE the rest, so sentence-transformers
+# finds its dependency already satisfied. From PyPI, torch pulls the CUDA build
+# and ~5 GB of nvidia-* wheels (cudnn 553 MB, cublas 423 MB, nccl 216 MB, ...)
+# that nothing here uses -- the cross-encoder runs on CPU and the server has no
+# GPU. That was the difference between a ~6 GB image built in an hour and a
+# lean one built in minutes.
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
 # Copy requirements first for better caching
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
