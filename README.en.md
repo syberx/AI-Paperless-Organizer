@@ -247,9 +247,9 @@ With **Ollama**, all of the above stays on your own server. With cloud providers
 
 ### Compatibility
 
-**Works with Paperless-ngx 2.x and 3.x.** Last verified against **Paperless-ngx 3.1.3** (PostgreSQL), both reading and writing: fetching and filtering documents, `PATCH` on title/date/tags/correspondent/type/storage path/custom fields, `bulk_edit` with `modify_tags`, `set_correspondent` and `set_document_type`, plus creating tags and correspondents.
+**Works with Paperless-ngx 2.x and 3.x.** Last verified against **Paperless-ngx 3.3.1** (PostgreSQL), both reading and writing: fetching and filtering documents, `PATCH` on title/date/tags/correspondent/type/storage path/custom fields, `bulk_edit` with `modify_tags`, `set_correspondent` and `set_document_type`, plus creating tags and correspondents.
 
-The tool does not pin an API version and follows the server default (v10 on 3.1.3); the fields it uses are identical to v9.
+The tool does not pin an API version and follows the server default (v10 on 3.3.1); the fields it uses are identical to v9.
 
 ### Option 1: Docker Hub (recommended)
 

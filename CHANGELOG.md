@@ -4,6 +4,15 @@ Alle wichtigen Änderungen an AI Paperless Organizer.
 
 ---
 
+## 2026-10-13
+
+### Kompatibilität mit Paperless-ngx 3.3.1 bestätigt
+- **Geprüft gegen 3.3.1** (PostgreSQL), lesend wie schreibend – **keine Anpassung nötig**. 41 Checks zu Feldern, Filtern, Taxonomie-Endpunkten und `bulk_edit`, dazu Schreibzugriffe (`PATCH`, `bulk_edit`) im laufenden Betrieb.
+- **Zusätzlich geprüft**: die Filter des Transaktions-Abgleichs (`created__date__gte/lte`, `correspondent__name__icontains`, `custom_field_query` mit echtem Ausdruck). Paperless 3.3 hat `django-filter` von 25 auf 26 angehoben, und unbekannte Filter werden dort stillschweigend ignoriert – deshalb jeweils mit Gegenprobe gegen die Gesamtmenge. Alle greifen.
+- **Such-Parser hat sich geändert**: Paperless 3.2 parst erweiterte Suchanfragen wieder Whoosh-kompatibel. Unquotiert liefert `title:Allgemeine Geschäftsbedingungen` damit 16 statt 462 Treffer. Der Aufräum-Scan bleibt bei der Phrase in Anführungszeichen: Sie trifft unter 3.1.3 wie unter 3.3.1 exakt die Grundwahrheit, und nur sie behandelt Begriffe mit Doppelpunkt richtig (unquotiert 5 Falschtreffer, früher HTTP 400).
+
+---
+
 ## 2026-09-17
 
 ### Docker-Image von 6,09 GB auf 2,14 GB verkleinert

@@ -8,7 +8,7 @@
 
 ## Compatibility
 
-**Works with Paperless-ngx 2.x and 3.x.** Last verified against **3.1.3**, reading and writing.
+**Works with Paperless-ngx 2.x and 3.x.** Last verified against **3.3.1**, reading and writing.
 
 ## Features
 
