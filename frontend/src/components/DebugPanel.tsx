@@ -418,7 +418,7 @@ export default function DebugPanel() {
               type="text"
               value={paperlessUrl}
               onChange={(e) => setPaperlessUrl(e.target.value)}
-              placeholder="z.B. http://192.13.37.4:8000 oder https://paperless.domain.de"
+              placeholder="z.B. http://192.168.1.50:8000 oder https://paperless.example.com"
               className="input"
             />
           </div>
