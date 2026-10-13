@@ -1042,7 +1042,52 @@ _auto_classify_state: Dict[str, Any] = {
     "current_doc": None,
     "last_run": None,
     "filter_mode": "db",  # "db" = new docs only (skip DB history), "tag" = only docs with tag (re-classify possible)
+    "ollama_offline": False,  # True while the loop is paused because the Ollama host does not answer
 }
+
+
+async def _ollama_reachable(host: str) -> bool:
+    """Cheap probe: is the Ollama host the classifier would use there at all?
+
+    Only "nobody answers" counts as unreachable: connection errors, timeouts and
+    5xx (a reverse proxy in front of a switched-off machine answers 502/503).
+    Any other status means the host is up. Pausing on a 401/403/404 would block
+    setups where classification itself works but /api/tags is not exposed.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as http:
+            resp = await http.get(f"{host.rstrip('/')}/api/tags")
+            return resp.status_code < 500
+    except Exception:
+        return False
+
+
+async def _classifier_ollama_host(service: DocumentClassifierService) -> str:
+    """Base URL of the Ollama provider, exactly as classify_document() will use it.
+
+    Returns only the string. Keeping the ORM row would pin it in the session of the
+    running cycle, and a model or URL changed in the settings would then not reach
+    the classifier before the cycle ends.
+    """
+    provider = await service._get_llm_provider("ollama")
+    return (provider.api_base_url or "http://localhost:11434").rstrip("/")
+
+
+def _set_ollama_offline(offline: bool, host: str) -> None:
+    """Remember whether Ollama is reachable and log only when that changes.
+
+    The loop wakes up every few minutes; logging on each wake-up would fill the
+    log with the same line for as long as the host stays off.
+    """
+    was_offline = _auto_classify_state.get("ollama_offline", False)
+    _auto_classify_state["ollama_offline"] = offline
+    if offline and not was_offline:
+        logger.info(
+            f"Auto-classify: Ollama nicht erreichbar ({host}) – pausiert, bis der Host wieder da ist. "
+            "Es werden keine Dokumente als fehlerhaft gezählt."
+        )
+    elif was_offline and not offline:
+        logger.info(f"Auto-classify: Ollama wieder erreichbar ({host}) – mache weiter")
 
 
 async def _auto_classify_loop():
@@ -1075,9 +1120,26 @@ async def _auto_classify_loop():
                 service = DocumentClassifierService(db_sess, client)
                 config = await service.get_config()
 
-                uses_ollama = config.active_provider == "ollama"
+                # Which provider really classifies is decided centrally (Settings → LLM,
+                # AppSettings.classifier_provider) – the same lookup classify_document()
+                # uses. The legacy classifier_config.active_provider column is no longer
+                # written and still defaults to "openai", so reading it here made a fresh
+                # Ollama install skip the Ollama lock below.
+                provider_name = await service._get_classifier_provider_name()
+                uses_ollama = provider_name == "ollama"
+                ollama_host = await _classifier_ollama_host(service) if uses_ollama else ""
                 mode = getattr(config, "auto_classify_mode", "review") or "review"
                 interval = getattr(config, "auto_classify_interval", 5) or 5
+
+                # Preflight, same idea as the OCR watchdog: Ollama often runs on a laptop
+                # that is simply switched off. Without this every cycle walked the whole
+                # archive, failed on each open document and stored one history row per
+                # attempt – 36,597 "All connection attempts failed" rows on one instance.
+                ollama_offline = uses_ollama and not await _ollama_reachable(ollama_host)
+                if uses_ollama:
+                    _set_ollama_offline(ollama_offline, ollama_host)
+                else:
+                    _auto_classify_state["ollama_offline"] = False
 
                 # Find already processed document IDs (only in "db" mode)
                 filter_mode = _auto_classify_state.get("filter_mode", "db")
@@ -1095,7 +1157,7 @@ async def _auto_classify_loop():
                 # Fetch documents in batches to find unclassified ones
                 found_any = False
                 page = 1
-                while _auto_classify_state["enabled"]:
+                while _auto_classify_state["enabled"] and not ollama_offline:
                     result = await client._request(
                         "GET", "/documents/",
                         params={"page_size": 50, "page": page, "ordering": "id"},
@@ -1150,6 +1212,22 @@ async def _auto_classify_loop():
                                 await asyncio.sleep(10)
                                 continue
 
+                            # Ollama may have gone away since the cycle started (laptop closed
+                            # mid-run). Stop the cycle here instead of failing every remaining
+                            # document; the next cycle picks them up again.
+                            try:
+                                ollama_host = await _classifier_ollama_host(service)
+                                reachable = await _ollama_reachable(ollama_host)
+                            except BaseException:
+                                # "Stop" cancels this task – never leave with the lock held.
+                                ollama_release("classifier")
+                                raise
+                            if not reachable:
+                                ollama_release("classifier")
+                                ollama_offline = True
+                                _set_ollama_offline(True, ollama_host)
+                                break
+
                         found_any = True
                         _auto_classify_state["running"] = True
                         _auto_classify_state["current_doc"] = doc_id
@@ -1197,7 +1275,7 @@ async def _auto_classify_loop():
                         break
                     page += 1
 
-                if not found_any:
+                if not found_any and not ollama_offline:
                     logger.info(f"Auto-classify: keine neuen Dokumente, warte {interval} min")
 
         except Exception as e:
@@ -1238,6 +1316,7 @@ async def start_auto_classify(
     _auto_classify_state["errors"] = 0
     _auto_classify_state["reviewed"] = 0
     _auto_classify_state["filter_mode"] = filter_mode
+    _auto_classify_state["ollama_offline"] = False
     _auto_classify_state["task"] = asyncio.create_task(_auto_classify_loop())
     logger.info(f"Auto-classify started (mode: {filter_mode})")
 
@@ -1283,6 +1362,15 @@ async def stop_auto_classify(db: AsyncSession = Depends(get_db)):
 async def get_auto_classify_status():
     """Get current status of the auto-classification job."""
     from app.services.ollama_lock import is_locked as ollama_is_locked, current_holder as ollama_holder
+
+    # The sidebar renders this as "Wartet auf <waiting_for>".
+    waiting_for = None
+    if _auto_classify_state["enabled"]:
+        if ollama_is_locked() and ollama_holder() != "classifier":
+            waiting_for = ollama_holder()
+        elif _auto_classify_state.get("ollama_offline"):
+            waiting_for = "Ollama (offline)"
+
     return {
         "enabled": _auto_classify_state["enabled"],
         "running": _auto_classify_state["running"],
@@ -1292,7 +1380,7 @@ async def get_auto_classify_status():
         "current_doc": _auto_classify_state["current_doc"],
         "last_run": _auto_classify_state["last_run"],
         "filter_mode": _auto_classify_state.get("filter_mode", "db"),
-        "waiting_for": ollama_holder() if ollama_is_locked() and _auto_classify_state["enabled"] and ollama_holder() != "classifier" else None,
+        "waiting_for": waiting_for,
     }
 
 

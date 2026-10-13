@@ -63,7 +63,9 @@ async def lifespan(app: FastAPI):
                 persisted_filter = getattr(cls_config, "auto_classify_filter_mode", "db") or "db"
                 _auto_classify_state["enabled"] = True
                 _auto_classify_state["filter_mode"] = persisted_filter
-                asyncio.get_running_loop().create_task(_auto_classify_loop())
+                # Keep the handle: "Stop" cancels this task. Without it the loop slept on,
+                # and a "Start" during that pause left two loops running side by side.
+                _auto_classify_state["task"] = asyncio.get_running_loop().create_task(_auto_classify_loop())
                 logging.getLogger(__name__).info(f"Auto-classify auto-started (filter_mode={persisted_filter})")
     except Exception as e:
         logging.getLogger(__name__).error(f"Auto-classify auto-start failed: {e}")

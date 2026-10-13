@@ -6,6 +6,13 @@ Alle wichtigen Änderungen an AI Paperless Organizer.
 
 ## 2026-10-13
 
+### Auto-Klassifizierer pausiert, wenn Ollama nicht erreichbar ist
+- **Bugfix Fehlerflut**: War der Ollama-Rechner aus (typisch: Notebook zugeklappt), lief der Auto-Klassifizierer trotzdem alle paar Minuten durchs ganze Archiv, scheiterte an jedem offenen Dokument und schrieb **pro Versuch eine Fehlerzeile** in den Verlauf. Auf einer Instanz waren das 36 597 Zeilen „All connection attempts failed" für 284 Dokumente – 87 % der Tabelle.
+- **Neu**: Vorab-Check wie beim OCR-Watchdog. Antwortet Ollama nicht, wird der Zyklus übersprungen: kein Archiv-Scan, kein Fehlversuch, keine Fehlerzeile. Fällt Ollama mitten im Lauf aus, endet der Zyklus vor dem nächsten Dokument. Die Seitenleiste zeigt so lange „Wartet auf Ollama (offline)", im Log steht je eine Zeile beim Ausfall und bei der Rückkehr.
+- **Bugfix Ollama-Lock bei Neuinstallationen**: Ob der Loop den Ollama-Lock nimmt, hing an einem Alt-Feld, das nicht mehr geschrieben wird und standardmäßig `openai` enthält. Frische Installationen mit Ollama liefen dadurch ohne Lock, also parallel zum OCR-Batch auf derselben GPU. Jetzt entscheidet der tatsächlich eingestellte Anbieter.
+- **Bugfix doppelte Klassifizierung nach Stopp/Start**: Nach einem Backend-Neustart ließ sich der automatisch gestartete Klassifizierer nicht wirklich stoppen, er pausierte nur. Wer in dieser Pause wieder auf „Start" klickte, hatte zwei Läufe nebeneinander, die dieselben Dokumente doppelt klassifizierten. „Stopp" beendet den Lauf jetzt sofort.
+- **Alte Fehlerzeilen** verschwinden nicht von selbst. Aufräumen bei gestopptem Backend, vorher `organizer.db` sichern: `DELETE FROM classifier_history WHERE status='error' AND error_message='All connection attempts failed'; VACUUM;`
+
 ### Kompatibilität mit Paperless-ngx 3.3.1 bestätigt
 - **Geprüft gegen 3.3.1** (PostgreSQL), lesend wie schreibend – **keine Anpassung nötig**. 41 Checks zu Feldern, Filtern, Taxonomie-Endpunkten und `bulk_edit`, dazu Schreibzugriffe (`PATCH`, `bulk_edit`) im laufenden Betrieb.
 - **Zusätzlich geprüft**: die Filter des Transaktions-Abgleichs (`created__date__gte/lte`, `correspondent__name__icontains`, `custom_field_query` mit echtem Ausdruck). Paperless 3.3 hat `django-filter` von 25 auf 26 angehoben, und unbekannte Filter werden dort stillschweigend ignoriert – deshalb jeweils mit Gegenprobe gegen die Gesamtmenge. Alle greifen.
