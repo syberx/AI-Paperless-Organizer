@@ -4,7 +4,8 @@ uvicorn[standard]>=0.27.0
 python-multipart>=0.0.6
 
 # Database
-sqlalchemy>=2.0.25
+# The asyncio extra pulls in greenlet, which SQLAlchemy 2.1 no longer installs by default.
+sqlalchemy[asyncio]>=2.0.25
 aiosqlite>=0.19.0
 
 # HTTP client for Paperless API

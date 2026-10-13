@@ -6,6 +6,10 @@ Alle wichtigen Änderungen an AI Paperless Organizer.
 
 ## 2026-10-13
 
+### Selbstbau repariert, Paketversionen festgeschrieben
+- **Bugfix**: Ein frisch aus dem Quellcode gebautes Backend (`docker compose up -d --build`) brach beim Start ab: `The SQLAlchemy asyncio module requires that the Python 'greenlet' library is installed`. Der Build zog SQLAlchemy 2.1, das greenlet nicht mehr von selbst installiert. Das fertige Image auf Docker Hub war nicht betroffen.
+- **Neu**: `backend/constraints.txt` schreibt die Versionen aller Python-Pakete fest. Bisher holte jeder Build die jeweils neuesten Versionen, so kamen auch openai 3.x und sentence-transformers 6.x ungetestet herein. Festgeschrieben ist der Stand, der seit Juni produktiv läuft.
+
 ### Auto-Klassifizierer pausiert, wenn Ollama nicht erreichbar ist
 - **Bugfix Fehlerflut**: War der Ollama-Rechner aus (typisch: Notebook zugeklappt), lief der Auto-Klassifizierer trotzdem alle paar Minuten durchs ganze Archiv, scheiterte an jedem offenen Dokument und schrieb **pro Versuch eine Fehlerzeile** in den Verlauf. Auf einer Instanz waren das 36 597 Zeilen „All connection attempts failed" für 284 Dokumente – 87 % der Tabelle.
 - **Neu**: Vorab-Check wie beim OCR-Watchdog. Antwortet Ollama nicht, wird der Zyklus übersprungen: kein Archiv-Scan, kein Fehlversuch, keine Fehlerzeile. Fällt Ollama mitten im Lauf aus, endet der Zyklus vor dem nächsten Dokument. Die Seitenleiste zeigt so lange „Wartet auf Ollama (offline)", im Log steht je eine Zeile beim Ausfall und bei der Rückkehr.

@@ -22,11 +22,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # that nothing here uses -- the cross-encoder runs on CPU and the server has no
 # GPU. That was the difference between a ~6 GB image built in an hour and a
 # lean one built in minutes.
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+# The version comes from constraints.txt, which pins everything pip installs.
+COPY constraints.txt .
+RUN pip install --no-cache-dir "$(grep -i '^torch==' constraints.txt)" --index-url https://download.pytorch.org/whl/cpu
 
 # Copy requirements first for better caching
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt -c constraints.txt
 
 # Copy application code
 COPY app/ ./app/
